@@ -1,0 +1,8 @@
+.venv/
+data/
+mapping/
+
+metric_mapping.txt
+plmn_mapping.txt
+
+.DS_Store
