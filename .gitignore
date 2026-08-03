@@ -1,6 +1,7 @@
 .venv/
 data/
 mapping/
+graph/
 
 metric_mapping.txt
 plmn_mapping.txt
