@@ -2,6 +2,8 @@
 data/
 mapping/
 graph/
+analysis/
+results/
 
 metric_mapping.txt
 plmn_mapping.txt
