@@ -111,6 +111,21 @@ METRIC_MAPPING_PATH = os.path.join(MAPPING_DIR, "metric_mapping.txt")
 
 _PLMN_ORIGINAL: dict[str, str] | None = None
 _METRIC_ORIGINAL: dict[str, str] | None = None
+_MAPPING_ENABLED = True
+
+
+def set_mapping_enabled(enabled: bool) -> None:
+    """Enable/disable mapping lookups (PLMN/metric original names).
+
+    When disabled, display helpers keep masked IDs only — safe for shared/git
+    notebooks even if mapping/ exists locally.
+    """
+    global _MAPPING_ENABLED
+    _MAPPING_ENABLED = bool(enabled)
+
+
+def mapping_enabled() -> bool:
+    return _MAPPING_ENABLED
 
 
 def _load_mapping_tables() -> None:
@@ -146,12 +161,16 @@ def reload_mappings() -> None:
 
 
 def plmn_original(plmn: str) -> str | None:
+    if not _MAPPING_ENABLED:
+        return None
     _load_mapping_tables()
     assert _PLMN_ORIGINAL is not None
     return _PLMN_ORIGINAL.get(plmn)
 
 
 def metric_original(metric: str) -> str | None:
+    if not _MAPPING_ENABLED:
+        return None
     _load_mapping_tables()
     assert _METRIC_ORIGINAL is not None
     return _METRIC_ORIGINAL.get(metric)
