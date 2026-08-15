@@ -4,6 +4,9 @@ mapping/
 graph/
 analysis/
 results/
+cache/
+labeling/__pycache__/
+labeling/cache/
 
 metric_mapping.txt
 plmn_mapping.txt
