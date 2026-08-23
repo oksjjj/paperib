@@ -7,6 +7,7 @@ results/
 cache/
 labeling/__pycache__/
 labeling/cache/
+labeling/labels/*_labels.json
 
 metric_mapping.txt
 plmn_mapping.txt
