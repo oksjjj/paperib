@@ -9,11 +9,9 @@ from datetime import datetime, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
-import anywidget
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-import traitlets
 
 KST = ZoneInfo("Asia/Seoul")
 # Display: Korean date style in Asia/Seoul (e.g. 2026년 04월 30일 00:00)
@@ -36,6 +34,7 @@ ANALYSIS_RANK_PATH = os.path.join(
 LABEL_DIR = os.path.join(os.path.dirname(__file__), "labels")
 RANK_CACHE_PATH = os.path.join(LABEL_DIR, "plmn_rank.csv")
 CACHE_DIR = os.path.join(os.path.dirname(__file__), "cache")
+RANK_SIGNATURE_PATH = os.path.join(CACHE_DIR, "plmn_rank.signature")
 
 TAG_COLORS = {
     "anomaly": "rgba(220, 20, 60, 0.25)",
@@ -51,58 +50,9 @@ TAG_LINE = {
 # Shapes/annotations tagged with these names are transient labeling guides.
 PENDING_ANCHOR_NAME = "pending_range_anchor"
 LABEL_HIGHLIGHT_NAME = "label_highlight"
+LABEL_HIGHLIGHT_START = "label_highlight_start"
+LABEL_HIGHLIGHT_END = "label_highlight_end"
 VALUE_CURSOR_NAME = "value_cursor"
-
-
-class KeyboardNavigator(anywidget.AnyWidget):
-    """Capture left/right arrows while value-inspection mode is active."""
-
-    _esm = """
-    function render({ model, el }) {
-      el.style.display = "none";
-
-      const isTextEntry = (node) => {
-        const tag = ((node && node.tagName) || "").toLowerCase();
-        if (tag === "textarea") return true;
-        if (tag === "input") {
-          const type = (node.getAttribute("type") || "text").toLowerCase();
-          return !["radio", "checkbox", "button", "submit"].includes(type);
-        }
-        return node && node.isContentEditable;
-      };
-
-      // Capture phase: the mode toggle keeps focus after a click, and both the
-      // browser and ipywidgets would otherwise consume the arrows first.
-      const handler = (event) => {
-        if (!model.get("enabled")) return;
-        if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-        if (isTextEntry(event.target)) return;
-        event.preventDefault();
-        event.stopPropagation();
-        model.set("direction", event.key === "ArrowLeft" ? "left" : "right");
-        model.set("sequence", model.get("sequence") + 1);
-        model.save_changes();
-      };
-      window.addEventListener("keydown", handler, true);
-
-      const dropFocus = () => {
-        const active = document.activeElement;
-        if (model.get("enabled") && active && !isTextEntry(active) && active.blur) {
-          active.blur();
-        }
-      };
-      model.on("change:enabled", dropFocus);
-
-      return () => {
-        window.removeEventListener("keydown", handler, true);
-        model.off("change:enabled", dropFocus);
-      };
-    }
-    """
-
-    enabled = traitlets.Bool(False).tag(sync=True)
-    direction = traitlets.Unicode("").tag(sync=True)
-    sequence = traitlets.Int(0).tag(sync=True)
 
 
 MAPPING_DIR = os.path.join(os.path.dirname(__file__), "..", "mapping")
@@ -256,16 +206,33 @@ def ensure_label_dir() -> str:
 
 
 def load_or_build_ranking(top_n: int | None = None) -> pd.DataFrame:
-    """Load PLMN ranking by M971 sum. Prefer analysis CSV, else labels cache, else scan data."""
-    ensure_label_dir()
+    """Load a ranking that matches the current source-data snapshot.
 
-    for path in (ANALYSIS_RANK_PATH, RANK_CACHE_PATH):
-        if os.path.exists(path):
-            rank_df = pd.read_csv(path)
-            break
-    else:
+    Adding or replacing data/*.csv invalidates the rank signature. The next app
+    start rebuilds the ranking, while label JSON files remain untouched.
+    """
+    ensure_label_dir()
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    signature = _data_signature(DATA_DIR)
+    cached_signature = None
+    if os.path.exists(RANK_SIGNATURE_PATH):
+        try:
+            with open(RANK_SIGNATURE_PATH, encoding="utf-8") as f:
+                cached_signature = f.read().strip()
+        except OSError:
+            pass
+
+    if os.path.exists(RANK_CACHE_PATH) and cached_signature == signature:
+        rank_df = pd.read_csv(RANK_CACHE_PATH)
+    elif any(f.endswith(".csv") for f in os.listdir(DATA_DIR)):
         rank_df = _build_ranking_from_data()
-        rank_df.to_csv(RANK_CACHE_PATH, index=False)
+        save_ranking_cache(rank_df, signature)
+    elif os.path.exists(RANK_CACHE_PATH):
+        rank_df = pd.read_csv(RANK_CACHE_PATH)
+    elif os.path.exists(ANALYSIS_RANK_PATH):
+        rank_df = pd.read_csv(ANALYSIS_RANK_PATH)
+    else:
+        raise FileNotFoundError(f"No source CSV or ranking cache found under {DATA_DIR}")
 
     if "rank" not in rank_df.columns:
         rank_df = rank_df.sort_values("M971_sum", ascending=False).reset_index(drop=True)
@@ -274,14 +241,20 @@ def load_or_build_ranking(top_n: int | None = None) -> pd.DataFrame:
     if top_n is not None:
         rank_df = rank_df.head(top_n).copy()
 
-    if not os.path.exists(RANK_CACHE_PATH):
-        rank_df.to_csv(RANK_CACHE_PATH, index=False)
-
     rank_df = rank_df.reset_index(drop=True)
     if "PLMN" in rank_df.columns:
         rank_df["PLMN_name"] = [plmn_original_short(p) or "" for p in rank_df["PLMN"]]
         rank_df["PLMN_display"] = [display_plmn(p) for p in rank_df["PLMN"]]
     return rank_df
+
+
+def save_ranking_cache(rank_df: pd.DataFrame, signature: str | None = None) -> None:
+    """Persist ranking and the source-data signature used to create it."""
+    ensure_label_dir()
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    rank_df.to_csv(RANK_CACHE_PATH, index=False)
+    with open(RANK_SIGNATURE_PATH, "w", encoding="utf-8") as f:
+        f.write(signature or _data_signature(DATA_DIR))
 
 
 def _build_ranking_from_data() -> pd.DataFrame:
@@ -302,7 +275,11 @@ def _build_ranking_from_data() -> pd.DataFrame:
 
 
 def _data_signature(data_dir: str) -> str:
-    """Fingerprint of the data dir so caches invalidate when files change."""
+    """Fingerprint of the data dir so caches invalidate when files change.
+
+    Keep this format stable: changing it invalidates every cached pickle and
+    forces a full CSV rescan per PLMN on the next load.
+    """
     csv_files = sorted(f for f in os.listdir(data_dir) if f.endswith(".csv"))
     newest = 0.0
     total = 0
@@ -517,6 +494,11 @@ def update_label(doc: dict[str, Any], label_id: str, **fields: Any) -> dict[str,
         found["end"] = parse_time(fields["end"]).isoformat()
     if found["kind"] == "point":
         found["end"] = found["start"]
+    else:
+        start_ts = parse_time(found["start"])
+        end_ts = parse_time(found["end"])
+        if end_ts < start_ts:
+            found["start"], found["end"] = end_ts.isoformat(), start_ts.isoformat()
     found["updated_at"] = datetime.now(timezone.utc).isoformat()
 
     doc["labels"] = sorted(doc["labels"], key=lambda x: x["start"])
@@ -541,7 +523,7 @@ def format_metric_value(value: float) -> str:
 
 
 # Highlighted in the "이 시점 특성값" panel (rank, name, and value).
-HOVER_RED_METRICS = frozenset({"M855", "M037", "M430", "M162", "M618"})
+HOVER_RED_METRICS = frozenset({"M855", "M037", "M430", "M162", "M618", "M520"})
 HOVER_ORANGE_METRICS = frozenset({"M874", "M185", "M965", "M843", "M419"})
 
 
@@ -708,13 +690,33 @@ def window_positions(
     return pos if 0 < len(pos) < n else None
 
 
+def detail_window(
+    df: pd.DataFrame,
+    start: pd.Timestamp | None,
+    end: pd.Timestamp | None,
+    *,
+    pad_ratio: float = 0.35,
+) -> tuple[pd.Timestamp | None, pd.Timestamp | None]:
+    """Widen the high-res window so pan/zoom edges stay detailed if ranges drift."""
+    if start is None or end is None or not len(df):
+        return start, end
+    start_ts = pd.to_datetime(start, utc=True)
+    end_ts = pd.to_datetime(end, utc=True)
+    if end_ts <= start_ts:
+        return start_ts, end_ts
+    pad = (end_ts - start_ts) * pad_ratio
+    tmin = pd.to_datetime(df["time"].min(), utc=True)
+    tmax = pd.to_datetime(df["time"].max(), utc=True)
+    return max(tmin, start_ts - pad), min(tmax, end_ts + pad)
+
+
 def window_indices(
     values: np.ndarray,
     pos: np.ndarray | None,
     max_points: int,
     context_ratio: float = 0.3,
 ) -> np.ndarray:
-    """Detail inside `pos`, coarse envelope outside.
+    """Detail inside `pos`, optionally with a coarse envelope outside.
 
     Keeping coarse context means the trace still spans the whole dataset, so
     plotly's double-click autorange resets to the full time span.
@@ -734,16 +736,32 @@ def plot_series_window(
     start: pd.Timestamp | None = None,
     end: pd.Timestamp | None = None,
     max_points: int = 1500,
+    *,
+    include_context: bool = False,
+    pad_ratio: float = 0.35,
 ) -> dict[str, tuple[Any, Any]]:
-    """Per-metric (x, y) arrays: high resolution in the window, coarse elsewhere."""
+    """Per-metric (x, y) arrays at high resolution around the visible window.
+
+    By default only the (padded) window is drawn at high res. The first/last
+    samples are always kept so the trace still spans the dataset (helps Plotly
+    keep a stable full time domain without coarse mid-context).
+    """
     if not len(df):
         return {col: ([], []) for col in cols}
-    pos = window_positions(df, start, end)
+    detail_start, detail_end = detail_window(df, start, end, pad_ratio=pad_ratio)
+    pos = window_positions(df, detail_start, detail_end)
     times = to_plot_times(df["time"])
+    n = len(df)
+    ends = np.array([0, n - 1], dtype=int) if n else np.array([], dtype=int)
     out: dict[str, tuple[Any, Any]] = {}
     for col in cols:
         values = df[col].to_numpy()
-        idx = window_indices(values, pos, max_points)
+        if include_context:
+            idx = window_indices(values, pos, max_points)
+        elif pos is None:
+            idx = minmax_indices(values, max_points)
+        else:
+            idx = np.union1d(ends, pos[minmax_indices(values[pos], max_points)])
         out[col] = (times[idx], values[idx])
     return out
 
@@ -770,6 +788,7 @@ def add_label_indicator(fig: go.Figure, item: dict[str, Any]) -> bool:
             annotation_text=f"[구간] {tag}:{label_id}",
             annotation_position="top left",
             annotation=dict(font_size=10),
+            editable=False,
         )
     else:
         fig.add_vline(
@@ -779,8 +798,23 @@ def add_label_indicator(fig: go.Figure, item: dict[str, Any]) -> bool:
             line_color=line,
             annotation_text=f"[점] {tag}:{label_id}",
             annotation_position="top",
+            editable=False,
         )
     return is_range
+
+
+def freeze_shape_editing(fig: go.Figure) -> go.Figure:
+    """Mark every existing shape non-editable so fills cannot be dragged whole."""
+    shapes = fig.layout.shapes
+    if not shapes:
+        return fig
+    locked = []
+    for shape in shapes:
+        data = shape.to_plotly_json() if hasattr(shape, "to_plotly_json") else dict(shape)
+        data["editable"] = False
+        locked.append(data)
+    fig.layout.shapes = tuple(locked)
+    return fig
 
 
 def label_line(item: dict[str, Any]) -> str:
@@ -797,44 +831,37 @@ def label_line(item: dict[str, Any]) -> str:
 
 def label_highlight_overlays(
     item: dict[str, Any],
+    *,
+    editable: bool = False,
+    line_width: int = 1,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Spotlight shapes/annotations for the label picked in the list."""
+    """Thin red edges for the selected label.
+
+    Keep editable=False; the app installs a custom horizontal drag on these edges
+    in 구간 편집 mode (Plotly native shape edit shows handles everywhere).
+    """
     s = to_plot_time(pd.to_datetime(item["start"], utc=True))
     e = to_plot_time(pd.to_datetime(item["end"], utc=True))
-    tag = item.get("tag", "anomaly")
-    line = TAG_LINE.get(tag, "crimson")
     is_range = item.get("kind") == "range" or s != e
 
-    if is_range:
-        shape = dict(
-            type="rect",
-            x0=s,
-            x1=e,
+    def _edge(x, name: str) -> dict[str, Any]:
+        return dict(
+            type="line",
+            xref="x",
+            yref="paper",
+            x0=x,
+            x1=x,
             y0=0,
             y1=1,
-            fillcolor="rgba(255,215,0,0.30)",
-            line=dict(color=line, width=3),
+            line=dict(color="crimson", width=int(line_width)),
+            layer="above",
+            editable=False,
+            name=name,
         )
-        mid = s + (e - s) / 2
-    else:
-        shape = dict(type="line", x0=s, x1=s, y0=0, y1=1, line=dict(color=line, width=4))
-        mid = s
-    shape.update(xref="x", yref="paper", layer="above", name=LABEL_HIGHLIGHT_NAME)
 
-    note = dict(
-        x=mid,
-        y=0,
-        xref="x",
-        yref="paper",
-        text=f"선택한 라벨 [{'구간' if is_range else '점'}] {tag}:{item.get('id', '')}",
-        showarrow=False,
-        yshift=14,
-        font=dict(size=11, color="black"),
-        bgcolor="gold",
-        borderpad=3,
-        name=LABEL_HIGHLIGHT_NAME,
-    )
-    return [shape], [note]
+    if is_range:
+        return [_edge(s, LABEL_HIGHLIGHT_START), _edge(e, LABEL_HIGHLIGHT_END)], []
+    return [_edge(s, LABEL_HIGHLIGHT_START)], []
 
 
 def value_cursor_overlays(ts) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -881,6 +908,7 @@ def pending_anchor_shape(ts) -> dict[str, Any]:
         y1=1,
         line=dict(color="royalblue", width=3, dash="dot"),
         layer="above",
+        editable=False,
         name=PENDING_ANCHOR_NAME,
     )
 
@@ -925,7 +953,18 @@ def build_figure(
     elif filter_data:
         series = plot_series(view, cols, max_points)
     else:
-        series = plot_series_window(view, cols, start, end, max_points)
+        # Visible (+pad) only — avoids stale coarse context on newly panned edges.
+        series = plot_series_window(
+            view, cols, start, end, max_points, include_context=False
+        )
+
+    # Force WebGL traces to replace on every pan/zoom (Scattergl can keep old buffers).
+    data_rev = str(doc.get("plmn") or "labeling")
+    if start is not None and end is not None:
+        data_rev = (
+            f"{data_rev}:{pd.to_datetime(start, utc=True).value}:"
+            f"{pd.to_datetime(end, utc=True).value}"
+        )
 
     fig = go.Figure()
     for col in cols:
@@ -939,6 +978,9 @@ def build_figure(
                 opacity=0.55,
                 line=dict(width=1),
                 hoverinfo="skip",
+                # Stable uid: embedding data_rev remounts every Scattergl on zoom
+                # and freezes the browser. datarevision alone refreshes buffers.
+                uid=col,
             )
         )
 
@@ -947,9 +989,12 @@ def build_figure(
         if filter_data:
             idx = minmax_indices(top.to_numpy(), max_points)
         else:
-            idx = window_indices(
-                top.to_numpy(), window_positions(view, start, end), max_points
-            )
+            detail_start, detail_end = detail_window(view, start, end)
+            pos = window_positions(view, detail_start, detail_end)
+            if pos is None:
+                idx = minmax_indices(top.to_numpy(), max_points)
+            else:
+                idx = pos[minmax_indices(top.to_numpy()[pos], max_points)]
         anchor = dict(
             x=to_plot_times(view["time"].to_numpy()[idx]),
             y=top.to_numpy()[idx],
@@ -957,6 +1002,7 @@ def build_figure(
             marker=dict(size=10, opacity=0),
             name="values",
             showlegend=False,
+            uid="values",
         )
         if hover_values:
             # Precomputing per-point text is the slow path; opt-in only.
@@ -992,6 +1038,8 @@ def build_figure(
                 )
             )
 
+    # Stable uirevision: changing it every zoom remounts all WebGL traces and
+    # freezes the browser. datarevision + uid still refresh series data.
     fig.update_layout(
         title=title or f"{display_plmn(str(doc.get('plmn')))} anomaly labeling",
         height=336,
@@ -1001,7 +1049,8 @@ def build_figure(
         margin=dict(l=40, r=20, t=60, b=40),
         xaxis_title="시간 (KST)",
         yaxis_title="value",
-        uirevision=doc.get("plmn") or "labeling",
+        uirevision=str(doc.get("plmn") or "labeling"),
+        datarevision=data_rev,
         hoverlabel=dict(
             bgcolor="white",
             font_size=11,
@@ -1014,7 +1063,7 @@ def build_figure(
         fig.update_layout(width=width, autosize=False)
     else:
         fig.update_layout(autosize=True)
-    # Box/drag zoom: horizontal only (time axis). Ignore vertical drag.
+    # Box/drag zoom: horizontal only (time axis). Vertical scale via Y buttons.
     fig.update_yaxes(fixedrange=True)
     # X axis always bounded by this dataset's start/end (not wall-clock "now").
     tmin, tmax = data_time_bounds(view if len(view) else df)
@@ -1106,51 +1155,6 @@ def build_metric_figure(
         spikethickness=1,
     )
     return fig
-
-
-def as_figure_widget(fig: go.Figure) -> go.FigureWidget:
-    """Convert a Figure to an interactive Jupyter FigureWidget.
-
-    responsive=True makes plotly.js size the paper div to 100% of its container
-    instead of measuring once at render time (which came out too narrow until
-    the first zoom triggered a relayout).
-    """
-    figw = go.FigureWidget(fig)
-    figw._config = {**figw._config, "responsive": True}
-    return figw
-
-
-class PlotResizer(anywidget.AnyWidget):
-    """Re-measure plotly figures in the browser after the widget tree settles.
-
-    A figure built before its container has a width draws the WebGL traces at
-    the stale size while label overlays (SVG shapes) use the final geometry, so
-    the two disagree until the first zoom forces a relayout. Bump `token` after
-    mounting a figure to re-run the measurement.
-    """
-
-    _esm = """
-    function render({ model, el }) {
-      el.style.display = "none";
-      const resizeAll = () => {
-        const plots = document.querySelectorAll(".js-plotly-plot");
-        if (window.Plotly && plots.length) {
-          plots.forEach((gd) => {
-            try { window.Plotly.Plots.resize(gd); } catch (err) { /* detached */ }
-          });
-        } else {
-          window.dispatchEvent(new Event("resize"));
-        }
-      };
-      // The widget can mount before Jupyter finishes laying out the output area,
-      // so retry a few times instead of measuring once.
-      const ping = () => [60, 300, 900].forEach((ms) => setTimeout(resizeAll, ms));
-      model.on("change:token", ping);
-      ping();
-    }
-    """
-
-    token = traitlets.Int(0).tag(sync=True)
 
 
 def suggest_zscore_points(

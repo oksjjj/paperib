@@ -6,10 +6,12 @@ Single-pass over data/*.csv → private artifacts under labeling/ (gitignored):
   - labeling/labels/plmn_rank.csv
 
 Usage:
-  python labeling/preprocess.py              # all PLMNs
+  python labeling/preprocess.py              # refresh changed data
   python labeling/preprocess.py --top 50
   python labeling/preprocess.py --plmn P0480
-  python labeling/preprocess.py --force
+  python labeling/preprocess.py --force      # rebuild all caches
+
+Label JSON files are never deleted or rewritten by preprocessing.
 """
 
 from __future__ import annotations
@@ -32,6 +34,7 @@ from tool import (  # noqa: E402
     _data_signature,
     clear_plmn_cache,
     ensure_label_dir,
+    save_ranking_cache,
 )
 
 
@@ -75,7 +78,7 @@ def _build_all_caches(
         .reset_index(drop=True)
     )
     rank_df.insert(0, "rank", rank_df.index + 1)
-    rank_df.to_csv(RANK_CACHE_PATH, index=False)
+    save_ranking_cache(rank_df, signature)
 
     write_plmns = sorted(parts.keys())
     print(f"writing {len(write_plmns)} pickle caches...")
@@ -124,13 +127,14 @@ def preprocess(*, top: int | None, plmns: list[str] | None, force: bool) -> None
         from tool import _build_ranking_from_data
 
         rank_df = _build_ranking_from_data()
-        rank_df.to_csv(RANK_CACHE_PATH, index=False)
+        save_ranking_cache(rank_df)
         targets = set(rank_df.head(top)["PLMN"].tolist())
         print(f"filtering to top {top}: {len(targets)} PLMNs")
 
     print(f"data dir: {os.path.abspath(DATA_DIR)}")
     print(f"cache dir: {os.path.abspath(CACHE_DIR)}")
     print(f"labels dir: {os.path.abspath(LABEL_DIR)}")
+    print("existing label JSON files: preserved")
     print(f"signature: {_data_signature(DATA_DIR)}")
 
     rank_df, written = _build_all_caches(targets=targets, force=force)
