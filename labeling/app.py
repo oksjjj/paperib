@@ -191,7 +191,11 @@ def _build_graph(click_mode: str):
         dragmode=(
             False
             if click_mode == "edit_range"
-            else ("pan" if click_mode in ("pan", "inspect") else "zoom")
+            else (
+                "pan"
+                if click_mode in ("pan", "pan_keep_y", "inspect")
+                else "zoom"
+            )
         )
     )
     # Always lock y for mouse drag: zoom/pan are time-axis only. Vertical scale
@@ -477,7 +481,9 @@ def _select_value_pos(pos: int):
     return row, panel
 
 
-def _shift_zoom(direction: int, fraction: float = 0.5) -> bool:
+def _shift_zoom(
+    direction: int, fraction: float = 0.5, *, y_auto: bool = True
+) -> bool:
     """Pan the time window; never past the dataset start/end. True if it moved."""
     if state["df"] is None:
         return False
@@ -490,14 +496,23 @@ def _shift_zoom(direction: int, fraction: float = 0.5) -> bool:
         return False
     before = (start_ts, end_ts)
     delta = width * fraction * direction
-    state["zoom_start"], state["zoom_end"] = _clamp_zoom(
-        start_ts + delta, end_ts + delta
-    )
-    moved = (state["zoom_start"], state["zoom_end"]) != before
-    if moved:
+    new_start, new_end = _clamp_zoom(start_ts + delta, end_ts + delta)
+    if (new_start, new_end) == before:
+        return False
+    if y_auto:
+        state["zoom_start"], state["zoom_end"] = new_start, new_end
         _reset_y()
-        _arm_zoom_guard()
-    return moved
+    else:
+        # Pin the y window shown before the pan so rebuild doesn't refit.
+        pinned = state.get("y_rendered")
+        if pinned is None:
+            pinned = _effective_y_bounds()
+        state["zoom_start"], state["zoom_end"] = new_start, new_end
+        if pinned is not None:
+            state["y_min"], state["y_max"] = float(pinned[0]), float(pinned[1])
+            state["y_auto"] = False
+    _arm_zoom_guard()
+    return True
 
 
 def _scale_x(factor: float) -> bool:
@@ -620,7 +635,9 @@ def _make_axis_cmd(
     status: str = "",
     *,
     apply_x: bool = True,
+    touch_y: bool = True,
     guard_seconds: float = 4.0,
+    rebuild_ms: int = 300,
 ) -> dict:
     """Payload for instant client relayout + deferred high-res rebuild."""
     if state["df"] is None:
@@ -636,20 +653,34 @@ def _make_axis_cmd(
         state["zoom_rendered_prev"] = prev
     state["zoom_rendered"] = rendered
     _arm_zoom_guard(guard_seconds)
-    yb = _effective_y_bounds()
-    state["y_rendered"] = yb
+    if touch_y:
+        yb = _effective_y_bounds()
+        state["y_rendered"] = yb
+        y_payload = [float(yb[0]), float(yb[1])] if yb else None
+    else:
+        # Keep the pinned / currently drawn y; do not push a new y range.
+        yb = None
+        if state.get("y_min") is not None and state.get("y_max") is not None:
+            yb = (float(state["y_min"]), float(state["y_max"]))
+        elif state.get("y_rendered") is not None:
+            yb = state["y_rendered"]
+        state["y_rendered"] = yb
+        y_payload = None
     state["axis_cmd_seq"] = int(state.get("axis_cmd_seq") or 0) + 1
     return {
         "seq": state["axis_cmd_seq"],
         # Drag zoom/pan already set x in the browser; re-applying x fights the drag.
         "x": [str(to_plot_time(x0)), str(to_plot_time(x1))] if apply_x else None,
-        "y": [float(yb[0]), float(yb[1])] if yb else None,
+        "y": y_payload,
+        "touch_y": bool(touch_y),
         "status": status,
-        "rebuild_ms": 300,
+        "rebuild_ms": int(rebuild_ms),
     }
 
 
-def _apply_axes_from_relayout(relayout, *, ignore_guard: bool = False) -> bool:
+def _apply_axes_from_relayout(
+    relayout, *, ignore_guard: bool = False, y_auto: bool = True
+) -> bool:
     if not relayout or state["df"] is None:
         return False
     if (not ignore_guard) and time.monotonic() < float(
@@ -679,8 +710,17 @@ def _apply_axes_from_relayout(relayout, *, ignore_guard: bool = False) -> bool:
             return False
         if _same_time_window(incoming, state.get("zoom_rendered_prev")):
             return False
-        state["zoom_start"], state["zoom_end"] = incoming
-        _reset_y()
+        if y_auto:
+            state["zoom_start"], state["zoom_end"] = incoming
+            _reset_y()
+        else:
+            pinned = state.get("y_rendered")
+            if pinned is None:
+                pinned = _effective_y_bounds()
+            state["zoom_start"], state["zoom_end"] = incoming
+            if pinned is not None:
+                state["y_min"], state["y_max"] = float(pinned[0]), float(pinned[1])
+                state["y_auto"] = False
         return True
 
     if relayout.get("yaxis.autorange"):
@@ -814,7 +854,8 @@ app.layout = html.Div(
                     id="click-mode",
                     options=[
                         {"label": "줌", "value": "zoom"},
-                        {"label": "이동(팬)", "value": "pan"},
+                        {"label": "이동(Y자동)", "value": "pan"},
+                        {"label": "이동(Y고정)", "value": "pan_keep_y"},
                         {"label": "값 탐색(클릭+←→)", "value": "inspect"},
                         {"label": "구간 라벨(2클릭)", "value": "label_range"},
                         {"label": "구간 편집", "value": "edit_range"},
@@ -1043,7 +1084,12 @@ def _main(
         if click_mode == "zoom":
             status = "그래프에서 좌우로 드래그해 시간축을 확대하세요."
         elif click_mode == "pan":
-            status = "좌우로 드래그해 시간축을 이동하세요."
+            status = "좌우로 드래그해 이동하세요. 놓을 때 Y 자동이 적용됩니다."
+        elif click_mode == "pan_keep_y":
+            status = (
+                "좌우로 드래그해 이동하세요. Y축은 유지되고, "
+                "해상도만 바로 갱신됩니다."
+            )
         elif click_mode == "inspect":
             status = "그래프에서 시점을 클릭하거나 마우스를 올린 뒤 ←/→ 키로 값을 탐색하세요."
         elif click_mode == "edit_range":
@@ -1326,6 +1372,7 @@ def _main(
     Input("btn-zoom-in-left", "n_clicks"),
     Input("btn-zoom-out", "n_clicks"),
     Input("btn-reset-zoom", "n_clicks"),
+    State("click-mode", "value"),
     prevent_initial_call=True,
 )
 def _axis_nav(
@@ -1338,20 +1385,23 @@ def _axis_nav(
     n_zoom_in_left,
     n_zoom_out,
     n_reset,
+    click_mode,
 ):
     """Instant axis moves: update state only; browser relayouts, then rebuilds."""
     if state["df"] is None:
         return no_update
     prop = callback_context.triggered[0]["prop_id"] if callback_context.triggered else ""
+    click_mode = click_mode or "zoom"
+    pan_keep_y = click_mode == "pan_keep_y"
 
     if prop == "btn-pan-left.n_clicks":
-        if not _shift_zoom(-1):
+        if not _shift_zoom(-1, y_auto=not pan_keep_y):
             return no_update
-        return _make_axis_cmd("")
+        return _make_axis_cmd("", touch_y=not pan_keep_y, rebuild_ms=80)
     if prop == "btn-pan-right.n_clicks":
-        if not _shift_zoom(1):
+        if not _shift_zoom(1, y_auto=not pan_keep_y):
             return no_update
-        return _make_axis_cmd("")
+        return _make_axis_cmd("", touch_y=not pan_keep_y, rebuild_ms=80)
     if prop == "btn-y-in.n_clicks":
         if not _scale_y(0.7):
             return no_update
@@ -1386,26 +1436,31 @@ def _axis_nav(
 @app.callback(
     Output("axis-cmd", "data", allow_duplicate=True),
     Input("graph", "relayoutData"),
+    State("click-mode", "value"),
     prevent_initial_call=True,
 )
-def _drag_axis_nav(relayout):
-    """On drag-zoom / drag-pan: Y 자동 immediately, then deferred rebuild."""
+def _drag_axis_nav(relayout, click_mode):
+    """On drag-zoom / drag-pan: optional Y 자동, then deferred high-res rebuild."""
     if not relayout or state["df"] is None:
         return no_update
-    # Only react to time-axis changes (ignore pure y / shape echoes).
     has_x = (
         ("xaxis.range[0]" in relayout and "xaxis.range[1]" in relayout)
         or "xaxis.range" in relayout
     )
     if not has_x:
         return no_update
-    # Ignore long button-zoom guards for real user drags; echo windows are
-    # filtered inside `_apply_axes_from_relayout` via zoom_rendered.
-    if not _apply_axes_from_relayout(relayout, ignore_guard=True):
+    click_mode = click_mode or "zoom"
+    # 이동(Y고정) only: keep y. Zoom / 이동(Y자동) / others: Y 자동.
+    y_auto = click_mode != "pan_keep_y"
+    if not _apply_axes_from_relayout(relayout, ignore_guard=True, y_auto=y_auto):
         return no_update
-    # Browser already shows the dragged x window — only push Y + schedule rebuild.
-    # Short guard: suppress the y-only echo without blocking the next pan step.
-    return _make_axis_cmd("", apply_x=False, guard_seconds=0.5)
+    return _make_axis_cmd(
+        "",
+        apply_x=False,
+        touch_y=y_auto,
+        guard_seconds=0.5,
+        rebuild_ms=80 if click_mode in ("pan", "pan_keep_y") else 300,
+    )
 
 
 @app.callback(
@@ -1429,7 +1484,10 @@ app.clientside_callback(
         }
         var hasX = cmd.x && cmd.x.length === 2;
         var hasY = cmd.y && cmd.y.length === 2;
-        if (!hasX && !hasY && cmd.y !== null) {
+        var touchY = (cmd.touch_y !== false);
+        if (!hasX && !touchY) {
+            // Still allow rebuild-only commands (pan with Y fixed).
+        } else if (!hasX && !hasY && cmd.y !== null && touchY) {
             return window.dash_clientside.no_update;
         }
         var host = document.getElementById('graph');
@@ -1440,32 +1498,41 @@ app.clientside_callback(
         if (hasX) {
             window.__ignoreDataXClampUntil = Date.now() + 4000;
         }
-        window.__clampingDataX = true;
         var patch = {};
         if (hasX) {
             patch['xaxis.autorange'] = false;
             patch['xaxis.range'] = [cmd.x[0], cmd.x[1]];
         }
-        if (hasY) {
-            patch['yaxis.autorange'] = false;
-            patch['yaxis.range'] = [cmd.y[0], cmd.y[1]];
-        } else {
-            patch['yaxis.autorange'] = true;
+        if (touchY) {
+            if (hasY) {
+                patch['yaxis.autorange'] = false;
+                patch['yaxis.range'] = [cmd.y[0], cmd.y[1]];
+            } else {
+                patch['yaxis.autorange'] = true;
+            }
         }
-        window.Plotly.relayout(gd, patch).finally(function() {
-            window.__clampingDataX = false;
-        });
-        if (window.__rebuildTimer) {
-            clearTimeout(window.__rebuildTimer);
-        }
-        var delay = (cmd.rebuild_ms != null) ? cmd.rebuild_ms : 300;
-        window.__rebuildTimer = setTimeout(function() {
-            window.dash_clientside.set_props('rebuild-trigger', {
-                data: {seq: cmd.seq, t: Date.now()}
+        var apply = function() {
+            if (window.__rebuildTimer) {
+                clearTimeout(window.__rebuildTimer);
+            }
+            var delay = (cmd.rebuild_ms != null) ? cmd.rebuild_ms : 300;
+            window.__rebuildTimer = setTimeout(function() {
+                window.dash_clientside.set_props('rebuild-trigger', {
+                    data: {seq: cmd.seq, t: Date.now()}
+                });
+            }, delay);
+            if (cmd.status) {
+                window.dash_clientside.set_props('status', {children: cmd.status});
+            }
+        };
+        if (Object.keys(patch).length) {
+            window.__clampingDataX = true;
+            window.Plotly.relayout(gd, patch).finally(function() {
+                window.__clampingDataX = false;
+                apply();
             });
-        }, delay);
-        if (cmd.status) {
-            window.dash_clientside.set_props('status', {children: cmd.status});
+        } else {
+            apply();
         }
         return cmd.seq;
     }
