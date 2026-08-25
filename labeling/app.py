@@ -95,6 +95,7 @@ state: dict = {
     "value_cursor_pos": None,
     "hover_pos": None,
     "_last_click": (None, 0.0),
+    "show_anomalies": True,
 }
 
 
@@ -140,10 +141,19 @@ def _label_by_id(label_id):
     return None
 
 
-def _label_at_time(ts, *, point_tol_seconds: float = 150.0):
-    """Return the best label covering `ts` (tightest range, or nearest point)."""
+def _label_at_time(ts, *, point_tol_seconds: float | None = None):
+    """Return the best label at `ts` (prefer divider edges, then tightest range)."""
     doc = state.get("doc") or {}
-    hits: list[tuple[float, dict]] = []
+    zoom_start = state.get("zoom_start")
+    zoom_end = state.get("zoom_end")
+    if zoom_start is not None and zoom_end is not None:
+        win_sec = max((zoom_end - zoom_start).total_seconds(), 1.0)
+        edge_tol = max(15 * 60.0, win_sec * 0.012)
+    else:
+        edge_tol = float(point_tol_seconds if point_tol_seconds is not None else 150.0)
+
+    edge_hits: list[tuple[float, dict]] = []
+    range_hits: list[tuple[float, dict]] = []
     for item in doc.get("labels", []):
         try:
             start_ts = parse_time(item["start"])
@@ -154,14 +164,39 @@ def _label_at_time(ts, *, point_tol_seconds: float = 150.0):
         is_point = kind == "point" or start_ts == end_ts
         if is_point:
             dist = abs((ts - start_ts).total_seconds())
-            if dist <= point_tol_seconds:
-                hits.append((dist, item))
-        elif start_ts <= ts <= end_ts:
-            hits.append(((end_ts - start_ts).total_seconds(), item))
-    if not hits:
+            if dist <= edge_tol:
+                edge_hits.append((dist, item))
+            continue
+        for edge in (start_ts, end_ts):
+            dist = abs((ts - edge).total_seconds())
+            if dist <= edge_tol:
+                edge_hits.append((dist, item))
+        if start_ts <= ts <= end_ts:
+            range_hits.append(((end_ts - start_ts).total_seconds(), item))
+    if edge_hits:
+        edge_hits.sort(key=lambda x: x[0])
+        return edge_hits[0][1]
+    if not range_hits:
         return None
-    hits.sort(key=lambda x: x[0])
-    return hits[0][1]
+    range_hits.sort(key=lambda x: x[0])
+    return range_hits[0][1]
+
+
+def _zoom_to_label_item(item: dict) -> None:
+    """Zoom X around a label (tight fit, then zoom-out ×7) and highlight it."""
+    start_ts = parse_time(item["start"])
+    end_ts = parse_time(item["end"])
+    span = end_ts - start_ts
+    pad = span / 2 if span > pd.Timedelta(0) else pd.Timedelta(hours=6)
+    tight_start, tight_end = start_ts - pad, end_ts + pad
+    tight_width = tight_end - tight_start
+    mid = tight_start + tight_width / 2
+    wide = tight_width * ((1.0 / 0.7) ** 7)
+    half = wide / 2
+    state["zoom_start"], state["zoom_end"] = _clamp_zoom(mid - half, mid + half)
+    state["highlight_id"] = item["id"]
+    _reset_y()
+    _arm_zoom_guard()
 
 
 def _cancel_style(click_mode: str):
@@ -187,6 +222,7 @@ def _build_graph(click_mode: str):
         title=title,
         hover_values=False,
         max_points=MAX_POINTS,
+        show_labels=bool(state.get("show_anomalies", True)),
     )
     # Extra revision bump so Dash/Plotly never keep a previous WebGL buffer /
     # axis range after 줌인·이동 buttons.
@@ -249,7 +285,7 @@ def _build_graph(click_mode: str):
         fig.add_shape(**pending_anchor_shape(state["label_range_anchor"]))
         fig.add_annotation(**pending_anchor_annotation(state["label_range_anchor"]))
 
-    if state.get("highlight_id"):
+    if state.get("highlight_id") and state.get("show_anomalies", True):
         item = _label_by_id(state["highlight_id"])
         if item is not None:
             before = len(fig.layout.shapes or ())
@@ -882,7 +918,28 @@ app.layout = html.Div(
                 "flexWrap": "wrap",
             },
         ),
-        html.H3("2) 그래프", style={"margin": "10px 0 4px"}),
+        html.Div(
+            [
+                html.H3("2) 그래프", style={"margin": "0"}),
+                dcc.RadioItems(
+                    id="anomaly-overlay-mode",
+                    options=[
+                        {"label": "anomaly 표시", "value": "show"},
+                        {"label": "anomaly 숨김", "value": "hide"},
+                    ],
+                    value="show",
+                    inline=True,
+                ),
+            ],
+            style={
+                "display": "flex",
+                "alignItems": "center",
+                "justifyContent": "space-between",
+                "gap": "12px",
+                "margin": "10px 0 4px",
+                "flexWrap": "wrap",
+            },
+        ),
         html.Div(
             [
                 dcc.RadioItems(
@@ -1003,6 +1060,7 @@ app.layout = html.Div(
         dcc.Store(id="key-listener-state"),
         dcc.Store(id="view-range"),
         dcc.Store(id="edge-drag-event"),
+        dcc.Store(id="shape-click-event"),
         dcc.Store(id="axis-cmd"),
         dcc.Store(id="axis-cmd-ack"),
         dcc.Store(id="rebuild-trigger"),
@@ -1023,6 +1081,7 @@ app.layout = html.Div(
     Input("btn-prev", "n_clicks"),
     Input("btn-next", "n_clicks"),
     Input("click-mode", "value"),
+    Input("anomaly-overlay-mode", "value"),
     Input("btn-cancel-range", "n_clicks"),
     Input("btn-save", "n_clicks"),
     Input("btn-reload", "n_clicks"),
@@ -1032,6 +1091,7 @@ app.layout = html.Div(
     Input("label-list", "value"),
     Input("key-event", "data"),
     Input("edge-drag-event", "data"),
+    Input("shape-click-event", "data"),
     Input("graph", "clickData"),
     Input("graph", "hoverData"),
     Input("graph", "relayoutData"),
@@ -1046,6 +1106,7 @@ def _main(
     n_prev,
     n_next,
     _mode_change,
+    anomaly_overlay_mode,
     n_cancel,
     n_save,
     n_reload,
@@ -1055,6 +1116,7 @@ def _main(
     selected_label,
     key_event,
     edge_drag,
+    shape_click,
     click_data,
     hover_data,
     relayout,
@@ -1065,6 +1127,7 @@ def _main(
 ):
     prop = callback_context.triggered[0]["prop_id"] if callback_context.triggered else ""
     click_mode = click_mode or "zoom"
+    state["show_anomalies"] = (anomaly_overlay_mode or "show") != "hide"
 
     # ----- load / prev / next -----
     if prop in ("btn-load.n_clicks", "btn-prev.n_clicks", "btn-next.n_clicks"):
@@ -1107,6 +1170,8 @@ def _main(
     # Axis buttons live in `_axis_nav`. Avoid replaying a stale browser view.
     _skip_view_sync = {
         "btn-zoom-selected.n_clicks",
+        "shape-click-event.data",
+        "graph.clickData",
     }
     if prop != "graph.relayoutData" and prop not in _skip_view_sync:
         _sync_zoom_from_view(view_range)
@@ -1147,6 +1212,18 @@ def _main(
             _label_options(),
             state.get("highlight_id"),
             status,
+            _cancel_style(click_mode),
+            no_update,
+            no_update,
+        )
+
+    if prop == "anomaly-overlay-mode.value":
+        shown = "표시" if state.get("show_anomalies", True) else "숨김"
+        return (
+            _build_graph(click_mode),
+            no_update,
+            no_update,
+            f"anomaly 오버레이: {shown}",
             _cancel_style(click_mode),
             no_update,
             no_update,
@@ -1230,21 +1307,7 @@ def _main(
         item = _label_by_id(selected_label)
         if item is None:
             return (no_update,) * 7
-        start_ts = parse_time(item["start"])
-        end_ts = parse_time(item["end"])
-        span = end_ts - start_ts
-        # Tight fit (previous "max zoom"), then zoom-out button ×7: factor 1/0.7 each.
-        pad = span / 2 if span > pd.Timedelta(0) else pd.Timedelta(hours=6)
-        tight_start, tight_end = start_ts - pad, end_ts + pad
-        tight_width = tight_end - tight_start
-        mid = tight_start + tight_width / 2
-        zoom_out_factor = 1.0 / 0.7
-        wide = tight_width * (zoom_out_factor**7)
-        half = wide / 2
-        state["zoom_start"], state["zoom_end"] = _clamp_zoom(mid - half, mid + half)
-        state["highlight_id"] = item["id"]
-        _reset_y()
-        _arm_zoom_guard()
+        _zoom_to_label_item(item)
         return (
             _build_graph(click_mode),
             _label_options(),
@@ -1329,6 +1392,43 @@ def _main(
             no_update,
         )
 
+    if prop == "shape-click-event.data" and shape_click and shape_click.get("x") is not None:
+        # Click on plot area near an anomaly divider (shapes are not clickable).
+        if state.get("df") is None or state.get("doc") is None:
+            return (no_update,) * 7
+        if click_mode == "edit_range":
+            return (no_update,) * 7
+        selecting_range_end = (
+            click_mode == "label_range" and state.get("label_range_anchor") is not None
+        )
+        if selecting_range_end:
+            return (no_update,) * 7
+        try:
+            ts = parse_time(shape_click["x"])
+        except (ValueError, TypeError):
+            return (no_update,) * 7
+        last_ts, last_at = state.get("_last_click", (None, 0.0))
+        now = time.monotonic()
+        if last_ts is not None and abs((ts - last_ts).total_seconds()) < 1 and now - last_at < 0.6:
+            return (no_update,) * 7
+        hit = _label_at_time(ts)
+        if hit is None:
+            return (no_update,) * 7
+        state["_last_click"] = (ts, now)
+        state["label_range_anchor"] = None
+        _zoom_to_label_item(hit)
+        kind = (hit.get("kind") or "point").lower()
+        tag = "점" if kind == "point" else "구간"
+        return (
+            _build_graph(click_mode),
+            _label_options(),
+            hit["id"],
+            f"선택·줌 ({tag}): {label_line(hit)}",
+            _cancel_style(click_mode),
+            no_update,
+            no_update,
+        )
+
     if prop == "graph.relayoutData":
         # Drag zoom/pan: Y 자동 + high-res rebuild go through `_drag_axis_nav`
         # (axis-cmd), same path as the toolbar buttons — avoids a second full
@@ -1367,15 +1467,15 @@ def _main(
         if not selecting_range_end:
             hit = _label_at_time(ts)
             if hit is not None:
-                state["highlight_id"] = hit["id"]
                 state["label_range_anchor"] = None
+                _zoom_to_label_item(hit)
                 kind = (hit.get("kind") or "point").lower()
                 tag = "점" if kind == "point" else "구간"
                 return (
                     _build_graph(click_mode),
                     _label_options(),
                     hit["id"],
-                    f"선택됨 ({tag}): {label_line(hit)}",
+                    f"선택·줌 ({tag}): {label_line(hit)}",
                     _cancel_style(click_mode),
                     no_update,
                     no_update,
@@ -2134,6 +2234,70 @@ app.clientside_callback(
             };
         }
 
+        // Click near anomaly divider lines → zoom (shapes themselves are not clickable).
+        if (!window.__installAnomalyShapeClick) {
+            window.__installAnomalyShapeClick = function(gd) {
+                if (!gd) return;
+                var drag = gd.querySelector('.nsewdrag');
+                if (!drag || drag.__anomalyZoomBound) return;
+                drag.__anomalyZoomBound = true;
+                var ptr = null;
+
+                function formatPlotX(val) {
+                    if (val == null || !isFinite(+new Date(val)) && typeof val !== 'string') {
+                        if (typeof val === 'number' && isFinite(val)) {
+                            var d = new Date(val);
+                            var pad = function(n) { return (n < 10 ? '0' : '') + n; };
+                            return d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1) + '-'
+                                + pad(d.getUTCDate()) + ' ' + pad(d.getUTCHours()) + ':'
+                                + pad(d.getUTCMinutes()) + ':' + pad(d.getUTCSeconds());
+                        }
+                        return null;
+                    }
+                    if (typeof val === 'string') return val;
+                    var dt = (val instanceof Date) ? val : new Date(val);
+                    if (isNaN(dt.getTime())) return null;
+                    var p = function(n) { return (n < 10 ? '0' : '') + n; };
+                    // Plot uses KST-naive wall clock encoded as UTC components.
+                    return dt.getUTCFullYear() + '-' + p(dt.getUTCMonth() + 1) + '-'
+                        + p(dt.getUTCDate()) + ' ' + p(dt.getUTCHours()) + ':'
+                        + p(dt.getUTCMinutes()) + ':' + p(dt.getUTCSeconds());
+                }
+
+                function clientXToPlotX(clientX) {
+                    var full = gd._fullLayout;
+                    var xa = full && full.xaxis;
+                    if (!xa) return null;
+                    var layer = gd.querySelector('.nsewdrag');
+                    if (!layer) return null;
+                    var bb = layer.getBoundingClientRect();
+                    var px = clientX - bb.left;
+                    if (px < 0 || px > bb.width) return null;
+                    try {
+                        if (typeof xa.p2d === 'function') return formatPlotX(xa.p2d(px));
+                        if (typeof xa.p2c === 'function' && typeof xa.c2d === 'function') {
+                            return formatPlotX(xa.c2d(xa.p2c(px)));
+                        }
+                    } catch (err) {}
+                    return null;
+                }
+
+                drag.addEventListener('pointerdown', function(ev) {
+                    ptr = {x: ev.clientX, y: ev.clientY};
+                });
+                drag.addEventListener('click', function(ev) {
+                    if (window.__editRangeMode) return;
+                    if (ptr && Math.hypot(ev.clientX - ptr.x, ev.clientY - ptr.y) > 8) return;
+                    var xVal = clientXToPlotX(ev.clientX);
+                    if (xVal == null) return;
+                    if (!window.dash_clientside || !window.dash_clientside.set_props) return;
+                    window.dash_clientside.set_props('shape-click-event', {
+                        data: {x: xVal, sequence: Date.now()}
+                    });
+                });
+            };
+        }
+
         setTimeout(function() {
             var host = document.getElementById('graph');
             var gd = host && host.querySelector('.js-plotly-plot');
@@ -2141,6 +2305,7 @@ app.clientside_callback(
             if (!gd || !window.Plotly) return;
             window.__clampPanToData(gd);
             window.__installCustomEdgeEdit(gd);
+            window.__installAnomalyShapeClick(gd);
             var drag = gd.querySelector('.nsewdrag');
             if (drag && !window.__editRangeMode) {
                 drag.classList.remove('edge-hit');

@@ -13,6 +13,8 @@
   let yRange = null;
   let yAuto = true;
   let suppressRelayout = false;
+  /** Show/hide anomaly overlays on the current chart (does not filter PLMNs). */
+  let showAnomalies = true;
 
   function setStatus(text) {
     statusEl.textContent = text || "";
@@ -21,6 +23,27 @@
   function syncYAutoButton() {
     const btn = document.getElementById("btn-y-auto");
     if (btn) btn.classList.toggle("active", yAuto);
+  }
+
+  function syncOverlayButtons() {
+    document
+      .getElementById("btn-mode-anomaly")
+      ?.classList.toggle("active", showAnomalies);
+    document
+      .getElementById("btn-mode-plain")
+      ?.classList.toggle("active", !showAnomalies);
+  }
+
+  function fillPlmnSelect(rows) {
+    selectEl.innerHTML = "";
+    for (const row of rows) {
+      const opt = document.createElement("option");
+      opt.value = row.plmn;
+      const nLab = row.n_labels || 0;
+      const lab = nLab > 0 ? ` · labels ${nLab}` : "";
+      opt.textContent = `#${String(row.rank ?? "").padStart(3, "0")} ${row.display}${lab}`;
+      selectEl.appendChild(opt);
+    }
   }
 
   function parseTime(v) {
@@ -323,7 +346,9 @@
       },
       xaxis,
       yaxis,
-      shapes: shapesForLabels(data.labels, highlightId),
+      shapes: showAnomalies
+        ? shapesForLabels(data.labels, highlightId)
+        : [],
     };
 
     return { data: traces, layout };
@@ -339,6 +364,100 @@
       displaylogo: false,
     });
     suppressRelayout = false;
+    bindAnomalyShapeClicks();
+  }
+
+  /** Map a mouse click in the plot area to data-X (ms). */
+  function clientXToPlotMs(clientX) {
+    const full = graphEl._fullLayout;
+    const xa = full?.xaxis;
+    if (!xa) return NaN;
+    const layer =
+      graphEl.querySelector(".nsewdrag") ||
+      graphEl.querySelector(".plotly .main-svg");
+    if (!layer) return NaN;
+    const bb = layer.getBoundingClientRect();
+    const px = clientX - bb.left;
+    if (px < 0 || px > bb.width) return NaN;
+    try {
+      // Plotly date axis: p2d(pixel-from-plot-left) → Date / number
+      if (typeof xa.p2d === "function") return parseTime(xa.p2d(px));
+      if (typeof xa.p2c === "function" && typeof xa.c2d === "function") {
+        return parseTime(xa.c2d(xa.p2c(px)));
+      }
+    } catch (_) {
+      /* fall through */
+    }
+    // Fallback: linear map using current range.
+    const cur = currentXRangeMs();
+    if (!cur || !(cur[1] > cur[0]) || !(bb.width > 0)) return NaN;
+    return cur[0] + (px / bb.width) * (cur[1] - cur[0]);
+  }
+
+  function labelAtPlotTime(ts) {
+    if (!isFinite(ts) || !payload?.labels?.length) return null;
+    const win = currentXRangeMs();
+    const winW =
+      win && win[1] > win[0] ? win[1] - win[0] : 24 * 3600 * 1000;
+    // ~8px equivalent as fraction of view; min 15 minutes.
+    const lineTol = Math.max(15 * 60 * 1000, winW * 0.012);
+
+    let best = null;
+    let bestScore = Infinity;
+    for (const item of payload.labels) {
+      const a = parseTime(utcIsoToPlotNaive(item.start));
+      const b = parseTime(utcIsoToPlotNaive(item.end || item.start));
+      const kind = (item.kind || "point").toLowerCase();
+      const edges =
+        kind === "point" || item.start === item.end ? [a] : [a, b];
+      for (const edge of edges) {
+        const d = Math.abs(ts - edge);
+        if (d <= lineTol && d < bestScore) {
+          bestScore = d;
+          best = item;
+        }
+      }
+    }
+    if (best) return best;
+
+    // Inside a range fill (secondary).
+    for (const item of payload.labels) {
+      const kind = (item.kind || "point").toLowerCase();
+      if (kind === "point" || item.start === item.end) continue;
+      const a = parseTime(utcIsoToPlotNaive(item.start));
+      const b = parseTime(utcIsoToPlotNaive(item.end || item.start));
+      const lo = Math.min(a, b);
+      const hi = Math.max(a, b);
+      if (ts >= lo && ts <= hi) {
+        const span = hi - lo;
+        if (span < bestScore) {
+          bestScore = span;
+          best = item;
+        }
+      }
+    }
+    return best;
+  }
+
+  let _ptrDown = null;
+  function bindAnomalyShapeClicks() {
+    const layer = graphEl.querySelector(".nsewdrag");
+    if (!layer) return;
+    if (layer.__anomalyClickBound) return;
+    layer.__anomalyClickBound = true;
+    layer.addEventListener("pointerdown", (ev) => {
+      _ptrDown = { x: ev.clientX, y: ev.clientY, t: Date.now() };
+    });
+    layer.addEventListener("click", (ev) => {
+      if (!showAnomalies || !payload) return;
+      if (_ptrDown) {
+        const dist = Math.hypot(ev.clientX - _ptrDown.x, ev.clientY - _ptrDown.y);
+        if (dist > 8) return; // pan/box-drag, not a click
+      }
+      const ts = clientXToPlotMs(ev.clientX);
+      const hit = labelAtPlotTime(ts);
+      if (hit) selectLabel(hit.id, true);
+    });
   }
 
   function applyXYRelayout(x0ms, x1ms) {
@@ -388,14 +507,12 @@
       const b = parseTime(utcIsoToPlotNaive(item.end || item.start));
       let lo = Math.min(a, b);
       let hi = Math.max(a, b);
-      const pad = Math.max((hi - lo) * 0.5, 6 * 3600 * 1000);
-      if (hi === lo) {
-        lo -= pad;
-        hi += pad;
-      } else {
-        lo -= pad;
-        hi += pad;
-      }
+      // Tight fit, then zoom-out ×7 (same idea as labeling "선택 라벨로 줌").
+      const tight = Math.max(hi - lo, 30 * 60 * 1000);
+      const mid = (lo + hi) / 2;
+      const half = (tight * Math.pow(1 / 0.7, 7)) / 2;
+      lo = mid - half;
+      hi = mid + half;
       xRange = [msToPlotNaive(lo), msToPlotNaive(hi)];
       yAuto = true;
       syncYAutoButton();
@@ -404,6 +521,14 @@
       setStatus(`선택: ${item.line || item.id}`);
     }
     await draw();
+  }
+
+  async function setShowAnomalies(on) {
+    if (showAnomalies === on) return;
+    showAnomalies = on;
+    syncOverlayButtons();
+    await draw();
+    setStatus(on ? "anomaly 표시" : "anomaly 숨김");
   }
 
   function setDragMode(mode) {
@@ -495,18 +620,9 @@
       return;
     }
     const idx = await res.json();
-    // Public viewer: only operators that currently have labels.
     catalog = idx.plmns || [];
-    selectEl.innerHTML = "";
-    for (const row of catalog) {
-      const opt = document.createElement("option");
-      opt.value = row.plmn;
-      const nLab = row.n_labels || 0;
-      const lab =
-        nLab > 0 ? ` · labels ${nLab}` : "";
-      opt.textContent = `#${String(row.rank ?? "").padStart(3, "0")} ${row.display}${lab}`;
-      selectEl.appendChild(opt);
-    }
+    syncOverlayButtons();
+    fillPlmnSelect(catalog);
     if (!catalog.length) {
       setStatus("내보낼 사업자가 없습니다.");
       return;
@@ -520,38 +636,16 @@
     document.getElementById("btn-y-in").onclick = () => scaleY(0.7);
     document.getElementById("btn-y-out").onclick = () => scaleY(1.4);
     document.getElementById("btn-y-auto").onclick = () => resetYAuto();
+    document.getElementById("btn-mode-anomaly").onclick = () =>
+      setShowAnomalies(true);
+    document.getElementById("btn-mode-plain").onclick = () =>
+      setShowAnomalies(false);
     syncYAutoButton();
 
     // First plot must run before graphEl.on (Plotly attaches .on only after plot).
     await loadPlmn(catalog[0].plmn);
 
     graphEl.on("plotly_relayout", onRelayout);
-    graphEl.on("plotly_click", (ev) => {
-      const x = ev?.points?.[0]?.x;
-      if (x == null || !payload) return;
-      const ts = parseTime(x);
-      let best = null;
-      let bestScore = Infinity;
-      for (const item of payload.labels || []) {
-        const a = parseTime(utcIsoToPlotNaive(item.start));
-        const b = parseTime(utcIsoToPlotNaive(item.end || item.start));
-        const kind = (item.kind || "point").toLowerCase();
-        if (kind === "point" || item.start === item.end) {
-          const d = Math.abs(ts - a);
-          if (d < bestScore && d <= 10 * 60 * 1000) {
-            bestScore = d;
-            best = item;
-          }
-        } else if (ts >= Math.min(a, b) && ts <= Math.max(a, b)) {
-          const span = Math.abs(b - a);
-          if (span < bestScore) {
-            bestScore = span;
-            best = item;
-          }
-        }
-      }
-      if (best) selectLabel(best.id, false);
-    });
   }
 
   init().catch((err) => {

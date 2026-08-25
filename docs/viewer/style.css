@@ -42,6 +42,39 @@ h1 {
   font-size: 0.92rem;
 }
 
+.top-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.view-mode {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.view-mode button {
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--ink);
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 0.88rem;
+}
+
+.view-mode button:hover {
+  border-color: #b8aea0;
+}
+
+.view-mode button.active {
+  background: var(--ink);
+  color: #fff;
+  border-color: var(--ink);
+}
+
 .plmn-pick {
   display: flex;
   flex-direction: column;
@@ -108,6 +141,12 @@ h1 {
   border: 1px solid var(--line);
   border-radius: 12px;
   overflow: hidden;
+}
+
+/* Let plot-area clicks pass through shape overlays to the drag layer. */
+.js-plotly-plot .shapelayer path,
+.js-plotly-plot .shapelayer rect {
+  pointer-events: none !important;
 }
 
 .labels-panel {

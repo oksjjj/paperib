@@ -939,6 +939,7 @@ def build_figure(
     hover_values: bool = False,
     width: int | None = None,
     max_points: int = 1500,
+    show_labels: bool = True,
 ) -> go.Figure:
     """Trend with label overlays. Zoom via xaxis range (keep full data for click/drag)."""
     view = _filter_df(df, start, end) if filter_data else df
@@ -1017,28 +1018,29 @@ def build_figure(
 
     y_ref = view[cols].max(axis=1) if len(view) and cols else None
 
-    for item in doc.get("labels", []):
-        s_utc = pd.to_datetime(item["start"], utc=True)
-        tag = item.get("tag", "anomaly")
-        line = TAG_LINE.get(tag, "crimson")
-        note = item.get("note") or ""
-        label_id = item.get("id", "")
-        add_label_indicator(fig, item)
+    if show_labels:
+        for item in doc.get("labels", []):
+            s_utc = pd.to_datetime(item["start"], utc=True)
+            tag = item.get("tag", "anomaly")
+            line = TAG_LINE.get(tag, "crimson")
+            note = item.get("note") or ""
+            label_id = item.get("id", "")
+            add_label_indicator(fig, item)
 
-        if y_ref is not None and len(view):
-            nearest = (view["time"] - s_utc).abs().idxmin()
-            fig.add_trace(
-                go.Scatter(
-                    x=[to_plot_time(view.loc[nearest, "time"])],
-                    y=[float(y_ref.loc[nearest])],
-                    mode="markers",
-                    marker=dict(size=10, color=line, symbol="x"),
-                    name=f"{tag}:{label_id}",
-                    hovertext=f"{label_id} | {tag} | {note}",
-                    hoverinfo="skip",
-                    showlegend=False,
+            if y_ref is not None and len(view):
+                nearest = (view["time"] - s_utc).abs().idxmin()
+                fig.add_trace(
+                    go.Scatter(
+                        x=[to_plot_time(view.loc[nearest, "time"])],
+                        y=[float(y_ref.loc[nearest])],
+                        mode="markers",
+                        marker=dict(size=10, color=line, symbol="x"),
+                        name=f"{tag}:{label_id}",
+                        hovertext=f"{label_id} | {tag} | {note}",
+                        hoverinfo="skip",
+                        showlegend=False,
+                    )
                 )
-            )
 
     # Stable uirevision: changing it every zoom remounts all WebGL traces and
     # freezes the browser. datarevision + uid still refresh series data.

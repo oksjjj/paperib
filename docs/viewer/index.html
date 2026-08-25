@@ -7,7 +7,7 @@
   <meta http-equiv="Pragma" content="no-cache" />
   <title>Anomaly Label Viewer</title>
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
-  <link rel="stylesheet" href="style.css?v=1787622349" />
+  <link rel="stylesheet" href="style.css?v=1787624373" />
 </head>
 <body>
   <header class="top">
@@ -15,10 +15,16 @@
       <h1>Anomaly Label Viewer</h1>
       <p class="sub">M971 상위 사업자 시계열 · 이동 / 박스줌 / Y+/Y- · 라벨 목록</p>
     </div>
-    <label class="plmn-pick">
-      사업자
-      <select id="plmn-select"></select>
-    </label>
+    <div class="top-controls">
+      <label class="plmn-pick">
+        사업자
+        <select id="plmn-select"></select>
+      </label>
+      <div class="view-mode" role="group" aria-label="anomaly 오버레이">
+        <button type="button" id="btn-mode-anomaly" class="active" title="그래프에 anomaly 표시">anomaly 표시</button>
+        <button type="button" id="btn-mode-plain" title="그래프에서 anomaly 숨김">anomaly 숨김</button>
+      </div>
+    </div>
   </header>
 
   <section class="toolbar">
@@ -46,6 +52,6 @@
     Plotly.js 정적 뷰어 · <code>python labeling/export_viewer.py</code> 로 data/ 갱신
   </footer>
 
-  <script src="app.js?v=1787622349"></script>
+  <script src="app.js?v=1787624373"></script>
 </body>
 </html>
