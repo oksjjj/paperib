@@ -1,12 +1,12 @@
 {
-  "build": "1787667782",
+  "build": "1787673141",
   "top_n": 100,
   "plmns": [
     {
       "plmn": "P0480",
       "display": "P0480",
       "rank": 1,
-      "n_labels": 22,
+      "n_labels": 23,
       "start_kst": "2026년 04월 30일 00:00",
       "end_kst": "2026년 08월 24일 23:55",
       "file": "P0480.json"

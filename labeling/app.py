@@ -50,6 +50,7 @@ from tool import (  # noqa: E402
     parse_time,
     pending_anchor_annotation,
     pending_anchor_shape,
+    pending_range_fill_shape,
     ranked_hover_html,
     remove_label,
     save_labels,
@@ -110,7 +111,7 @@ def _empty_figure():
 
     fig = go.Figure()
     fig.update_layout(
-        height=336,
+        height=360,
         margin=dict(l=40, r=20, t=40, b=40),
         annotations=[
             dict(
@@ -250,7 +251,7 @@ def _build_graph(click_mode: str):
     fig.update_layout(
         dragmode=(
             False
-            if click_mode == "edit_range"
+            if click_mode in ("edit_range", "label_range", "label_point")
             else (
                 "pan"
                 if click_mode in ("pan", "pan_keep_y", "inspect")
@@ -282,8 +283,13 @@ def _build_graph(click_mode: str):
         )
 
     if state["label_range_anchor"] is not None:
+        before_shapes = len(fig.layout.shapes or ())
+        fig.add_shape(**pending_range_fill_shape(state["label_range_anchor"]))
+        state["_pending_fill_index"] = before_shapes
         fig.add_shape(**pending_anchor_shape(state["label_range_anchor"]))
         fig.add_annotation(**pending_anchor_annotation(state["label_range_anchor"]))
+    else:
+        state["_pending_fill_index"] = None
 
     if state.get("highlight_id") and state.get("show_anomalies", True):
         item = _label_by_id(state["highlight_id"])
@@ -334,14 +340,18 @@ def _build_graph(click_mode: str):
         "data_x": [str(to_plot_time(tmin)), str(to_plot_time(tmax))],
         "zoom_x": [str(x0_plot), str(x1_plot)],
     }
-    if click_mode == "edit_range":
-        # Nearest-sample snap while dragging edges (irregular gaps included).
-        samples = state.get("sample_ms")
-        if samples is None and state["df"] is not None and len(state["df"]):
-            samples = _sample_plot_ms(state["df"])
-            state["sample_ms"] = samples
-        if samples:
-            meta["sample_ms"] = samples
+    samples = state.get("sample_ms")
+    if samples is None and state["df"] is not None and len(state["df"]):
+        samples = _sample_plot_ms(state["df"])
+        state["sample_ms"] = samples
+    if click_mode in ("edit_range", "label_range") and samples:
+        meta["sample_ms"] = samples
+    if click_mode == "label_range" and state.get("label_range_anchor") is not None:
+        meta["pending_range_start"] = str(
+            to_plot_time(state["label_range_anchor"])
+        )
+        if state.get("_pending_fill_index") is not None:
+            meta["pending_fill_index"] = int(state["_pending_fill_index"])
     if idxs:
         edges_meta = []
         if idxs.get("start") is not None:
@@ -370,6 +380,102 @@ def _snap_to_data_time(ts):
         return ts
     pos = int((df["time"] - ts).abs().to_numpy().argmin())
     return df.iloc[pos]["time"]
+
+
+def _place_label_click(ts, click_mode: str, note: str | None):
+    """Handle point/range label placement for a plotted time click."""
+    if click_mode == "label_point":
+        state["label_range_anchor"] = None
+        ts = _snap_to_data_time(ts)
+        before = {x["id"] for x in state["doc"].get("labels", [])}
+        add_label(
+            state["doc"],
+            kind="point",
+            tag="anomaly",
+            start=ts,
+            metrics=["ALL"],
+            note=(note or "").strip(),
+        )
+        after = [x for x in state["doc"]["labels"] if x["id"] not in before]
+        lid = after[0]["id"] if after else None
+        state["highlight_id"] = lid
+        opts = _label_options()
+        return (
+            _build_graph(click_mode),
+            opts,
+            lid,
+            html.Span(
+                f"✔ [점] anomaly 추가됨 ({lid}) {format_kst(ts)} — Save Labels로 저장",
+                style={"color": "green"},
+            ),
+            _cancel_style(click_mode),
+            no_update,
+            no_update,
+        )
+
+    if click_mode != "label_range":
+        return None
+
+    anchor = state["label_range_anchor"]
+    if anchor is None:
+        state["label_range_anchor"] = _snap_to_data_time(ts)
+        return (
+            _build_graph(click_mode),
+            no_update,
+            no_update,
+            (
+                f"① 시작(왼쪽): {format_kst(state['label_range_anchor'])} — "
+                "커서를 오른쪽으로 옮긴 뒤 ② 끝점을 클릭하세요"
+            ),
+            _cancel_style(click_mode),
+            no_update,
+            no_update,
+        )
+
+    ts = _snap_to_data_time(ts)
+    if ts <= anchor:
+        return (
+            _build_graph(click_mode),
+            no_update,
+            no_update,
+            (
+                f"끝점은 시작보다 오른쪽이어야 합니다 "
+                f"(시작 {format_kst(anchor)}). 오른쪽에서 다시 클릭하세요."
+            ),
+            _cancel_style(click_mode),
+            no_update,
+            no_update,
+        )
+
+    a, b = anchor, ts
+    state["label_range_anchor"] = None
+    before = {x["id"] for x in state["doc"].get("labels", [])}
+    add_label(
+        state["doc"],
+        kind="range",
+        tag="anomaly",
+        start=a,
+        end=b,
+        metrics=["ALL"],
+        note=(note or "").strip(),
+    )
+    after = [x for x in state["doc"]["labels"] if x["id"] not in before]
+    lid = after[0]["id"] if after else None
+    state["highlight_id"] = lid
+    opts = _label_options()
+    when = f"{format_kst(a)} → {format_kst(b)}"
+    return (
+        _build_graph(click_mode),
+        opts,
+        lid,
+        html.Span(
+            f"✔ [구간] anomaly 추가됨 ({lid}) {when} — Save Labels로 저장",
+            style={"color": "green"},
+        ),
+        _cancel_style(click_mode),
+        no_update,
+        no_update,
+    )
 
 
 def _shape_x_from_relayout(relayout, idx: int):
@@ -504,17 +610,29 @@ def _effective_y_bounds() -> tuple[float, float] | None:
 
 
 def _scale_y(factor: float) -> bool:
-    """Scale the y window against the zero baseline, keeping it at the bottom."""
+    """Keep the Y floor fixed; only the top moves (Y+ = shrink, Y- = expand).
+
+    X-axis stays at the bottom of the plot. Do not move ``y_min`` — moving the
+    floor makes the series look like it jumps up and the plot gets shorter.
+    """
     if state["df"] is None:
         return False
     bounds = _effective_y_bounds()
     if bounds is None:
         return False
-    lo, hi = bounds
-    top = lo + (hi - lo) * factor
+    lo, hi = float(bounds[0]), float(bounds[1])
+    # Keep an already-pinned floor; on first leave from auto, snap non-neg → 0.
+    if state.get("y_min") is not None and not state.get("y_auto"):
+        lo = float(state["y_min"])
+    elif lo >= 0:
+        lo = 0.0
+    span = hi - lo
+    if not (span > 0):
+        return False
+    top = lo + span * factor
     if top <= lo:
         return False
-    state["y_min"], state["y_max"] = lo, top
+    state["y_min"], state["y_max"] = lo, float(top)
     state["y_auto"] = False
     state["y_gen"] = int(state.get("y_gen") or 0) + 1
     return True
@@ -1030,7 +1148,7 @@ app.layout = html.Div(
         ),
         html.H3("3) 라벨 추가 / 수정", style={"margin": "10px 0 4px"}),
         html.Div(
-            "anomaly 라벨: 구간은 시작·끝 2클릭, 점은 시점 1클릭으로 추가하세요. "
+            "anomaly 라벨: 구간은 왼쪽 시작 → 오른쪽 끝 2클릭, 점은 시점 1클릭으로 추가하세요. "
             "목록에서 선택 후 구간 편집으로 경계를 조절할 수 있습니다.",
             style={"fontSize": "12px", "color": "#666", "marginBottom": "6px"},
         ),
@@ -1236,7 +1354,10 @@ def _main(
         elif click_mode == "inspect":
             status = "그래프에서 시점을 클릭하거나 마우스를 올린 뒤 ←/→ 키로 값을 탐색하세요."
         elif click_mode == "label_range":
-            status = "① 시작점 클릭 → ② 끝점 클릭으로 구간 라벨 추가"
+            status = (
+                "① 왼쪽(시작) 클릭 → 커서를 오른쪽으로 옮기면 빨간 미리보기 → "
+                "② 끝점 클릭으로 완료"
+            )
         elif click_mode == "label_point":
             status = "그래프에서 시점을 한 번 클릭하면 점(세로선) 라벨이 추가됩니다."
         elif click_mode == "edit_range":
@@ -1247,7 +1368,9 @@ def _main(
                 else "편집할 라벨을 목록에서 선택한 뒤 좌·우 경계선을 드래그하세요."
             )
         else:
-            status = "① 시작점 클릭 → ② 끝점 클릭으로 구간 라벨 추가"
+            status = (
+                "① 왼쪽(시작) 클릭 → 오른쪽으로 이동 후 ② 끝점 클릭"
+            )
         return (
             _build_graph(click_mode),
             _label_options(),
@@ -1434,15 +1557,10 @@ def _main(
         )
 
     if prop == "shape-click-event.data" and shape_click and shape_click.get("x") is not None:
-        # Click on plot area near an anomaly divider (shapes are not clickable).
+        # Click on plot area (shapes themselves are not clickable).
         if state.get("df") is None or state.get("doc") is None:
             return (no_update,) * 7
         if click_mode == "edit_range":
-            return (no_update,) * 7
-        selecting_range_end = (
-            click_mode == "label_range" and state.get("label_range_anchor") is not None
-        )
-        if selecting_range_end:
             return (no_update,) * 7
         try:
             ts = parse_time(shape_click["x"])
@@ -1450,12 +1568,25 @@ def _main(
             return (no_update,) * 7
         last_ts, last_at = state.get("_last_click", (None, 0.0))
         now = time.monotonic()
-        if last_ts is not None and abs((ts - last_ts).total_seconds()) < 1 and now - last_at < 0.6:
+        if (
+            last_ts is not None
+            and abs((ts - last_ts).total_seconds()) < 0.1
+            and now - last_at < 0.35
+        ):
             return (no_update,) * 7
+        # shape-click + clickData often fire for one gesture — drop the second.
+        if click_mode in ("label_range", "label_point") and now - last_at < 0.35:
+            return (no_update,) * 7
+        state["_last_click"] = (ts, now)
+
+        # Range/point placement: prefer this path (works on empty plot area).
+        if click_mode in ("label_range", "label_point"):
+            placed = _place_label_click(ts, click_mode, note)
+            return placed if placed is not None else (no_update,) * 7
+
         hit = _label_at_time(ts)
         if hit is None:
             return (no_update,) * 7
-        state["_last_click"] = (ts, now)
         state["label_range_anchor"] = None
         _zoom_to_label_item(hit)
         kind = (hit.get("kind") or "point").lower()
@@ -1483,7 +1614,14 @@ def _main(
         ts = parse_time(x)
         last_ts, last_at = state.get("_last_click", (None, 0.0))
         now = time.monotonic()
-        if last_ts == ts and now - last_at < 0.6:
+        # Ignore true double-fires of the same sample; allow a quick 2nd click elsewhere.
+        if (
+            last_ts is not None
+            and abs((ts - last_ts).total_seconds()) < 0.1
+            and now - last_at < 0.35
+        ):
+            return (no_update,) * 7
+        if click_mode in ("label_range", "label_point") and now - last_at < 0.35:
             return (no_update,) * 7
         state["_last_click"] = (ts, now)
 
@@ -1500,105 +1638,32 @@ def _main(
                 no_update,
             )
 
-        # Prefer selecting an existing red label when the click lands on it
-        # (except while placing the 2nd click of a new range).
-        selecting_range_end = (
-            click_mode == "label_range" and state.get("label_range_anchor") is not None
-        )
-        if not selecting_range_end:
-            hit = _label_at_time(ts)
-            if hit is not None:
-                state["label_range_anchor"] = None
-                _zoom_to_label_item(hit)
-                kind = (hit.get("kind") or "point").lower()
-                tag = "점" if kind == "point" else "구간"
-                return (
-                    _build_graph(click_mode),
-                    _label_options(),
-                    hit["id"],
-                    f"선택·줌 ({tag}): {label_line(hit)}",
-                    _cancel_style(click_mode),
-                    no_update,
-                    no_update,
-                )
+        # label_range / label_point: shape-click handles empty-area taps;
+        # clickData still places when the click lands on a trace.
+        if click_mode in ("label_range", "label_point"):
+            placed = _place_label_click(ts, click_mode, note)
+            return placed if placed is not None else (no_update,) * 7
 
-        if click_mode == "label_point":
+        hit = _label_at_time(ts)
+        if hit is not None:
             state["label_range_anchor"] = None
-            ts = _snap_to_data_time(ts)
-            before = {x["id"] for x in state["doc"].get("labels", [])}
-            add_label(
-                state["doc"],
-                kind="point",
-                tag="anomaly",
-                start=ts,
-                metrics=["ALL"],
-                note=(note or "").strip(),
-            )
-            after = [x for x in state["doc"]["labels"] if x["id"] not in before]
-            lid = after[0]["id"] if after else None
-            state["highlight_id"] = lid
-            opts = _label_options()
+            _zoom_to_label_item(hit)
+            kind = (hit.get("kind") or "point").lower()
+            tag = "점" if kind == "point" else "구간"
             return (
                 _build_graph(click_mode),
-                opts,
-                lid,
-                html.Span(
-                    f"✔ [점] anomaly 추가됨 ({lid}) {format_kst(ts)} — Save Labels로 저장",
-                    style={"color": "green"},
-                ),
+                _label_options(),
+                hit["id"],
+                f"선택·줌 ({tag}): {label_line(hit)}",
                 _cancel_style(click_mode),
                 no_update,
                 no_update,
             )
 
-        if click_mode != "label_range":
-            return (no_update,) * 7
-
-        anchor = state["label_range_anchor"]
-        if anchor is None:
-            state["label_range_anchor"] = _snap_to_data_time(ts)
-            return (
-                _build_graph(click_mode),
-                no_update,
-                no_update,
-                f"① 구간 시작: {format_kst(state['label_range_anchor'])} → ② 끝점을 클릭하세요",
-                _cancel_style(click_mode),
-                no_update,
-                no_update,
-            )
-
-        ts = _snap_to_data_time(ts)
-        a, b = (anchor, ts) if anchor <= ts else (ts, anchor)
-        state["label_range_anchor"] = None
-        before = {x["id"] for x in state["doc"].get("labels", [])}
-        add_label(
-            state["doc"],
-            kind="range",
-            tag="anomaly",
-            start=a,
-            end=b,
-            metrics=["ALL"],
-            note=(note or "").strip(),
-        )
-        after = [x for x in state["doc"]["labels"] if x["id"] not in before]
-        lid = after[0]["id"] if after else None
-        state["highlight_id"] = lid
-        opts = _label_options()
-        when = f"{format_kst(a)} → {format_kst(b)}"
-        return (
-            _build_graph(click_mode),
-            opts,
-            lid,
-            html.Span(
-                f"✔ [구간] anomaly 추가됨 ({lid}) {when} — Save Labels로 저장",
-                style={"color": "green"},
-            ),
-            _cancel_style(click_mode),
-            no_update,
-            no_update,
-        )
+        return (no_update,) * 7
 
     return (no_update,) * 7
+
 
 
 @app.callback(
@@ -1645,14 +1710,16 @@ def _axis_nav(
     if prop == "btn-y-in.n_clicks":
         if not _scale_y(0.7):
             return no_update
-        return _make_axis_cmd("세로축 확대")
+        # Y-only: don't touch X, don't full-rebuild (rebuild remounts WebGL and
+        # can shrink the plot height / shift the series upward).
+        return _make_axis_cmd("세로축 확대", apply_x=False, rebuild_ms=-1)
     if prop == "btn-y-out.n_clicks":
         if not _scale_y(1.4):
             return no_update
-        return _make_axis_cmd("세로축 축소")
+        return _make_axis_cmd("세로축 축소", apply_x=False, rebuild_ms=-1)
     if prop == "btn-y-auto.n_clicks":
         _reset_y()
-        return _make_axis_cmd("세로축 자동 맞춤")
+        return _make_axis_cmd("세로축 자동 맞춤", apply_x=False, rebuild_ms=-1)
     if prop == "btn-zoom-in.n_clicks":
         if not _scale_x(0.7, y_auto=not pan_keep_y):
             return no_update
@@ -1766,19 +1833,27 @@ app.clientside_callback(
         var apply = function() {
             if (window.__rebuildTimer) {
                 clearTimeout(window.__rebuildTimer);
+                window.__rebuildTimer = null;
             }
             var delay = (cmd.rebuild_ms != null) ? cmd.rebuild_ms : 300;
-            window.__rebuildTimer = setTimeout(function() {
-                window.dash_clientside.set_props('rebuild-trigger', {
-                    data: {seq: cmd.seq, t: Date.now()}
-                });
-            }, delay);
+            // rebuild_ms < 0 → Y-only / no remount (keeps plot height & x-axis put).
+            if (delay >= 0) {
+                window.__rebuildTimer = setTimeout(function() {
+                    window.dash_clientside.set_props('rebuild-trigger', {
+                        data: {seq: cmd.seq, t: Date.now()}
+                    });
+                }, delay);
+            }
             if (cmd.status) {
                 window.dash_clientside.set_props('status', {children: cmd.status});
             }
         };
         if (Object.keys(patch).length) {
             window.__clampingDataX = true;
+            // Keep layout height/domain stable when only Y changes.
+            if (!hasX && hasY) {
+                patch['yaxis.fixedrange'] = true;
+            }
             window.Plotly.relayout(gd, patch).finally(function() {
                 window.__clampingDataX = false;
                 apply();
@@ -1815,9 +1890,10 @@ app.clientside_callback(
         window.__valueInspectMode = mode === 'inspect';
         window.__editRangeMode = mode === 'edit_range';
         window.__desiredDragmode = (
-            mode === 'edit_range' ? false
-            : (mode === 'pan' || mode === 'pan_keep_y' || mode === 'inspect')
-                ? 'pan' : 'zoom'
+            (mode === 'edit_range' || mode === 'label_range' || mode === 'label_point')
+                ? false
+                : (mode === 'pan' || mode === 'pan_keep_y' || mode === 'inspect')
+                    ? 'pan' : 'zoom'
         );
 
         function isTextEntry(node) {
@@ -2337,6 +2413,103 @@ app.clientside_callback(
                     });
                 });
             };
+
+            window.__installPendingRangePreview = function(gd) {
+                if (!gd) return;
+                var drag = gd.querySelector('.nsewdrag');
+                if (!drag) return;
+                if (drag.__pendingRangePreviewBound) return;
+                drag.__pendingRangePreviewBound = true;
+                var raf = null;
+                var lastX1 = null;
+
+                function plotXToMs(xVal) {
+                    if (xVal == null) return NaN;
+                    if (typeof xVal === 'number' && isFinite(xVal)) return xVal;
+                    if (typeof window.toMs === 'function') {
+                        // not global; use local copy of plot encoding
+                    }
+                    if (xVal instanceof Date) {
+                        return Date.UTC(
+                            xVal.getUTCFullYear(), xVal.getUTCMonth(), xVal.getUTCDate(),
+                            xVal.getUTCHours(), xVal.getUTCMinutes(), xVal.getUTCSeconds()
+                        );
+                    }
+                    var s = String(xVal).replace('T', ' ');
+                    var y = +s.slice(0, 4), mo = +s.slice(5, 7), d = +s.slice(8, 10);
+                    var h = +s.slice(11, 13), mi = +s.slice(14, 16), sec = +s.slice(17, 19) || 0;
+                    if (!(y > 0) || !(mo > 0)) return NaN;
+                    return Date.UTC(y, mo - 1, d, h, mi, sec);
+                }
+
+                function clientXToPlotX(clientX) {
+                    var full = gd._fullLayout;
+                    var xa = full && full.xaxis;
+                    if (!xa) return null;
+                    var bb = drag.getBoundingClientRect();
+                    var px = clientX - bb.left;
+                    if (px < 0 || px > bb.width) return null;
+                    try {
+                        if (typeof xa.p2d === 'function') return xa.p2d(px);
+                        if (typeof xa.p2c === 'function' && typeof xa.c2d === 'function') {
+                            return xa.c2d(xa.p2c(px));
+                        }
+                    } catch (err) {}
+                    return null;
+                }
+
+                function formatPlotNaive(ms) {
+                    var d = new Date(ms);
+                    function pad(n) { return (n < 10 ? '0' : '') + n; }
+                    return d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1) + '-'
+                        + pad(d.getUTCDate()) + ' ' + pad(d.getUTCHours()) + ':'
+                        + pad(d.getUTCMinutes()) + ':' + pad(d.getUTCSeconds());
+                }
+
+                drag.addEventListener('pointermove', function(ev) {
+                    var meta = (gd.layout && gd.layout.meta) || {};
+                    var idx = meta.pending_fill_index;
+                    var start = meta.pending_range_start;
+                    if (idx == null || start == null || !window.Plotly) {
+                        return;
+                    }
+                    var xVal = clientXToPlotX(ev.clientX);
+                    if (xVal == null) return;
+                    var startMs = plotXToMs(start);
+                    var curMs = plotXToMs(xVal);
+                    if (!isFinite(startMs) || !isFinite(curMs)) return;
+
+                    var patch = {};
+                    if (curMs > startMs) {
+                        var x1 = formatPlotNaive(curMs);
+                        if (x1 === lastX1) return;
+                        lastX1 = x1;
+                        patch['shapes[' + idx + '].x0'] = start;
+                        patch['shapes[' + idx + '].x1'] = x1;
+                        patch['shapes[' + idx + '].fillcolor'] = 'rgba(200, 16, 46, 0.38)';
+                    } else {
+                        if (lastX1 === null) return;
+                        lastX1 = null;
+                        patch['shapes[' + idx + '].x1'] = start;
+                        patch['shapes[' + idx + '].fillcolor'] = 'rgba(0,0,0,0)';
+                    }
+                    if (raf) cancelAnimationFrame(raf);
+                    raf = requestAnimationFrame(function() {
+                        window.Plotly.relayout(gd, patch);
+                    });
+                });
+                drag.addEventListener('pointerleave', function() {
+                    var meta = (gd.layout && gd.layout.meta) || {};
+                    var idx = meta.pending_fill_index;
+                    var start = meta.pending_range_start;
+                    if (idx == null || start == null || !window.Plotly) return;
+                    lastX1 = null;
+                    window.Plotly.relayout(gd, {
+                        ['shapes[' + idx + '].x1']: start,
+                        ['shapes[' + idx + '].fillcolor']: 'rgba(0,0,0,0)'
+                    });
+                });
+            };
         }
 
         setTimeout(function() {
@@ -2347,6 +2520,9 @@ app.clientside_callback(
             window.__clampPanToData(gd);
             window.__installCustomEdgeEdit(gd);
             window.__installAnomalyShapeClick(gd);
+            if (window.__installPendingRangePreview) {
+                window.__installPendingRangePreview(gd);
+            }
             var drag = gd.querySelector('.nsewdrag');
             if (drag && !window.__editRangeMode) {
                 drag.classList.remove('edge-hit');

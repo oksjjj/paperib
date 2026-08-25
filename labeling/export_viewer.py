@@ -47,11 +47,13 @@ set_mapping_enabled(False)
 
 OUT_DIR = os.path.join(os.path.dirname(ROOT), "docs", "viewer", "data")
 VIEWER_DIR = os.path.join(os.path.dirname(ROOT), "docs", "viewer")
-# Keep Pages / git size manageable for ~100 PLMNs; labels still get dense windows.
-DEFAULT_MAX_POINTS = 2500
+# Keep Pages / git size manageable for ~100 PLMNs.
+# Uniform min/max sampling only — mixing full-rate label windows with a coarse
+# background made zoom/pan look like high- and low-res charts glued together.
+DEFAULT_MAX_POINTS = 5000
 DEFAULT_MAX_METRICS = 30
 DEFAULT_TOP_N = 100
-# Full-resolution keep window around each label (minutes each side).
+# Kept for CLI compatibility; densify-around-labels is disabled (see export_one).
 DEFAULT_LABEL_PAD_MIN = 12 * 60
 
 
@@ -130,47 +132,17 @@ def _purge_stale_exports(keep_plmns: list[str]) -> None:
         print(f"removed stale {path}", flush=True)
 
 
-def _label_dense_indices(
-    times_utc: pd.DatetimeIndex,
-    labels: list[dict],
-    *,
-    pad_minutes: int,
-) -> np.ndarray:
-    """Every sample index inside each label window (± pad)."""
-    n = len(times_utc)
-    if n == 0 or not labels:
-        return np.array([], dtype=int)
-    keep = np.zeros(n, dtype=bool)
-    pad = pd.Timedelta(minutes=int(pad_minutes))
-    for item in labels:
-        start = pd.to_datetime(item.get("start"), utc=True) - pad
-        end = pd.to_datetime(item.get("end") or item.get("start"), utc=True) + pad
-        keep |= (times_utc >= start) & (times_utc <= end)
-    return np.flatnonzero(keep)
-
-
 def _merge_sample_indices(
     envelope: np.ndarray,
     *,
     max_points: int,
-    dense: np.ndarray,
 ) -> np.ndarray:
-    """Min/max downsample for context + full-rate indices near labels."""
+    """Uniform min/max downsample over the full series."""
     n = int(envelope.shape[0])
-    if n <= max_points and len(dense) == 0:
+    if n <= max_points:
         return np.arange(n)
-
-    dense = np.unique(dense.astype(int))
-    dense = dense[(dense >= 0) & (dense < n)]
-    bg_budget = max(max_points, len(dense) + min(2000, max_points))
-    if len(dense) >= bg_budget:
-        bg = minmax_indices(envelope, min(2000, max_points))
-        idx = np.unique(np.concatenate([dense, bg, [0, n - 1]]))
-        return idx[idx < n]
-
-    remaining = max(500, bg_budget - len(dense))
-    bg = minmax_indices(envelope, remaining)
-    idx = np.unique(np.concatenate([dense, bg, [0, n - 1]]))
+    idx = minmax_indices(envelope, max_points)
+    idx = np.unique(np.concatenate([idx, [0, n - 1]]))
     return idx[idx < n]
 
 
@@ -192,13 +164,9 @@ def export_one(
         raise RuntimeError(f"no metrics for {plmn}")
 
     envelope = df[cols].max(axis=1).to_numpy(dtype="float64")
-    times_utc = pd.to_datetime(pd.Series(df["time"]), utc=True)
-    dense = _label_dense_indices(
-        times_utc, label_items, pad_minutes=label_pad_min
-    )
-    idx = _merge_sample_indices(
-        envelope, max_points=max_points, dense=dense
-    )
+    # Uniform sampling only (label overlays stay full-fidelity as shapes).
+    _ = label_pad_min  # CLI retained; no longer densifies the plotted series
+    idx = _merge_sample_indices(envelope, max_points=max_points)
     times = to_plot_times(df["time"].to_numpy()[idx])
     t_str = [str(x)[:19].replace("T", " ") for x in times]
 
@@ -227,7 +195,7 @@ def export_one(
         "rank": rank,
         "n_points_raw": int(len(df)),
         "n_points": len(t_str),
-        "n_points_dense": int(len(dense)),
+        "n_points_dense": 0,
         "start_kst": format_kst(tmin),
         "end_kst": format_kst(tmax),
         "t": t_str,

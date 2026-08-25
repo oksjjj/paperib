@@ -373,17 +373,18 @@
     });
   }
 
-  /** Keep the current Y floor fixed; only the top moves (Y+ = 0.7, Y- = 1.4). */
+  /** Keep the Y floor fixed; only the top moves (Y+ = 0.7, Y- = 1.4). */
   function scaleY(factor) {
     const bounds = currentYBounds();
     if (!bounds) return;
     let [lo, hi] = bounds;
-    // Prefer a non-negative floor when the visible series is non-negative.
+    // Prefer an exact 0 floor when the visible series is non-negative.
     const win = visibleXWindowMs();
     const dataYr = win
       ? yRangeForWindow(payload, win[0], win[1])
       : null;
-    if (dataYr && dataYr[0] >= 0 && lo < 0) lo = 0;
+    if (yAuto && dataYr && dataYr[0] >= 0) lo = 0;
+    else if (yAuto && lo >= 0) lo = 0;
     const top = lo + (hi - lo) * factor;
     if (!(top > lo)) return;
     yAuto = false;

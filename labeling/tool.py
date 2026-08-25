@@ -37,18 +37,45 @@ CACHE_DIR = os.path.join(os.path.dirname(__file__), "cache")
 RANK_SIGNATURE_PATH = os.path.join(CACHE_DIR, "plmn_rank.signature")
 
 TAG_COLORS = {
-    "anomaly": "rgba(220, 20, 60, 0.25)",
-    "normal": "rgba(46, 160, 67, 0.20)",
-    "uncertain": "rgba(255, 165, 0, 0.25)",
+    # Stronger fills so ranges stay visible on white plot background.
+    "anomaly": "rgba(200, 16, 46, 0.38)",
+    "normal": "rgba(20, 120, 50, 0.32)",
+    "uncertain": "rgba(200, 110, 0, 0.36)",
 }
 TAG_LINE = {
-    "anomaly": "crimson",
-    "normal": "seagreen",
-    "uncertain": "darkorange",
+    "anomaly": "#b01028",
+    "normal": "#147832",
+    "uncertain": "#c86e00",
 }
+
+# Avoid Plotly defaults that wash out on white (pale yellow / mint / pink).
+# Mid–dark hues, distinct enough for ~20 overlapping series.
+SERIES_COLORWAY = (
+    "#1f4e79",  # navy
+    "#c0392b",  # red
+    "#1e8449",  # green
+    "#6c3483",  # purple
+    "#b9770e",  # amber (not pale yellow)
+    "#1a5276",  # steel
+    "#922b21",  # brick
+    "#0e6655",  # teal
+    "#4a235a",  # deep purple
+    "#a04000",  # burnt orange
+    "#154360",  # dark blue
+    "#7b241c",  # dark red
+    "#196f3d",  # forest
+    "#5b2c6f",  # violet
+    "#7d6608",  # olive gold
+    "#1b4f72",  # blue
+    "#784212",  # brown
+    "#117a65",  # sea green
+    "#512e5f",  # plum
+    "#943126",  # rust
+)
 
 # Shapes/annotations tagged with these names are transient labeling guides.
 PENDING_ANCHOR_NAME = "pending_range_anchor"
+PENDING_RANGE_FILL_NAME = "pending_range_fill"
 LABEL_HIGHLIGHT_NAME = "label_highlight"
 LABEL_HIGHLIGHT_START = "label_highlight_start"
 LABEL_HIGHLIGHT_END = "label_highlight_end"
@@ -893,7 +920,7 @@ def value_cursor_overlays(ts) -> tuple[dict[str, Any], dict[str, Any]]:
 
 
 def pending_anchor_shape(ts) -> dict[str, Any]:
-    """Dotted guide marking a range label's first click (start point)."""
+    """Dotted guide marking a range label's first click (start / left)."""
     x = to_plot_time(ts)
     return dict(
         type="line",
@@ -916,13 +943,34 @@ def pending_anchor_annotation(ts) -> dict[str, Any]:
         y=1.0,
         xref="x",
         yref="paper",
-        text="① anomaly 구간 시작 — 끝점을 클릭하세요",
+        text="① 시작(왼쪽) — 오른쪽으로 이동 후 끝점 클릭",
         showarrow=False,
         yshift=-8,
         font=dict(size=11, color="white"),
         bgcolor="royalblue",
         borderpad=3,
         name=PENDING_ANCHOR_NAME,
+    )
+
+
+def pending_range_fill_shape(start_ts, end_ts=None) -> dict[str, Any]:
+    """Crimson band preview from start → end (transparent until end > start)."""
+    x0 = to_plot_time(start_ts)
+    x1 = to_plot_time(end_ts) if end_ts is not None else x0
+    show = end_ts is not None and end_ts > start_ts
+    return dict(
+        type="rect",
+        xref="x",
+        yref="paper",
+        x0=x0,
+        x1=x1 if show else x0,
+        y0=0,
+        y1=1,
+        fillcolor=TAG_COLORS["anomaly"] if show else "rgba(0,0,0,0)",
+        line=dict(width=0),
+        layer="below",
+        editable=False,
+        name=PENDING_RANGE_FILL_NAME,
     )
 
 
@@ -965,24 +1013,25 @@ def build_figure(
         )
 
     fig = go.Figure()
-    for col in cols:
+    for i, col in enumerate(cols):
         x, y = series.get(col, ([], []))
         metric_name = display_metric(col)
+        color = SERIES_COLORWAY[i % len(SERIES_COLORWAY)]
         fig.add_trace(
             go.Scattergl(
                 x=x,
                 y=y,
                 mode="lines",
                 name=metric_name,
-                opacity=0.55,
-                line=dict(width=1),
+                opacity=0.88,
+                line=dict(width=1, color=color),
                 hovertemplate=(
                     f"<b>{metric_name}</b><br>"
                     "%{x|%Y년 %m월 %d일 %H:%M}<br>"
                     "값=%{y}<extra></extra>"
                 ),
                 # Stable uid: embedding data_rev remounts every Scattergl on zoom
-                # and freezes the browser. datarevision alone refreshes buffers.
+                # and freezes the browser. datarevision alone refreshes series data.
                 uid=col,
             )
         )
@@ -1046,7 +1095,7 @@ def build_figure(
     # freezes the browser. datarevision + uid still refresh series data.
     fig.update_layout(
         title=title or f"{display_plmn(str(doc.get('plmn')))} anomaly labeling",
-        height=336,
+        height=360,
         hovermode="closest",
         dragmode="zoom",
         showlegend=False,
@@ -1055,6 +1104,9 @@ def build_figure(
         yaxis_title="value",
         uirevision=str(doc.get("plmn") or "labeling"),
         datarevision=data_rev,
+        colorway=list(SERIES_COLORWAY),
+        plot_bgcolor="#f7f5f1",
+        paper_bgcolor="white",
         hoverlabel=dict(
             bgcolor="white",
             font_size=11,
