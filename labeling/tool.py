@@ -775,7 +775,6 @@ def add_label_indicator(fig: go.Figure, item: dict[str, Any]) -> bool:
     tag = item.get("tag", "anomaly")
     color = TAG_COLORS.get(tag, TAG_COLORS["anomaly"])
     line = TAG_LINE.get(tag, "crimson")
-    label_id = item.get("id", "")
     is_range = item.get("kind") == "range" or s_utc != e_utc
 
     if is_range:
@@ -785,19 +784,14 @@ def add_label_indicator(fig: go.Figure, item: dict[str, Any]) -> bool:
             fillcolor=color,
             layer="below",
             line_width=0,
-            annotation_text=f"[구간] {tag}:{label_id}",
-            annotation_position="top left",
-            annotation=dict(font_size=10),
             editable=False,
         )
     else:
         fig.add_vline(
             x=s,
             line_width=2,
-            line_dash="dash",
+            line_dash="solid",
             line_color=line,
-            annotation_text=f"[점] {tag}:{label_id}",
-            annotation_position="top",
             editable=False,
         )
     return is_range
@@ -818,11 +812,14 @@ def freeze_shape_editing(fig: go.Figure) -> go.Figure:
 
 
 def label_line(item: dict[str, Any]) -> str:
-    """One-line description of a label (anomaly ranges)."""
+    """One-line description of a label for the saved-label list."""
+    kind = (item.get("kind") or "point").lower()
     start = format_kst(item.get("start"))
     end = format_kst(item.get("end"))
-    when = f"{start} → {end}"
-    text = f"[구간] anomaly · {when}"
+    if kind == "point":
+        text = f"[점] anomaly · {start}"
+    else:
+        text = f"[구간] anomaly · {start} → {end}"
     note = (item.get("note") or "").strip()
     if note:
         text += f" · {note}"
@@ -969,15 +966,20 @@ def build_figure(
     fig = go.Figure()
     for col in cols:
         x, y = series.get(col, ([], []))
+        metric_name = display_metric(col)
         fig.add_trace(
             go.Scattergl(
                 x=x,
                 y=y,
                 mode="lines",
-                name=display_metric(col),
+                name=metric_name,
                 opacity=0.55,
                 line=dict(width=1),
-                hoverinfo="skip",
+                hovertemplate=(
+                    f"<b>{metric_name}</b><br>"
+                    "%{x|%Y년 %m월 %d일 %H:%M}<br>"
+                    "값=%{y}<extra></extra>"
+                ),
                 # Stable uid: embedding data_rev remounts every Scattergl on zoom
                 # and freezes the browser. datarevision alone refreshes buffers.
                 uid=col,
@@ -1010,7 +1012,7 @@ def build_figure(
             anchor["text"] = [ranked_hover_text(view.loc[i], cols) for i in rows]
             anchor["hovertemplate"] = "%{x|%Y년 %m월 %d일 %H:%M}<br>%{text}<extra></extra>"
         else:
-            anchor["hovertemplate"] = "%{x|%Y년 %m월 %d일 %H:%M}<extra></extra>"
+            anchor["hoverinfo"] = "skip"
         fig.add_trace(go.Scattergl(**anchor))
 
     y_ref = view[cols].max(axis=1) if len(view) and cols else None
@@ -1043,7 +1045,7 @@ def build_figure(
     fig.update_layout(
         title=title or f"{display_plmn(str(doc.get('plmn')))} anomaly labeling",
         height=336,
-        hovermode="x",
+        hovermode="closest",
         dragmode="zoom",
         showlegend=False,
         margin=dict(l=40, r=20, t=60, b=40),

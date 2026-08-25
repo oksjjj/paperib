@@ -140,6 +140,30 @@ def _label_by_id(label_id):
     return None
 
 
+def _label_at_time(ts, *, point_tol_seconds: float = 150.0):
+    """Return the best label covering `ts` (tightest range, or nearest point)."""
+    doc = state.get("doc") or {}
+    hits: list[tuple[float, dict]] = []
+    for item in doc.get("labels", []):
+        try:
+            start_ts = parse_time(item["start"])
+            end_ts = parse_time(item["end"])
+        except (ValueError, TypeError, KeyError):
+            continue
+        kind = (item.get("kind") or "point").lower()
+        is_point = kind == "point" or start_ts == end_ts
+        if is_point:
+            dist = abs((ts - start_ts).total_seconds())
+            if dist <= point_tol_seconds:
+                hits.append((dist, item))
+        elif start_ts <= ts <= end_ts:
+            hits.append(((end_ts - start_ts).total_seconds(), item))
+    if not hits:
+        return None
+    hits.sort(key=lambda x: x[0])
+    return hits[0][1]
+
+
 def _cancel_style(click_mode: str):
     if click_mode == "label_range" and state["label_range_anchor"] is not None:
         return {"display": "inline-block"}
@@ -481,6 +505,17 @@ def _select_value_pos(pos: int):
     return row, panel
 
 
+def _pin_y_before_x_change() -> None:
+    """Freeze the currently drawn y range so the next rebuild won't refit."""
+    pinned = state.get("y_rendered")
+    if pinned is None:
+        pinned = _effective_y_bounds()
+    if pinned is None:
+        return
+    state["y_min"], state["y_max"] = float(pinned[0]), float(pinned[1])
+    state["y_auto"] = False
+
+
 def _shift_zoom(
     direction: int, fraction: float = 0.5, *, y_auto: bool = True
 ) -> bool:
@@ -499,23 +534,16 @@ def _shift_zoom(
     new_start, new_end = _clamp_zoom(start_ts + delta, end_ts + delta)
     if (new_start, new_end) == before:
         return False
+    if not y_auto:
+        _pin_y_before_x_change()
+    state["zoom_start"], state["zoom_end"] = new_start, new_end
     if y_auto:
-        state["zoom_start"], state["zoom_end"] = new_start, new_end
         _reset_y()
-    else:
-        # Pin the y window shown before the pan so rebuild doesn't refit.
-        pinned = state.get("y_rendered")
-        if pinned is None:
-            pinned = _effective_y_bounds()
-        state["zoom_start"], state["zoom_end"] = new_start, new_end
-        if pinned is not None:
-            state["y_min"], state["y_max"] = float(pinned[0]), float(pinned[1])
-            state["y_auto"] = False
     _arm_zoom_guard()
     return True
 
 
-def _scale_x(factor: float) -> bool:
+def _scale_x(factor: float, *, y_auto: bool = True) -> bool:
     """Shrink (factor < 1) or expand (factor > 1) the time window around its center."""
     if state["df"] is None:
         return False
@@ -535,19 +563,23 @@ def _scale_x(factor: float) -> bool:
     min_half = pd.Timedelta(minutes=15)
     if half < min_half and factor < 1:
         half = min_half
-    state["zoom_start"], state["zoom_end"] = _clamp_zoom(mid - half, mid + half)
+    new_start, new_end = _clamp_zoom(mid - half, mid + half)
     # If already at the data bounds and zooming out, nothing changed.
-    if factor > 1 and state["zoom_start"] == tmin and state["zoom_end"] == tmax:
+    if factor > 1 and new_start == tmin and new_end == tmax:
         if start_ts == tmin and end_ts == tmax:
             return False
-    if state["zoom_start"] == start_ts and state["zoom_end"] == end_ts:
+    if new_start == start_ts and new_end == end_ts:
         return False
-    _reset_y()
+    if not y_auto:
+        _pin_y_before_x_change()
+    state["zoom_start"], state["zoom_end"] = new_start, new_end
+    if y_auto:
+        _reset_y()
     _arm_zoom_guard()
     return True
 
 
-def _scale_x_from_left(factor: float) -> bool:
+def _scale_x_from_left(factor: float, *, y_auto: bool = True) -> bool:
     """Shrink the time window while keeping the left edge fixed."""
     if state["df"] is None:
         return False
@@ -570,9 +602,12 @@ def _scale_x_from_left(factor: float) -> bool:
         new_end = tmax
     if new_end <= start_ts or new_end >= end_ts:
         return False
+    if not y_auto:
+        _pin_y_before_x_change()
     state["zoom_start"] = start_ts
     state["zoom_end"] = new_end
-    _reset_y()
+    if y_auto:
+        _reset_y()
     _arm_zoom_guard()
     return True
 
@@ -858,6 +893,7 @@ app.layout = html.Div(
                         {"label": "이동(Y고정)", "value": "pan_keep_y"},
                         {"label": "값 탐색(클릭+←→)", "value": "inspect"},
                         {"label": "구간 라벨(2클릭)", "value": "label_range"},
+                        {"label": "점 라벨(1클릭)", "value": "label_point"},
                         {"label": "구간 편집", "value": "edit_range"},
                     ],
                     value="zoom",
@@ -922,7 +958,8 @@ app.layout = html.Div(
         ),
         html.H3("3) 라벨 추가 / 수정", style={"margin": "10px 0 4px"}),
         html.Div(
-            "라벨은 항상 anomaly 구간입니다. 그래프에서 시작·끝을 클릭해 추가하세요.",
+            "anomaly 라벨: 구간은 시작·끝 2클릭, 점은 시점 1클릭으로 추가하세요. "
+            "목록에서 선택 후 구간 편집으로 경계를 조절할 수 있습니다.",
             style={"fontSize": "12px", "color": "#666", "marginBottom": "6px"},
         ),
         html.Div(
@@ -945,6 +982,14 @@ app.layout = html.Div(
         ),
         html.Div(
             [
+                html.Button("라벨 선택해제", id="btn-clear-selection", n_clicks=0),
+                html.Button("선택 라벨로 줌", id="btn-zoom-selected", n_clicks=0),
+                html.Button("선택 라벨 삭제", id="btn-delete", n_clicks=0),
+            ],
+            style={"display": "flex", "gap": "8px", "marginTop": "8px"},
+        ),
+        html.Div(
+            [
                 html.B("저장된 라벨 (한 줄 = 라벨 1개)"),
                 html.Span(
                     " — 한 줄을 클릭하면 그래프에서 노란색으로 강조됩니다.",
@@ -954,14 +999,6 @@ app.layout = html.Div(
             style={"marginTop": "8px"},
         ),
         dcc.RadioItems(id="label-list", options=[], value=None),
-        html.Div(
-            [
-                html.Button("라벨 선택해제", id="btn-clear-selection", n_clicks=0),
-                html.Button("선택 라벨로 줌", id="btn-zoom-selected", n_clicks=0),
-                html.Button("선택 라벨 삭제", id="btn-delete", n_clicks=0),
-            ],
-            style={"display": "flex", "gap": "8px", "marginTop": "6px"},
-        ),
         dcc.Store(id="key-event"),
         dcc.Store(id="key-listener-state"),
         dcc.Store(id="view-range"),
@@ -1092,6 +1129,10 @@ def _main(
             )
         elif click_mode == "inspect":
             status = "그래프에서 시점을 클릭하거나 마우스를 올린 뒤 ←/→ 키로 값을 탐색하세요."
+        elif click_mode == "label_range":
+            status = "① 시작점 클릭 → ② 끝점 클릭으로 구간 라벨 추가"
+        elif click_mode == "label_point":
+            status = "그래프에서 시점을 한 번 클릭하면 점(세로선) 라벨이 추가됩니다."
         elif click_mode == "edit_range":
             status = (
                 "빨간 경계선 위에서만 ↔ 커서가 됩니다. 선을 좌우로 드래그하세요. "
@@ -1192,10 +1233,15 @@ def _main(
         start_ts = parse_time(item["start"])
         end_ts = parse_time(item["end"])
         span = end_ts - start_ts
+        # Tight fit (previous "max zoom"), then zoom-out button ×7: factor 1/0.7 each.
         pad = span / 2 if span > pd.Timedelta(0) else pd.Timedelta(hours=6)
-        state["zoom_start"], state["zoom_end"] = _clamp_zoom(
-            start_ts - pad, end_ts + pad
-        )
+        tight_start, tight_end = start_ts - pad, end_ts + pad
+        tight_width = tight_end - tight_start
+        mid = tight_start + tight_width / 2
+        zoom_out_factor = 1.0 / 0.7
+        wide = tight_width * (zoom_out_factor**7)
+        half = wide / 2
+        state["zoom_start"], state["zoom_end"] = _clamp_zoom(mid - half, mid + half)
         state["highlight_id"] = item["id"]
         _reset_y()
         _arm_zoom_guard()
@@ -1312,22 +1358,75 @@ def _main(
                 panel,
                 no_update,
             )
-        if click_mode != "label_range":
-            return (no_update,) * 7
 
-        anchor = state["label_range_anchor"]
-        if anchor is None:
-            state["label_range_anchor"] = ts
+        # Prefer selecting an existing red label when the click lands on it
+        # (except while placing the 2nd click of a new range).
+        selecting_range_end = (
+            click_mode == "label_range" and state.get("label_range_anchor") is not None
+        )
+        if not selecting_range_end:
+            hit = _label_at_time(ts)
+            if hit is not None:
+                state["highlight_id"] = hit["id"]
+                state["label_range_anchor"] = None
+                kind = (hit.get("kind") or "point").lower()
+                tag = "점" if kind == "point" else "구간"
+                return (
+                    _build_graph(click_mode),
+                    _label_options(),
+                    hit["id"],
+                    f"선택됨 ({tag}): {label_line(hit)}",
+                    _cancel_style(click_mode),
+                    no_update,
+                    no_update,
+                )
+
+        if click_mode == "label_point":
+            state["label_range_anchor"] = None
+            ts = _snap_to_data_time(ts)
+            before = {x["id"] for x in state["doc"].get("labels", [])}
+            add_label(
+                state["doc"],
+                kind="point",
+                tag="anomaly",
+                start=ts,
+                metrics=["ALL"],
+                note=(note or "").strip(),
+            )
+            after = [x for x in state["doc"]["labels"] if x["id"] not in before]
+            lid = after[0]["id"] if after else None
+            state["highlight_id"] = lid
+            opts = _label_options()
             return (
                 _build_graph(click_mode),
-                no_update,
-                no_update,
-                f"① 구간 시작: {format_kst(ts)} → ② 끝점을 클릭하세요",
+                opts,
+                lid,
+                html.Span(
+                    f"✔ [점] anomaly 추가됨 ({lid}) {format_kst(ts)} — Save Labels로 저장",
+                    style={"color": "green"},
+                ),
                 _cancel_style(click_mode),
                 no_update,
                 no_update,
             )
 
+        if click_mode != "label_range":
+            return (no_update,) * 7
+
+        anchor = state["label_range_anchor"]
+        if anchor is None:
+            state["label_range_anchor"] = _snap_to_data_time(ts)
+            return (
+                _build_graph(click_mode),
+                no_update,
+                no_update,
+                f"① 구간 시작: {format_kst(state['label_range_anchor'])} → ② 끝점을 클릭하세요",
+                _cancel_style(click_mode),
+                no_update,
+                no_update,
+            )
+
+        ts = _snap_to_data_time(ts)
         a, b = (anchor, ts) if anchor <= ts else (ts, anchor)
         state["label_range_anchor"] = None
         before = {x["id"] for x in state["doc"].get("labels", [])}
@@ -1414,17 +1513,29 @@ def _axis_nav(
         _reset_y()
         return _make_axis_cmd("세로축 자동 맞춤")
     if prop == "btn-zoom-in.n_clicks":
-        if not _scale_x(0.7):
+        if not _scale_x(0.7, y_auto=not pan_keep_y):
             return no_update
-        return _make_axis_cmd("시간축 줌인")
+        return _make_axis_cmd(
+            "시간축 줌인",
+            touch_y=not pan_keep_y,
+            rebuild_ms=80,
+        )
     if prop == "btn-zoom-in-left.n_clicks":
-        if not _scale_x_from_left(0.7):
+        if not _scale_x_from_left(0.7, y_auto=not pan_keep_y):
             return no_update
-        return _make_axis_cmd("시간축 줌인(왼쪽 고정)")
+        return _make_axis_cmd(
+            "시간축 줌인(왼쪽 고정)",
+            touch_y=not pan_keep_y,
+            rebuild_ms=80,
+        )
     if prop == "btn-zoom-out.n_clicks":
-        if not _scale_x(1.0 / 0.7):
+        if not _scale_x(1.0 / 0.7, y_auto=not pan_keep_y):
             return no_update
-        return _make_axis_cmd("시간축 줌아웃")
+        return _make_axis_cmd(
+            "시간축 줌아웃",
+            touch_y=not pan_keep_y,
+            rebuild_ms=80,
+        )
     if prop == "btn-reset-zoom.n_clicks":
         state["label_range_anchor"] = None
         state["zoom_start"], state["zoom_end"] = data_time_bounds(state["df"])
@@ -1562,6 +1673,11 @@ app.clientside_callback(
     function(mode) {
         window.__valueInspectMode = mode === 'inspect';
         window.__editRangeMode = mode === 'edit_range';
+        window.__desiredDragmode = (
+            mode === 'edit_range' ? false
+            : (mode === 'pan' || mode === 'pan_keep_y' || mode === 'inspect')
+                ? 'pan' : 'zoom'
+        );
 
         function isTextEntry(node) {
             var tag = ((node && node.tagName) || '').toLowerCase();
@@ -1605,20 +1721,25 @@ app.clientside_callback(
             document.head.appendChild(style);
         }
         document.getElementById('edit-range-pointer-style').textContent =
-            mode === 'edit_range'
+            // Label fills/lines must not steal clicks — selection uses clickData x.
+            '#graph .shapelayer path,'
+            + '#graph .shapelayer rect{'
+            + 'pointer-events:none !important;}'
+            + (mode === 'edit_range'
                 ? (
                     '#graph .nsewdrag{cursor:default !important;}'
                     + '#graph .nsewdrag.edge-hit{cursor:ew-resize !important;}'
                     + '#graph .outline-controllers{display:none !important;}'
-                    + '#graph .shapelayer path:not([fill="none"]),'
-                    + '#graph .shapelayer rect:not([fill="none"]){'
-                    + 'pointer-events:none !important;}'
                   )
-                : '';
+                : '');
 
         setTimeout(function() {
             var host = document.getElementById('graph');
             var gd = host && host.querySelector('.js-plotly-plot');
+            if (gd && window.Plotly && window.__desiredDragmode !== undefined) {
+                // Stable layout.uirevision keeps the old dragmode; force the mode radio.
+                window.Plotly.relayout(gd, {dragmode: window.__desiredDragmode});
+            }
             if (gd && window.__installCustomEdgeEdit) {
                 window.__installCustomEdgeEdit(gd);
             }
@@ -1645,6 +1766,15 @@ app.clientside_callback(
 app.clientside_callback(
     """
     function(figure) {
+        if (!document.getElementById('edit-range-pointer-style')) {
+            var style = document.createElement('style');
+            style.id = 'edit-range-pointer-style';
+            document.head.appendChild(style);
+            style.textContent =
+                '#graph .shapelayer path,#graph .shapelayer rect{'
+                + 'pointer-events:none !important;}';
+        }
+
         if (!window.__readGraphView) {
             window.__readGraphView = function() {
                 var host = document.getElementById('graph');
@@ -2015,7 +2145,13 @@ app.clientside_callback(
             if (drag && !window.__editRangeMode) {
                 drag.classList.remove('edge-hit');
             }
-            // Do not Plotly.relayout here — that re-triggers Dash rebuilds and freezes.
+            // Re-apply mode dragmode after figure updates (uirevision keeps stale zoom/pan).
+            if (window.__desiredDragmode !== undefined) {
+                var cur = gd._fullLayout && gd._fullLayout.dragmode;
+                if (cur !== window.__desiredDragmode) {
+                    window.Plotly.relayout(gd, {dragmode: window.__desiredDragmode});
+                }
+            }
         }, 80);
         return window.dash_clientside.no_update;
     }

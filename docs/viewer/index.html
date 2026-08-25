@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Anomaly Label Viewer</title>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="top">
+    <div>
+      <h1>Anomaly Label Viewer</h1>
+      <p class="sub">라벨링된 사업자 시계열 · 이동 / 박스줌 / 목록 클릭</p>
+    </div>
+    <label class="plmn-pick">
+      사업자
+      <select id="plmn-select"></select>
+    </label>
+  </header>
+
+  <section class="toolbar">
+    <button type="button" id="btn-pan" class="active" title="드래그로 이동">이동</button>
+    <button type="button" id="btn-zoom" title="드래그로 구간 확대">줌</button>
+    <button type="button" id="btn-zoom-in" title="시간축 확대">줌인</button>
+    <button type="button" id="btn-zoom-out" title="시간축 축소">줌아웃</button>
+    <button type="button" id="btn-reset" title="전체 구간">전체</button>
+    <span class="toolbar-sep" aria-hidden="true"></span>
+    <button type="button" id="btn-y-in" title="세로축 확대">Y+</button>
+    <button type="button" id="btn-y-out" title="세로축 축소">Y-</button>
+    <button type="button" id="btn-y-auto" class="active" title="세로축 자동 맞춤">Y 자동</button>
+    <span id="status" class="status"></span>
+  </section>
+
+  <div id="graph"></div>
+
+  <section class="labels-panel">
+    <h2>Anomaly 목록</h2>
+    <p class="hint">한 줄을 클릭하면 그래프에서 강조되고 해당 구간으로 이동합니다.</p>
+    <div id="label-list"></div>
+  </section>
+
+  <footer class="foot">
+    Plotly.js 정적 뷰어 · <code>python labeling/export_viewer.py</code> 로 data/ 갱신
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
