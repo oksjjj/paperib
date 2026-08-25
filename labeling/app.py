@@ -6,7 +6,7 @@
     # 또는
     cd labeling && python app.py
 
-브라우저가 열리면 PLMN을 고른 뒤 Load 하세요.
+브라우저가 열리면 사업자를 선택하세요 (선택 즉시 로드).
 
 새 날짜의 data/*.csv를 추가한 경우:
     python labeling/preprocess.py
@@ -114,7 +114,7 @@ def _empty_figure():
         margin=dict(l=40, r=20, t=40, b=40),
         annotations=[
             dict(
-                text="PLMN을 선택하고 Load를 누르세요",
+                text="사업자를 선택하세요",
                 xref="paper",
                 yref="paper",
                 x=0.5,
@@ -894,6 +894,22 @@ def _do_load(plmn: str, click_mode: str):
     )
 
 
+# Prefetch rank #1 so the first paint already shows data (no empty "선택하세요" flash).
+_START_PLMN = plmn_ids[0] if plmn_ids else None
+_START_LABEL_OPTS: list = []
+_START_LABEL_VALUE = None
+_START_FIGURE = None
+if _START_PLMN:
+    _do_load(_START_PLMN, "zoom")
+    _START_FIGURE = _build_graph("zoom")
+    _START_LABEL_OPTS = _label_options()
+    _START_LABEL_VALUE = (
+        _START_LABEL_OPTS[0]["value"] if _START_LABEL_OPTS else None
+    )
+else:
+    _START_FIGURE = _empty_figure()
+
+
 app = Dash(__name__, title="Anomaly Labeling")
 app.layout = html.Div(
     [
@@ -909,7 +925,6 @@ app.layout = html.Div(
                     style={"width": "560px", "display": "inline-block"},
                 ),
                 html.Button("Next ▶", id="btn-next", n_clicks=0),
-                html.Button("Load", id="btn-load", n_clicks=0, style={"marginLeft": "8px"}),
             ],
             style={
                 "display": "flex",
@@ -990,7 +1005,7 @@ app.layout = html.Div(
         ),
         dcc.Graph(
             id="graph",
-            figure=_empty_figure(),
+            figure=_START_FIGURE,
             config={
                 "responsive": True,
                 "displayModeBar": True,
@@ -1055,7 +1070,11 @@ app.layout = html.Div(
             ],
             style={"marginTop": "8px"},
         ),
-        dcc.RadioItems(id="label-list", options=[], value=None),
+        dcc.RadioItems(
+            id="label-list",
+            options=_START_LABEL_OPTS,
+            value=_START_LABEL_VALUE,
+        ),
         dcc.Store(id="key-event"),
         dcc.Store(id="key-listener-state"),
         dcc.Store(id="view-range"),
@@ -1077,7 +1096,7 @@ app.layout = html.Div(
     Output("btn-cancel-range", "style"),
     Output("hover-panel", "children"),
     Output("dd-plmn", "value"),
-    Input("btn-load", "n_clicks"),
+    Input("dd-plmn", "value"),
     Input("btn-prev", "n_clicks"),
     Input("btn-next", "n_clicks"),
     Input("click-mode", "value"),
@@ -1095,14 +1114,13 @@ app.layout = html.Div(
     Input("graph", "clickData"),
     Input("graph", "hoverData"),
     Input("graph", "relayoutData"),
-    State("dd-plmn", "value"),
     State("note", "value"),
     State("click-mode", "value"),
     State("view-range", "data"),
-    prevent_initial_call=True,
+    prevent_initial_call=False,
 )
 def _main(
-    n_load,
+    plmn,
     n_prev,
     n_next,
     _mode_change,
@@ -1120,7 +1138,6 @@ def _main(
     click_data,
     hover_data,
     relayout,
-    plmn,
     note,
     click_mode,
     view_range,
@@ -1129,28 +1146,52 @@ def _main(
     click_mode = click_mode or "zoom"
     state["show_anomalies"] = (anomaly_overlay_mode or "show") != "hide"
 
-    # ----- load / prev / next -----
-    if prop in ("btn-load.n_clicks", "btn-prev.n_clicks", "btn-next.n_clicks"):
-        target = plmn
-        if prop == "btn-prev.n_clicks" and plmn in plmn_ids:
-            i = plmn_ids.index(plmn)
-            if i > 0:
-                target = plmn_ids[i - 1]
-            else:
-                return (no_update,) * 7
-        elif prop == "btn-next.n_clicks" and plmn in plmn_ids:
-            i = plmn_ids.index(plmn)
-            if i < len(plmn_ids) - 1:
-                target = plmn_ids[i + 1]
-            else:
-                return (no_update,) * 7
+    # ----- load on startup / dropdown change / prev / next -----
+    triggered_id = getattr(callback_context, "triggered_id", None)
+    boot = triggered_id is None or (not prop) or prop == "."
+    target = plmn
+    if prop == "btn-prev.n_clicks" and plmn in plmn_ids:
+        i = plmn_ids.index(plmn)
+        if i > 0:
+            target = plmn_ids[i - 1]
+        else:
+            return (no_update,) * 7
+    elif prop == "btn-next.n_clicks" and plmn in plmn_ids:
+        i = plmn_ids.index(plmn)
+        if i < len(plmn_ids) - 1:
+            target = plmn_ids[i + 1]
+        else:
+            return (no_update,) * 7
+
+    want_load = (
+        boot
+        or prop in ("dd-plmn.value", "btn-prev.n_clicks", "btn-next.n_clicks")
+        or (state.get("df") is None and bool(target))
+    )
+    if want_load:
         if not target:
             return (
                 no_update,
                 no_update,
                 no_update,
-                "PLMN을 선택하세요.",
+                "사업자를 선택하세요.",
                 no_update,
+                no_update,
+                no_update,
+            )
+        already = target == state.get("plmn") and state.get("df") is not None
+        if already and prop == "dd-plmn.value":
+            # Echo after Prev/Next wrote the same value back.
+            return (no_update,) * 7
+        if already:
+            # Startup prefetch already loaded rank #1 — keep it, clear status.
+            opts = _label_options()
+            return (
+                _build_graph(click_mode),
+                opts,
+                no_update,
+                "",
+                _cancel_style(click_mode),
                 no_update,
                 no_update,
             )
@@ -1161,7 +1202,7 @@ def _main(
             no_update,
             no_update,
             no_update,
-            "먼저 Load를 누르세요.",
+            "사업자를 선택하세요.",
             no_update,
             no_update,
             no_update,
