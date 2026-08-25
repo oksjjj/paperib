@@ -48,29 +48,28 @@ TAG_LINE = {
     "uncertain": "#c86e00",
 }
 
-# Avoid Plotly defaults that wash out on white (pale yellow / mint / pink).
-# Mid–dark hues, distinct enough for ~20 overlapping series.
+# Mid-tone hues: readable on white without the previous near-black density.
 SERIES_COLORWAY = (
-    "#1f4e79",  # navy
-    "#c0392b",  # red
-    "#1e8449",  # green
-    "#6c3483",  # purple
-    "#b9770e",  # amber (not pale yellow)
-    "#1a5276",  # steel
-    "#922b21",  # brick
-    "#0e6655",  # teal
-    "#4a235a",  # deep purple
-    "#a04000",  # burnt orange
-    "#154360",  # dark blue
-    "#7b241c",  # dark red
-    "#196f3d",  # forest
-    "#5b2c6f",  # violet
-    "#7d6608",  # olive gold
-    "#1b4f72",  # blue
-    "#784212",  # brown
-    "#117a65",  # sea green
-    "#512e5f",  # plum
-    "#943126",  # rust
+    "#3d7ab5",  # blue
+    "#d9655a",  # coral red
+    "#3da86a",  # green
+    "#9b6bb8",  # purple
+    "#d4a017",  # gold
+    "#4a90a4",  # steel
+    "#c06a5a",  # brick
+    "#2e9a85",  # teal
+    "#8e6ba8",  # soft purple
+    "#d4833a",  # orange
+    "#5b8fbf",  # sky
+    "#c97b72",  # rose
+    "#4caf77",  # mint green
+    "#a07cbc",  # lilac
+    "#b8a03a",  # olive gold
+    "#5b9bd5",  # light steel
+    "#b8875a",  # tan
+    "#3cb09a",  # sea green
+    "#9a7aab",  # plum
+    "#c97a55",  # rust
 )
 
 # Shapes/annotations tagged with these names are transient labeling guides.
@@ -988,11 +987,15 @@ def build_figure(
     width: int | None = None,
     max_points: int = 1500,
     show_labels: bool = True,
+    color_metrics: list[str] | None = None,
 ) -> go.Figure:
     """Trend with label overlays. Zoom via xaxis range (keep full data for click/drag)."""
     view = _filter_df(df, start, end) if filter_data else df
-    cols = metrics or metric_columns(df)
-    cols = cols[:max_metrics]
+    # `metrics=[]` must stay empty — do not treat it as falsy fallback to all cols.
+    cols = metric_columns(df) if metrics is None else list(metrics)
+    if max_metrics is not None and max_metrics >= 0:
+        cols = cols[:max_metrics]
+    color_source = list(color_metrics) if color_metrics else list(cols)
 
     if not len(view):
         series = {}
@@ -1016,14 +1019,18 @@ def build_figure(
     for i, col in enumerate(cols):
         x, y = series.get(col, ([], []))
         metric_name = display_metric(col)
-        color = SERIES_COLORWAY[i % len(SERIES_COLORWAY)]
+        try:
+            color_i = color_source.index(col)
+        except ValueError:
+            color_i = i
+        color = SERIES_COLORWAY[color_i % len(SERIES_COLORWAY)]
         fig.add_trace(
             go.Scattergl(
                 x=x,
                 y=y,
                 mode="lines",
                 name=metric_name,
-                opacity=0.88,
+                opacity=0.72,
                 line=dict(width=1, color=color),
                 hovertemplate=(
                     f"<b>{metric_name}</b><br>"

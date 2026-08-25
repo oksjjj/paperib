@@ -7,13 +7,13 @@
   <meta http-equiv="Pragma" content="no-cache" />
   <title>Anomaly Label Viewer</title>
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
-  <link rel="stylesheet" href="style.css?v=1787673567" />
+  <link rel="stylesheet" href="style.css?v=1787684058" />
 </head>
 <body>
   <header class="top">
     <div>
       <h1>Anomaly Label Viewer</h1>
-      <p class="sub">M971 상위 사업자 시계열 · 이동 / 박스줌 / Y+/Y- · 라벨 목록</p>
+      <p class="sub">라벨 있는 사업자 · metric 필터 · 이동 / 줌 / 값 탐색 · 라벨 목록</p>
     </div>
     <div class="top-controls">
       <label class="plmn-pick">
@@ -30,6 +30,7 @@
   <section class="toolbar">
     <button type="button" id="btn-pan" class="active" title="드래그로 이동">이동</button>
     <button type="button" id="btn-zoom" title="드래그로 구간 확대">줌</button>
+    <button type="button" id="btn-inspect" title="클릭·←→로 시점 값 탐색 (드래그 이동 없음)">값 탐색</button>
     <button type="button" id="btn-zoom-in" title="시간축 확대">줌인</button>
     <button type="button" id="btn-zoom-out" title="시간축 축소">줌아웃</button>
     <button type="button" id="btn-reset" title="전체 구간">전체</button>
@@ -40,7 +41,28 @@
     <span id="status" class="status"></span>
   </section>
 
+  <section class="metric-filter" aria-label="표시 metric">
+    <div class="metric-filter-head">
+      <strong>표시 metric</strong>
+      <button type="button" id="btn-metrics-all" title="모든 metric을 다시 표시">전체 선택</button>
+      <button type="button" id="btn-metrics-none" title="모든 metric 숨김 (Y축 스케일 유지)">전체 해제</button>
+      <span class="hint-inline">체크 해제하면 숨깁니다 · 화면 합계 내림차순</span>
+    </div>
+    <div id="metric-filter-list" class="metric-filter-list"></div>
+  </section>
+
   <div id="graph"></div>
+
+  <section class="hover-panel-wrap">
+    <h2>이 시점 특성값</h2>
+    <p class="hint">
+      표시 중인 metric · 값 내림차순.
+      <strong>값 탐색</strong>에서 클릭 또는 ←/→.
+    </p>
+    <div id="hover-panel" class="hover-panel">
+      <em>그래프에 커서를 올리세요.</em>
+    </div>
+  </section>
 
   <section class="labels-panel">
     <h2>Anomaly 목록</h2>
@@ -52,6 +74,6 @@
     Plotly.js 정적 뷰어 · <code>python labeling/export_viewer.py</code> 로 data/ 갱신
   </footer>
 
-  <script src="app.js?v=1787673567"></script>
+  <script src="app.js?v=1787684058"></script>
 </body>
 </html>

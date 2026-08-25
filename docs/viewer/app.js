@@ -1,13 +1,40 @@
 (() => {
   const DATA_BASE = "data";
+  // Same mid-tone palette as labeling/tool.py SERIES_COLORWAY.
+  const SERIES_COLORWAY = [
+    "#3d7ab5",
+    "#d9655a",
+    "#3da86a",
+    "#9b6bb8",
+    "#d4a017",
+    "#4a90a4",
+    "#c06a5a",
+    "#2e9a85",
+    "#8e6ba8",
+    "#d4833a",
+    "#5b8fbf",
+    "#c97b72",
+    "#4caf77",
+    "#a07cbc",
+    "#b8a03a",
+    "#5b9bd5",
+    "#b8875a",
+    "#3cb09a",
+    "#9a7aab",
+    "#c97a55",
+  ];
   const graphEl = document.getElementById("graph");
   const selectEl = document.getElementById("plmn-select");
   const listEl = document.getElementById("label-list");
   const statusEl = document.getElementById("status");
+  const metricListEl = document.getElementById("metric-filter-list");
+  const hoverPanelEl = document.getElementById("hover-panel");
 
   let catalog = [];
   let payload = null;
   let selectedId = null;
+  /** pan | zoom | inspect */
+  let interactionMode = "pan";
   let dragmode = "pan";
   let xRange = null;
   let yRange = null;
@@ -15,13 +42,223 @@
   let suppressRelayout = false;
   /** Show/hide anomaly overlays on the current chart (does not filter PLMNs). */
   let showAnomalies = true;
+  /** Metric names currently drawn (and shown in the hover panel). */
+  let visibleMetrics = new Set();
+  let hoverIndex = null;
+  /** Locked sample index for 값 탐색 (null = unlocked / follow hover). */
+  let inspectIndex = null;
   let _resizeTimer = null;
+  let _placeTipBound = false;
+  let _placeOnTrace = false;
   const coarsePointer =
     typeof window.matchMedia === "function" &&
     window.matchMedia("(pointer: coarse)").matches;
 
   function setStatus(text) {
     statusEl.textContent = text || "";
+  }
+
+  function allMetricNames() {
+    return Object.keys(payload?.metrics || {});
+  }
+
+  function windowIndexBounds(data, x0ms, x1ms) {
+    if (!data?.t?.length) return null;
+    let lo = 0;
+    let hi = data.t.length - 1;
+    if (!(isFinite(x0ms) && isFinite(x1ms) && x1ms > x0ms)) {
+      return [lo, hi];
+    }
+    const tms = (i) => parseTime(data.t[i]);
+    let a = 0;
+    let b = data.t.length - 1;
+    while (a < b) {
+      const m = (a + b) >> 1;
+      if (tms(m) < x0ms) a = m + 1;
+      else b = m;
+    }
+    lo = Math.max(0, a - 1);
+    a = lo;
+    b = data.t.length - 1;
+    while (a < b) {
+      const m = (a + b + 1) >> 1;
+      if (tms(m) > x1ms) b = m - 1;
+      else a = m;
+    }
+    hi = Math.min(data.t.length - 1, a + 1);
+    return [lo, hi];
+  }
+
+  /** Metrics ranked by sum over the current on-screen time window (desc). */
+  function metricsByViewSum() {
+    const names = allMetricNames();
+    if (!payload?.t?.length || !names.length) return names;
+    const win = visibleXWindowMs();
+    const bounds = win
+      ? windowIndexBounds(payload, win[0], win[1])
+      : [0, payload.t.length - 1];
+    if (!bounds) return names;
+    const [lo0, hi0] = bounds;
+    const x0ms = win ? win[0] : -Infinity;
+    const x1ms = win ? win[1] : Infinity;
+    const scored = names.map((name) => {
+      const series = payload.metrics[name] || [];
+      let sum = 0;
+      for (let i = lo0; i <= hi0; i++) {
+        const ms = parseTime(payload.t[i]);
+        if (ms < x0ms || ms > x1ms) continue;
+        const v = series[i];
+        if (v != null && isFinite(v)) sum += v;
+      }
+      return { name, sum };
+    });
+    scored.sort((a, b) => b.sum - a.sum || a.name.localeCompare(b.name));
+    return scored.map((x) => x.name);
+  }
+
+  function renderMetricFilter() {
+    if (!metricListEl) return;
+    metricListEl.innerHTML = "";
+    if (!payload) return;
+    const ranked = metricsByViewSum();
+    for (const name of ranked) {
+      const lab = document.createElement("label");
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.value = name;
+      input.checked = visibleMetrics.has(name);
+      input.addEventListener("change", () => {
+        if (input.checked) visibleMetrics.add(name);
+        else visibleMetrics.delete(name);
+        onVisibleMetricsChanged({ keepY: false });
+      });
+      lab.appendChild(input);
+      lab.appendChild(document.createTextNode(name));
+      metricListEl.appendChild(lab);
+    }
+  }
+
+  async function onVisibleMetricsChanged({ keepY = false } = {}) {
+    if (keepY) {
+      const bounds = currentYBounds();
+      if (bounds && bounds[1] > bounds[0]) {
+        yRange = [Number(bounds[0]), Number(bounds[1])];
+        yAuto = false;
+        syncYAutoButton();
+      }
+    } else {
+      yAuto = true;
+      syncYAutoButton();
+    }
+    const n = visibleMetrics.size;
+    const total = allMetricNames().length;
+    setStatus(
+      keepY && n === 0
+        ? "metric 전체 해제 (Y축 유지)"
+        : `표시 metric ${n}/${total}`
+    );
+    renderMetricFilter();
+    refreshHoverPanel();
+    await draw();
+  }
+
+  function selectAllMetrics() {
+    visibleMetrics = new Set(allMetricNames());
+    onVisibleMetricsChanged({ keepY: false });
+  }
+
+  function clearAllMetrics() {
+    visibleMetrics = new Set();
+    onVisibleMetricsChanged({ keepY: true });
+  }
+
+  function formatMetricValue(v) {
+    if (v == null || !isFinite(v)) return "—";
+    if (Math.abs(v) >= 1000) return Math.round(v).toLocaleString("en-US");
+    if (Number.isInteger(v)) return String(v);
+    return String(Math.round(v * 1000) / 1000);
+  }
+
+  function nearestTimeIndex(ms) {
+    if (!payload?.t?.length || !isFinite(ms)) return null;
+    const tms = (i) => parseTime(payload.t[i]);
+    let a = 0;
+    let b = payload.t.length - 1;
+    while (a < b) {
+      const m = (a + b) >> 1;
+      if (tms(m) < ms) a = m + 1;
+      else b = m;
+    }
+    let best = a;
+    let bestD = Math.abs(tms(a) - ms);
+    if (a > 0) {
+      const d = Math.abs(tms(a - 1) - ms);
+      if (d < bestD) {
+        best = a - 1;
+        bestD = d;
+      }
+    }
+    if (a + 1 < payload.t.length) {
+      const d = Math.abs(tms(a + 1) - ms);
+      if (d < bestD) best = a + 1;
+    }
+    return best;
+  }
+
+  /** Midpoint of the current on-screen window (fallback: series center). */
+  function defaultHoverIndex() {
+    if (!payload?.t?.length) return null;
+    const win = visibleXWindowMs();
+    if (win && isFinite(win[0]) && isFinite(win[1]) && win[1] > win[0]) {
+      const idx = nearestTimeIndex((win[0] + win[1]) / 2);
+      if (idx != null) return idx;
+    }
+    return Math.floor((payload.t.length - 1) / 2);
+  }
+
+  function refreshHoverPanel(index) {
+    if (!hoverPanelEl) return;
+    if (index == null) {
+      index = interactionMode === "inspect" && inspectIndex != null
+        ? inspectIndex
+        : hoverIndex;
+    }
+    if (index == null) index = defaultHoverIndex();
+    if (index == null || !payload?.t?.length) {
+      hoverPanelEl.innerHTML = "<em>표시할 시점이 없습니다.</em>";
+      return;
+    }
+    index = Math.max(0, Math.min(index, payload.t.length - 1));
+    hoverIndex = index;
+    const names = metricsByViewSum().filter((n) => visibleMetrics.has(n));
+    if (!names.length) {
+      hoverPanelEl.innerHTML =
+        "<em>표시 중인 metric이 없습니다. 위에서 metric을 선택하세요.</em>";
+      return;
+    }
+    const pairs = names
+      .map((name) => {
+        const v = payload.metrics[name]?.[index];
+        return { name, val: v == null || !isFinite(v) ? -Infinity : Number(v) };
+      })
+      .sort((a, b) => b.val - a.val);
+    const when = payload.t[index] || "";
+    const cells = pairs
+      .map((p, i) => {
+        const bg = Math.floor(i / 4) % 2 ? "#f6f8fa" : "#ffffff";
+        const shown = isFinite(p.val) ? formatMetricValue(p.val) : "—";
+        return (
+          `<div class="hover-cell" style="background:${bg}">` +
+          `<span class="rank">${i + 1}</span>` +
+          `<span class="name" title="${p.name}">${p.name}</span>` +
+          `<span class="val">${shown}</span>` +
+          `</div>`
+        );
+      })
+      .join("");
+    hoverPanelEl.innerHTML =
+      `<div style="margin:0 0 6px;color:#666;font-size:0.78rem">${when}</div>` +
+      `<div class="hover-grid">${cells}</div>`;
   }
 
   function graphHeightPx() {
@@ -209,8 +446,10 @@
       if (d < bestD) best = a + 1;
     }
     let ymax = -Infinity;
-    for (const series of Object.values(payload.metrics || {})) {
-      const v = series[best];
+    for (const name of allMetricNames()) {
+      if (!visibleMetrics.has(name)) continue;
+      const series = payload.metrics[name];
+      const v = series?.[best];
       if (v != null && isFinite(v) && v > ymax) ymax = v;
     }
     return isFinite(ymax) ? ymax : null;
@@ -267,31 +506,12 @@
   /** Y auto from values visible in [x0ms, x1ms] (no forced zero). */
   function yRangeForWindow(data, x0ms, x1ms) {
     if (!data?.t?.length) return null;
-    const metrics = Object.values(data.metrics || {});
-    if (!metrics.length) return null;
+    const names = allMetricNames().filter((n) => visibleMetrics.has(n));
+    if (!names.length) return null;
 
-    let lo = 0;
-    let hi = data.t.length - 1;
-    if (isFinite(x0ms) && isFinite(x1ms) && x1ms > x0ms) {
-      // Bound scan roughly by binary search on t.
-      const tms = (i) => parseTime(data.t[i]);
-      let a = 0;
-      let b = data.t.length - 1;
-      while (a < b) {
-        const m = (a + b) >> 1;
-        if (tms(m) < x0ms) a = m + 1;
-        else b = m;
-      }
-      lo = Math.max(0, a - 1);
-      a = lo;
-      b = data.t.length - 1;
-      while (a < b) {
-        const m = (a + b + 1) >> 1;
-        if (tms(m) > x1ms) b = m - 1;
-        else a = m;
-      }
-      hi = Math.min(data.t.length - 1, a + 1);
-    }
+    const bounds = windowIndexBounds(data, x0ms, x1ms);
+    if (!bounds) return null;
+    const [lo, hi] = bounds;
 
     let ymin = Infinity;
     let ymax = -Infinity;
@@ -299,8 +519,8 @@
       const ms = parseTime(data.t[i]);
       if (isFinite(x0ms) && ms < x0ms) continue;
       if (isFinite(x1ms) && ms > x1ms) continue;
-      for (const series of metrics) {
-        const v = series[i];
+      for (const name of names) {
+        const v = data.metrics[name]?.[i];
         if (v == null || !isFinite(v)) continue;
         if (v < ymin) ymin = v;
         if (v > ymax) ymax = v;
@@ -402,17 +622,28 @@
   }
 
   function buildFigure(data, highlightId) {
-    const traces = Object.entries(data.metrics || {}).map(([name, y]) => ({
-      type: "scattergl",
-      mode: "lines",
-      name,
-      x: data.t,
-      y,
-      opacity: 0.55,
-      line: { width: 1 },
-      hovertemplate:
-        "<b>%{fullData.name}</b><br>%{x}<br>값=%{y}<extra></extra>",
-    }));
+    // Keep color order stable across toggles (full metric list order).
+    const colorOrder = allMetricNames();
+    const traces = colorOrder
+      .filter((name) => visibleMetrics.has(name))
+      .map((name) => {
+        const colorIdx = Math.max(0, colorOrder.indexOf(name));
+        const color = SERIES_COLORWAY[colorIdx % SERIES_COLORWAY.length];
+        return {
+          type: "scattergl",
+          mode: "lines",
+          name,
+          x: data.t,
+          y: data.metrics[name],
+          opacity: 0.72,
+          line: { width: 1, color },
+          hovertemplate:
+            "<b>%{fullData.name}</b><br>" +
+            "%{x|%Y년 %m월 %d일 %H:%M}<br>" +
+            "값=%{y}<extra></extra>",
+          uid: name,
+        };
+      });
 
     if (showAnomalies) {
       const markers = anomalyMarkerTrace(data.labels, highlightId);
@@ -421,12 +652,15 @@
 
     let x0ms = null;
     let x1ms = null;
-    if (xRange) {
-      x0ms = parseTime(xRange[0]);
-      x1ms = parseTime(xRange[1]);
-    } else if (data.t?.length) {
-      x0ms = parseTime(data.t[0]);
-      x1ms = parseTime(data.t[data.t.length - 1]);
+    // Always pin X explicitly. With zero metric traces, Plotly autorange invents
+    // a wrong date window that then "sticks" after metrics are re-selected.
+    let xAxisRange = xRange;
+    if (!xAxisRange && data.t?.length) {
+      xAxisRange = [data.t[0], data.t[data.t.length - 1]];
+    }
+    if (xAxisRange) {
+      x0ms = parseTime(xAxisRange[0]);
+      x1ms = parseTime(xAxisRange[1]);
     }
     let yr = yRange;
     if (yAuto) {
@@ -438,9 +672,11 @@
       type: "date",
       rangeslider: { visible: false },
       fixedrange: false,
-      autorange: !xRange,
+      autorange: false,
+      showspikes: false,
+      hoverformat: "%Y년 %m월 %d일 %H:%M",
     };
-    if (xRange) xaxis.range = xRange;
+    if (xAxisRange) xaxis.range = xAxisRange;
 
     const yaxis = {
       title: "value",
@@ -459,15 +695,43 @@
       dragmode,
       paper_bgcolor: "rgba(0,0,0,0)",
       plot_bgcolor: "#fffdf8",
+      colorway: SERIES_COLORWAY.slice(),
+      hoverlabel: {
+        bgcolor: "white",
+        font: { size: 11, family: "monospace" },
+        align: "left",
+        namelength: -1,
+      },
       title: {
         text: `${data.display || data.plmn} · labels=${(data.labels || []).length}`,
         font: { size: 14 },
       },
       xaxis,
       yaxis,
-      shapes: showAnomalies
-        ? shapesForLabels(data.labels, highlightId)
-        : [],
+      shapes: (() => {
+        const out = showAnomalies
+          ? shapesForLabels(data.labels, highlightId)
+          : [];
+        const cursorIdx =
+          interactionMode === "inspect" && inspectIndex != null
+            ? inspectIndex
+            : null;
+        if (cursorIdx != null && data.t?.[cursorIdx] != null) {
+          const x = data.t[cursorIdx];
+          out.push({
+            type: "line",
+            xref: "x",
+            yref: "paper",
+            x0: x,
+            x1: x,
+            y0: 0,
+            y1: 1,
+            line: { color: "royalblue", width: 2, dash: "dot" },
+            layer: "above",
+          });
+        }
+        return out;
+      })(),
     };
 
     return { data: traces, layout };
@@ -493,14 +757,194 @@
       post["yaxis.range"] = yr;
       post["yaxis.autorange"] = false;
     }
-    if (xRange) {
-      post["xaxis.range"] = xRange;
+    // Re-pin X after react (empty-trace draws must not leave a bogus autorange).
+    const xr =
+      xRange ||
+      (payload.t?.length
+        ? [payload.t[0], payload.t[payload.t.length - 1]]
+        : null);
+    if (xr) {
+      post["xaxis.range"] = xr;
       post["xaxis.autorange"] = false;
     }
     await Plotly.relayout(graphEl, post);
     suppressRelayout = false;
     bindAnomalyShapeClicks();
+    bindInspectClicks();
+    installPlaceTimeTip();
     scheduleResize();
+  }
+
+  /** Empty-area time tip + royalblue dotted spike (same as labeling app). */
+  function installPlaceTimeTip() {
+    if (!graphEl || _placeTipBound) return;
+    _placeTipBound = true;
+    let raf = null;
+    let lastText = "";
+    let lastSpikeX = null;
+
+    function ensureTip() {
+      let tip = document.getElementById("place-time-tip");
+      if (!tip) {
+        tip = document.createElement("div");
+        tip.id = "place-time-tip";
+        tip.style.cssText = [
+          "position:fixed",
+          "z-index:99999",
+          "pointer-events:none",
+          "display:none",
+          "background:#fff",
+          "color:#444",
+          "padding:6px 8px",
+          "border:1px solid #bbb",
+          "border-radius:2px",
+          "font:11px/1.4 monospace",
+          "white-space:nowrap",
+          "box-shadow:0 1px 3px rgba(0,0,0,.18)",
+        ].join(";");
+        document.body.appendChild(tip);
+      }
+      return tip;
+    }
+
+    function ensureSpike() {
+      let spike = document.getElementById("place-time-spike");
+      if (!spike) {
+        spike = document.createElement("div");
+        spike.id = "place-time-spike";
+        spike.style.cssText = [
+          "position:fixed",
+          "z-index:99998",
+          "pointer-events:none",
+          "display:none",
+          "width:0",
+          "border-left:1px dotted royalblue",
+          "box-sizing:border-box",
+        ].join(";");
+        document.body.appendChild(spike);
+      }
+      return spike;
+    }
+
+    function hideTip() {
+      const tip = document.getElementById("place-time-tip");
+      if (tip) tip.style.display = "none";
+      const spike = document.getElementById("place-time-spike");
+      if (spike) spike.style.display = "none";
+      lastText = "";
+      lastSpikeX = null;
+    }
+
+    function formatHoverTime(ms) {
+      const d = new Date(ms);
+      const pad = (n) => (n < 10 ? "0" : "") + n;
+      return (
+        d.getUTCFullYear() +
+        "년 " +
+        pad(d.getUTCMonth() + 1) +
+        "월 " +
+        pad(d.getUTCDate()) +
+        "일 " +
+        pad(d.getUTCHours()) +
+        ":" +
+        pad(d.getUTCMinutes())
+      );
+    }
+
+    function snapFiveMinMs(ms) {
+      if (!isFinite(ms)) return NaN;
+      const step = 5 * 60 * 1000;
+      return Math.round(ms / step) * step;
+    }
+
+    function nearestSampleMs(ms) {
+      if (!payload?.t?.length || !isFinite(ms)) return NaN;
+      const idx = nearestTimeIndex(ms);
+      if (idx == null) return snapFiveMinMs(ms);
+      return parseTime(payload.t[idx]);
+    }
+
+    graphEl.on("plotly_hover", () => {
+      _placeOnTrace = true;
+      const tip = document.getElementById("place-time-tip");
+      if (tip) tip.style.display = "none";
+      lastText = "";
+    });
+    graphEl.on("plotly_unhover", () => {
+      _placeOnTrace = false;
+    });
+
+    graphEl.addEventListener(
+      "pointermove",
+      (ev) => {
+        if (ev.buttons) {
+          hideTip();
+          return;
+        }
+        const layer =
+          graphEl.querySelector(".nsewdrag") || graphEl;
+        const bb = layer.getBoundingClientRect();
+        if (
+          ev.clientX < bb.left ||
+          ev.clientX > bb.right ||
+          ev.clientY < bb.top ||
+          ev.clientY > bb.bottom
+        ) {
+          hideTip();
+          return;
+        }
+        const ms = clientXToPlotMs(ev.clientX);
+        if (!isFinite(ms)) {
+          hideTip();
+          return;
+        }
+        const snapped = nearestSampleMs(ms);
+        if (!isFinite(snapped)) {
+          hideTip();
+          return;
+        }
+        // spikesnap=cursor: follow pointer. Data-snapped d2p drifts far from the
+        // mouse after zoom (5-min sample spacing becomes many pixels).
+        const left = Math.min(bb.right, Math.max(bb.left, ev.clientX));
+        if (lastSpikeX !== left) {
+          lastSpikeX = left;
+          const spike = ensureSpike();
+          spike.style.left = left + "px";
+          spike.style.top = bb.top + "px";
+          spike.style.height = Math.max(0, bb.height) + "px";
+          spike.style.display = "block";
+        }
+        // On a series, Plotly hoverlabel already shows the time.
+        if (_placeOnTrace) return;
+        const text = formatHoverTime(snapped);
+        if (
+          text === lastText &&
+          document.getElementById("place-time-tip")?.style.display === "block"
+        ) {
+          const tip0 = document.getElementById("place-time-tip");
+          tip0.style.left = ev.clientX + 14 + "px";
+          tip0.style.top = Math.max(8, ev.clientY - 32) + "px";
+          return;
+        }
+        lastText = text;
+        if (raf) cancelAnimationFrame(raf);
+        raf = requestAnimationFrame(() => {
+          const tip = ensureTip();
+          tip.textContent = text;
+          tip.style.display = "block";
+          let tipLeft = ev.clientX + 14;
+          let tipTop = ev.clientY - 32;
+          const w = tip.offsetWidth || 160;
+          if (tipLeft + w > window.innerWidth - 8) tipLeft = ev.clientX - w - 14;
+          if (tipTop < 8) tipTop = ev.clientY + 18;
+          tip.style.left = tipLeft + "px";
+          tip.style.top = tipTop + "px";
+        });
+      },
+      true
+    );
+
+    graphEl.addEventListener("pointerleave", hideTip, true);
   }
 
   /** Map a mouse click in the plot area to data-X (ms). */
@@ -653,7 +1097,39 @@
     });
   }
 
+  function dataXBoundsMs() {
+    if (!payload?.t?.length) return null;
+    const tmin = parseTime(payload.t[0]);
+    const tmax = parseTime(payload.t[payload.t.length - 1]);
+    if (!(tmax > tmin)) return null;
+    return [tmin, tmax];
+  }
+
+  /** Keep [a,b] inside the dataset; preserve width when possible. */
+  function clampTimeWindow(a, b) {
+    const bounds = dataXBoundsMs();
+    if (!bounds || !(b > a)) return [a, b];
+    const [tmin, tmax] = bounds;
+    let na = a;
+    let nb = b;
+    const width = nb - na;
+    const full = tmax - tmin;
+    if (width >= full) return [tmin, tmax];
+    if (na < tmin) {
+      na = tmin;
+      nb = tmin + width;
+    }
+    if (nb > tmax) {
+      nb = tmax;
+      na = tmax - width;
+    }
+    if (na < tmin) na = tmin;
+    return [na, nb];
+  }
+
   function applyXYRelayout(x0ms, x1ms) {
+    if (!(x1ms > x0ms)) return;
+    [x0ms, x1ms] = clampTimeWindow(x0ms, x1ms);
     if (!(x1ms > x0ms)) return;
     xRange = [msToPlotNaive(x0ms), msToPlotNaive(x1ms)];
     const update = {
@@ -670,6 +1146,8 @@
     suppressRelayout = true;
     Plotly.relayout(graphEl, update).then(() => {
       suppressRelayout = false;
+      renderMetricFilter();
+      refreshHoverPanel();
     });
   }
 
@@ -706,6 +1184,7 @@
       const half = (tight * Math.pow(1 / 0.7, 7)) / 2;
       lo = mid - half;
       hi = mid + half;
+      [lo, hi] = clampTimeWindow(lo, hi);
       xRange = [msToPlotNaive(lo), msToPlotNaive(hi)];
       yAuto = true;
       syncYAutoButton();
@@ -728,6 +1207,8 @@
         }
         scheduleResize();
       }
+      renderMetricFilter();
+      refreshHoverPanel();
     } else if (item) {
       setStatus(`선택: ${item.line || item.id}`);
       await draw();
@@ -744,13 +1225,87 @@
     setStatus(on ? "anomaly 표시" : "anomaly 숨김");
   }
 
-  function setDragMode(mode) {
-    dragmode = mode;
-    document.getElementById("btn-pan").classList.toggle("active", mode === "pan");
-    document.getElementById("btn-zoom").classList.toggle("active", mode === "zoom");
-    if (graphEl && graphEl.data) {
-      Plotly.relayout(graphEl, { dragmode: mode });
+  function setInteractionMode(mode) {
+    interactionMode = mode;
+    dragmode = mode === "inspect" ? false : mode;
+    document
+      .getElementById("btn-pan")
+      ?.classList.toggle("active", mode === "pan");
+    document
+      .getElementById("btn-zoom")
+      ?.classList.toggle("active", mode === "zoom");
+    document
+      .getElementById("btn-inspect")
+      ?.classList.toggle("active", mode === "inspect");
+    if (mode !== "inspect") {
+      inspectIndex = null;
+    } else if (inspectIndex == null && hoverIndex != null) {
+      inspectIndex = hoverIndex;
+    } else if (inspectIndex == null) {
+      inspectIndex = defaultHoverIndex();
     }
+    if (graphEl && graphEl.data) {
+      Plotly.relayout(graphEl, { dragmode: dragmode });
+    }
+    draw().then(() => {
+      refreshHoverPanel(
+        interactionMode === "inspect" ? inspectIndex : hoverIndex
+      );
+      if (mode === "inspect") {
+        setStatus("값 탐색: 클릭 또는 ←/→ · 드래그 이동 없음");
+      }
+    });
+  }
+
+  function selectInspectAtMs(ms) {
+    if (!payload?.t?.length || !isFinite(ms)) return;
+    const idx = nearestTimeIndex(ms);
+    if (idx == null) return;
+    inspectIndex = idx;
+    hoverIndex = idx;
+    refreshHoverPanel(idx);
+    setStatus(`값 탐색: ${payload.t[idx]} · ←/→ 키로 이동`);
+    draw();
+  }
+
+  function stepInspect(delta) {
+    if (interactionMode !== "inspect" || !payload?.t?.length) return;
+    let idx = inspectIndex;
+    if (idx == null) idx = hoverIndex;
+    if (idx == null) idx = defaultHoverIndex();
+    if (idx == null) return;
+    idx = Math.max(0, Math.min(payload.t.length - 1, idx + delta));
+    inspectIndex = idx;
+    hoverIndex = idx;
+    refreshHoverPanel(idx);
+    setStatus(`값 탐색: ${payload.t[idx]} · ←/→ 키로 이동`);
+    draw();
+  }
+
+  function bindInspectClicks() {
+    const layer = graphEl.querySelector(".nsewdrag");
+    if (!layer || layer.__inspectClickBound) return;
+    layer.__inspectClickBound = true;
+    let ptr = null;
+    layer.addEventListener(
+      "pointerdown",
+      (ev) => {
+        ptr = { x: ev.clientX, y: ev.clientY };
+      },
+      { passive: true }
+    );
+    layer.addEventListener("click", (ev) => {
+      if (interactionMode !== "inspect") return;
+      if (ptr && Math.hypot(ev.clientX - ptr.x, ev.clientY - ptr.y) > 10) return;
+      const ms = clientXToPlotMs(ev.clientX);
+      if (!isFinite(ms)) return;
+      selectInspectAtMs(ms);
+    });
+  }
+
+  function setDragMode(mode) {
+    // Back-compat alias used by older callers.
+    setInteractionMode(mode);
   }
 
   function currentXRangeMs() {
@@ -784,6 +1339,8 @@
     yAuto = true;
     syncYAutoButton();
     await draw();
+    renderMetricFilter();
+    refreshHoverPanel();
   }
 
   async function loadPlmn(plmn) {
@@ -792,12 +1349,19 @@
     xRange = null;
     yRange = null;
     yAuto = true;
+    hoverIndex = null;
+    inspectIndex = null;
     syncYAutoButton();
     const res = await fetch(`${DATA_BASE}/${plmn}.json`, { cache: "no-store" });
     if (!res.ok) throw new Error(`failed to load ${plmn}`);
     payload = await res.json();
+    visibleMetrics = new Set(allMetricNames());
+    hoverIndex = defaultHoverIndex();
+    if (interactionMode === "inspect") inspectIndex = hoverIndex;
+    renderMetricFilter();
     renderLabelList();
     await draw();
+    refreshHoverPanel(hoverIndex);
     setStatus(
       `${payload.start_kst} ~ ${payload.end_kst} · ${payload.n_points} pts · ${
         (payload.labels || []).length
@@ -817,12 +1381,22 @@
     if (ev["xaxis.autorange"] === true) {
       xRange = null;
       if (yAuto) yRange = null;
-      draw();
+      draw().then(() => {
+        renderMetricFilter();
+        refreshHoverPanel();
+      });
       return;
     }
 
     const cur = currentXRangeMs();
     if (!cur || !(cur[1] > cur[0])) return;
+    // Reject bogus windows from empty-plot autorange (no overlap with data).
+    if (payload.t?.length) {
+      const d0 = parseTime(payload.t[0]);
+      const d1 = parseTime(payload.t[payload.t.length - 1]);
+      if (!(d1 > d0)) return;
+      if (cur[1] < d0 || cur[0] > d1) return;
+    }
     applyXYRelayout(cur[0], cur[1]);
   }
 
@@ -841,8 +1415,12 @@
       return;
     }
     selectEl.addEventListener("change", () => loadPlmn(selectEl.value));
-    document.getElementById("btn-pan").onclick = () => setDragMode("pan");
-    document.getElementById("btn-zoom").onclick = () => setDragMode("zoom");
+    document.getElementById("btn-pan").onclick = () =>
+      setInteractionMode("pan");
+    document.getElementById("btn-zoom").onclick = () =>
+      setInteractionMode("zoom");
+    document.getElementById("btn-inspect").onclick = () =>
+      setInteractionMode("inspect");
     document.getElementById("btn-zoom-in").onclick = () => scaleX(0.7, false);
     document.getElementById("btn-zoom-out").onclick = () => scaleX(1 / 0.7, false);
     document.getElementById("btn-reset").onclick = () => resetX();
@@ -853,7 +1431,24 @@
       setShowAnomalies(true);
     document.getElementById("btn-mode-plain").onclick = () =>
       setShowAnomalies(false);
+    document.getElementById("btn-metrics-all").onclick = () =>
+      selectAllMetrics();
+    document.getElementById("btn-metrics-none").onclick = () =>
+      clearAllMetrics();
     syncYAutoButton();
+
+    window.addEventListener("keydown", (ev) => {
+      if (interactionMode !== "inspect") return;
+      const tag = (ev.target && ev.target.tagName) || "";
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (ev.key === "ArrowLeft") {
+        ev.preventDefault();
+        stepInspect(-1);
+      } else if (ev.key === "ArrowRight") {
+        ev.preventDefault();
+        stepInspect(1);
+      }
+    });
 
     window.addEventListener("resize", scheduleResize);
     window.addEventListener("orientationchange", () => {
@@ -871,9 +1466,27 @@
     await loadPlmn(catalog[0].plmn);
 
     graphEl.on("plotly_relayout", onRelayout);
-    graphEl.on("plotly_click", (ev) => {
-      if (!showAnomalies || !payload || !ev?.points?.length) return;
+    graphEl.on("plotly_hover", (ev) => {
+      if (!ev?.points?.length) return;
       const pt = ev.points[0];
+      if (pt.data?.name === "__anomaly_markers") return;
+      // In 값 탐색, the locked cursor drives the panel until ←/→ or click.
+      if (interactionMode === "inspect" && inspectIndex != null) return;
+      const ms = parseTime(pt.x);
+      const idx = nearestTimeIndex(ms);
+      if (idx == null) return;
+      refreshHoverPanel(idx);
+    });
+    graphEl.on("plotly_click", (ev) => {
+      if (!payload || !ev?.points?.length) return;
+      const pt = ev.points[0];
+      if (interactionMode === "inspect") {
+        if (pt.data?.name === "__anomaly_markers") return;
+        const ms = parseTime(pt.x);
+        if (isFinite(ms)) selectInspectAtMs(ms);
+        return;
+      }
+      if (!showAnomalies) return;
       const id = pt.customdata;
       if (id == null || pt.data?.name !== "__anomaly_markers") return;
       if (Date.now() < _tapLockUntil) return;

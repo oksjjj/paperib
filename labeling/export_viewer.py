@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""Export top-ranked PLMNs as static JSON for the GitHub Pages viewer.
+"""Export labeled PLMNs as static JSON for the GitHub Pages viewer.
+
+Default: only PLMNs with non-empty ``labeling/labels/*_labels.json``,
+at full (or near-full) time resolution — intended for ≤ ~20 labeled operators.
 
 Usage:
-    python labeling/export_viewer.py              # top 100 by M971 rank
-    python labeling/export_viewer.py --top-n 50
+    python labeling/export_viewer.py                 # labeled only (default)
+    python labeling/export_viewer.py --all-labeled   # same as default
+    python labeling/export_viewer.py --top-n 50      # M971 rank top-N instead
     python labeling/export_viewer.py --plmn P0480 P0193
-    python labeling/export_viewer.py --all-labeled
 
 Output goes to docs/viewer/data/ (committed for Pages).
 Source labeling/labels/*.json can stay gitignored; labels are embedded when present.
@@ -47,12 +50,11 @@ set_mapping_enabled(False)
 
 OUT_DIR = os.path.join(os.path.dirname(ROOT), "docs", "viewer", "data")
 VIEWER_DIR = os.path.join(os.path.dirname(ROOT), "docs", "viewer")
-# Keep Pages / git size manageable for ~100 PLMNs.
-# Uniform min/max sampling only — mixing full-rate label windows with a coarse
-# background made zoom/pan look like high- and low-res charts glued together.
-DEFAULT_MAX_POINTS = 5000
-DEFAULT_MAX_METRICS = 30
-DEFAULT_TOP_N = 100
+# Labeled-only set is small (≤~20): keep full 5-min cadence when possible.
+DEFAULT_MAX_POINTS = 100_000
+DEFAULT_MAX_METRICS = 46
+# Soft guidance — Pages stays light if labeling stays within this.
+DEFAULT_LABELED_SOFT_CAP = 20
 # Kept for CLI compatibility; densify-around-labels is disabled (see export_one).
 DEFAULT_LABEL_PAD_MIN = 12 * 60
 
@@ -137,13 +139,22 @@ def _merge_sample_indices(
     *,
     max_points: int,
 ) -> np.ndarray:
-    """Uniform min/max downsample over the full series."""
+    """Downsample: regular stride (keeps ~5-min cadence) + min/max extrema."""
     n = int(envelope.shape[0])
     if n <= max_points:
         return np.arange(n)
-    idx = minmax_indices(envelope, max_points)
-    idx = np.unique(np.concatenate([idx, [0, n - 1]]))
-    return idx[idx < n]
+    # Prefer a regular time grid so zoom/inspect step near the native cadence.
+    n_reg = max(2, int(max_points * 0.65))
+    step = max(1, int(np.ceil(n / n_reg)))
+    reg = np.arange(0, n, step, dtype=np.int64)
+    n_mm = max(2, max_points - int(reg.shape[0]))
+    mm = minmax_indices(envelope, n_mm)
+    idx = np.unique(np.concatenate([reg, mm, [0, n - 1]]))
+    idx = idx[idx < n]
+    if idx.shape[0] > max_points:
+        pick = np.linspace(0, idx.shape[0] - 1, max_points).astype(np.int64)
+        idx = idx[pick]
+    return idx
 
 
 def export_one(
@@ -211,13 +222,13 @@ def main() -> None:
     parser.add_argument(
         "--top-n",
         type=int,
-        default=DEFAULT_TOP_N,
-        help=f"Export top N by M971 rank (default {DEFAULT_TOP_N})",
+        default=None,
+        help="Export top N by M971 rank (overrides labeled-only default)",
     )
     parser.add_argument(
         "--all-labeled",
         action="store_true",
-        help="Export every PLMN that currently has labels (instead of top-N)",
+        help="Export every PLMN that currently has labels (default if --top-n/--plmn omitted)",
     )
     parser.add_argument("--max-points", type=int, default=DEFAULT_MAX_POINTS)
     parser.add_argument("--max-metrics", type=int, default=DEFAULT_MAX_METRICS)
@@ -231,13 +242,25 @@ def main() -> None:
 
     if args.plmn:
         plmns = list(args.plmn)
-    elif args.all_labeled:
-        plmns = _labeled_plmns()
-    else:
+    elif args.top_n is not None:
         plmns = _top_plmns(args.top_n)
+    else:
+        # Default + --all-labeled: only operators with saved anomaly labels.
+        plmns = _labeled_plmns()
+        if len(plmns) > DEFAULT_LABELED_SOFT_CAP:
+            print(
+                f"warning: {len(plmns)} labeled PLMNs "
+                f"(soft cap {DEFAULT_LABELED_SOFT_CAP}); "
+                f"Pages/git size may grow — keep labeling ≤{DEFAULT_LABELED_SOFT_CAP} "
+                f"or pass --max-points lower",
+                flush=True,
+            )
 
     if not plmns:
-        raise SystemExit("No PLMNs to export.")
+        raise SystemExit(
+            "No PLMNs to export. Add labels under labeling/labels/, "
+            "or pass --top-n / --plmn."
+        )
 
     os.makedirs(OUT_DIR, exist_ok=True)
     _purge_stale_exports(plmns)

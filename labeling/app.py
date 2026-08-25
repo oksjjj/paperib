@@ -38,6 +38,7 @@ from tool import (  # noqa: E402
     build_figure,
     clamp_time_range,
     data_time_bounds,
+    display_metric,
     display_plmn,
     format_kst,
     freeze_shape_editing,
@@ -48,7 +49,6 @@ from tool import (  # noqa: E402
     load_plmn,
     metric_columns,
     parse_time,
-    pending_anchor_annotation,
     pending_anchor_shape,
     pending_range_fill_shape,
     ranked_hover_html,
@@ -80,6 +80,9 @@ state: dict = {
     "plmn": None,
     "rank": None,
     "metrics": [],
+    # Currently drawn series (subset of metrics). Empty = draw nothing.
+    "visible_metrics": [],
+    "metric_rev": 0,
     "zoom_start": None,
     "zoom_end": None,
     "y_min": None,
@@ -133,6 +136,55 @@ def _empty_figure():
 def _label_options():
     items = (state["doc"] or {}).get("labels", [])
     return [{"label": label_line(x), "value": x["id"]} for x in items]
+
+
+def _plot_metrics() -> list[str]:
+    """Metrics currently drawn on the graph (stable column order)."""
+    all_m = state.get("metrics") or []
+    visible = state.get("visible_metrics")
+    if visible is None:
+        return list(all_m)
+    selected = set(visible)
+    return [m for m in all_m if m in selected]
+
+
+def _metrics_by_view_sum() -> list[str]:
+    """All metrics ranked by sum over the current on-screen time window (desc)."""
+    df = state.get("df")
+    metrics = list(state.get("metrics") or [])
+    if df is None or not len(df) or not metrics:
+        return metrics
+    start_ts = state.get("zoom_start")
+    end_ts = state.get("zoom_end")
+    view = df
+    if start_ts is not None and end_ts is not None:
+        mask = (df["time"] >= start_ts) & (df["time"] <= end_ts)
+        if bool(mask.any()):
+            view = df.loc[mask]
+    try:
+        sums = view[metrics].sum(numeric_only=True)
+    except Exception:
+        return metrics
+
+    def sort_key(m: str) -> float:
+        try:
+            v = float(sums.get(m, 0) or 0)
+        except (TypeError, ValueError):
+            return 0.0
+        if v != v:  # NaN
+            return 0.0
+        return v
+
+    return sorted(metrics, key=sort_key, reverse=True)
+
+
+def _metric_filter_ui() -> tuple[list[dict], list[str]]:
+    """Checklist options (by on-screen sum desc) + checked values."""
+    ranked = _metrics_by_view_sum()
+    opts = [{"label": display_metric(m), "value": m} for m in ranked]
+    selected = set(state.get("visible_metrics") or [])
+    vals = [m for m in ranked if m in selected]
+    return opts, vals
 
 
 def _label_by_id(label_id):
@@ -217,11 +269,13 @@ def _build_graph(click_mode: str):
     fig = build_figure(
         state["df"],
         state["doc"],
-        metrics=state["metrics"],
+        metrics=_plot_metrics(),
+        color_metrics=state.get("metrics") or None,
         start=state["zoom_start"],
         end=state["zoom_end"],
         title=title,
         hover_values=False,
+        max_metrics=-1,
         max_points=MAX_POINTS,
         show_labels=bool(state.get("show_anomalies", True)),
     )
@@ -239,11 +293,15 @@ def _build_graph(click_mode: str):
     if prev is not None and not _same_time_window(rendered, prev):
         state["zoom_rendered_prev"] = prev
     state["zoom_rendered"] = rendered
-    # Keep layout.uirevision stable (PLMN). Bumping it every zoom remounts every
-    # Scattergl trace and freezes the UI; datarevision handles data refresh.
+    # Keep layout.uirevision stable across zoom (PLMN + metric_rev). Bumping
+    # metric_rev on filter changes forces Scattergl to drop removed series —
+    # otherwise Plotly.react can leave ghost WebGL traces after 전체 해제.
+    metric_rev = int(state.get("metric_rev") or 0)
     fig.update_layout(
-        datarevision=f"{fig.layout.datarevision}:{state['fig_gen']}",
-        uirevision=str(state.get("plmn") or "labeling"),
+        datarevision=(
+            f"{fig.layout.datarevision}:{state['fig_gen']}:m{metric_rev}"
+        ),
+        uirevision=f"{state.get('plmn') or 'labeling'}:m{metric_rev}",
     )
     # Label fills must never be draggable as a whole — only edge lines in edit mode.
     freeze_shape_editing(fig)
@@ -251,10 +309,10 @@ def _build_graph(click_mode: str):
     fig.update_layout(
         dragmode=(
             False
-            if click_mode in ("edit_range", "label_range", "label_point")
+            if click_mode in ("edit_range", "label_range", "label_point", "inspect")
             else (
                 "pan"
-                if click_mode in ("pan", "pan_keep_y", "inspect")
+                if click_mode in ("pan", "pan_keep_y")
                 else "zoom"
             )
         )
@@ -287,7 +345,7 @@ def _build_graph(click_mode: str):
         fig.add_shape(**pending_range_fill_shape(state["label_range_anchor"]))
         state["_pending_fill_index"] = before_shapes
         fig.add_shape(**pending_anchor_shape(state["label_range_anchor"]))
-        fig.add_annotation(**pending_anchor_annotation(state["label_range_anchor"]))
+        # No on-plot tooltip annotation — it covers the series while placing.
     else:
         state["_pending_fill_index"] = None
 
@@ -327,8 +385,20 @@ def _build_graph(click_mode: str):
     fig.update_xaxes(
         range=[x0_plot, x1_plot],
         autorange=False,
-        # Spikes look like editable guides; keep them off while adjusting edges.
-        showspikes=(click_mode != "edit_range"),
+        # Custom place-time spike draws one dotted line; keep Plotly spikes off
+        # in tip modes so zoom/pan/inspect don't show a double vertical.
+        showspikes=(
+            click_mode
+            not in (
+                "edit_range",
+                "label_range",
+                "label_point",
+                "inspect",
+                "pan",
+                "pan_keep_y",
+                "zoom",
+            )
+        ),
     )
     if click_mode == "edit_range":
         fig.update_layout(hovermode=False)
@@ -344,7 +414,15 @@ def _build_graph(click_mode: str):
     if samples is None and state["df"] is not None and len(state["df"]):
         samples = _sample_plot_ms(state["df"])
         state["sample_ms"] = samples
-    if click_mode in ("edit_range", "label_range") and samples:
+    if click_mode in (
+        "edit_range",
+        "label_range",
+        "label_point",
+        "inspect",
+        "pan",
+        "pan_keep_y",
+        "zoom",
+    ) and samples:
         meta["sample_ms"] = samples
     if click_mode == "label_range" and state.get("label_range_anchor") is not None:
         meta["pending_range_start"] = str(
@@ -375,11 +453,27 @@ def _build_graph(click_mode: str):
 
 
 def _snap_to_data_time(ts):
+    """Snap to the nearest sample (data is 5-minute). Works for any Y click."""
     df = state["df"]
     if df is None or not len(df):
         return ts
+    ts = pd.to_datetime(ts, utc=True)
     pos = int((df["time"] - ts).abs().to_numpy().argmin())
     return df.iloc[pos]["time"]
+
+
+def _cancel_pending_range(click_mode: str):
+    """Clear in-progress range placement (Esc / 시작점 취소)."""
+    state["label_range_anchor"] = None
+    return (
+        _build_graph(click_mode),
+        no_update,
+        no_update,
+        "구간 설정 취소",
+        _cancel_style(click_mode),
+        no_update,
+        no_update,
+    )
 
 
 def _place_label_click(ts, click_mode: str, note: str | None):
@@ -424,8 +518,8 @@ def _place_label_click(ts, click_mode: str, note: str | None):
             no_update,
             no_update,
             (
-                f"① 시작(왼쪽): {format_kst(state['label_range_anchor'])} — "
-                "커서를 오른쪽으로 옮긴 뒤 ② 끝점을 클릭하세요"
+                f"① 시작 {format_kst(state['label_range_anchor'])} "
+                "· 오른쪽 끝 클릭 · Esc 취소"
             ),
             _cancel_style(click_mode),
             no_update,
@@ -580,7 +674,7 @@ def _clamp_zoom(start_ts, end_ts):
 
 def _visible_y_bounds() -> tuple[float, float] | None:
     df = state["df"]
-    metrics = state["metrics"]
+    metrics = _plot_metrics()
     if df is None or not len(df) or not metrics:
         return None
     start_ts = state["zoom_start"]
@@ -652,11 +746,33 @@ def _select_value_pos(pos: int):
     pos = max(0, min(int(pos), len(df) - 1))
     state["value_cursor_pos"] = pos
     row = df.iloc[pos]
-    panel = dcc.Markdown(
-        ranked_hover_html(row["time"], row, state["metrics"]),
+    panel = _hover_panel_at_row(row)
+    return row, panel
+
+
+def _hover_panel_at_row(row: pd.Series):
+    """Bottom '이 시점 특성값' panel — only currently visible metrics."""
+    cols = _plot_metrics()
+    if not cols:
+        return html.I("표시 중인 metric이 없습니다. 위에서 metric을 선택하세요.")
+    return dcc.Markdown(
+        ranked_hover_html(row["time"], row, cols),
         dangerously_allow_html=True,
     )
-    return row, panel
+
+
+def _refresh_hover_panel():
+    """Rebuild hover panel for the last hovered / inspected sample, if any."""
+    df = state.get("df")
+    if df is None or not len(df):
+        return no_update
+    pos = state.get("value_cursor_pos")
+    if pos is None:
+        pos = state.get("hover_pos")
+    if pos is None:
+        return no_update
+    pos = max(0, min(int(pos), len(df) - 1))
+    return _hover_panel_at_row(df.iloc[pos])
 
 
 def _pin_y_before_x_change() -> None:
@@ -985,6 +1101,8 @@ def _do_load(plmn: str, click_mode: str):
         plmn=plmn,
         rank=rank,
         metrics=metrics,
+        visible_metrics=list(metrics),
+        metric_rev=int(state.get("metric_rev") or 0) + 1,
         zoom_start=tmin,
         zoom_end=tmax,
         y_min=None,
@@ -1001,6 +1119,7 @@ def _do_load(plmn: str, click_mode: str):
         sample_ms=_sample_plot_ms(df),
     )
     opts = _label_options()
+    m_opts, m_vals = _metric_filter_ui()
     return (
         _build_graph(click_mode),
         opts,
@@ -1009,6 +1128,8 @@ def _do_load(plmn: str, click_mode: str):
         _cancel_style(click_mode),
         html.I("그래프에 커서를 올리면 이 시점의 특성값이 내림차순으로 표시됩니다."),
         plmn,
+        m_opts,
+        m_vals,
     )
 
 
@@ -1017,6 +1138,8 @@ _START_PLMN = plmn_ids[0] if plmn_ids else None
 _START_LABEL_OPTS: list = []
 _START_LABEL_VALUE = None
 _START_FIGURE = None
+_START_METRIC_OPTS: list = []
+_START_METRIC_VALS: list = []
 if _START_PLMN:
     _do_load(_START_PLMN, "zoom")
     _START_FIGURE = _build_graph("zoom")
@@ -1024,6 +1147,7 @@ if _START_PLMN:
     _START_LABEL_VALUE = (
         _START_LABEL_OPTS[0]["value"] if _START_LABEL_OPTS else None
     )
+    _START_METRIC_OPTS, _START_METRIC_VALS = _metric_filter_ui()
 else:
     _START_FIGURE = _empty_figure()
 
@@ -1121,6 +1245,64 @@ app.layout = html.Div(
                 "marginBottom": "4px",
             },
         ),
+        html.Div(
+            [
+                html.Div(
+                    [
+                        html.B("표시 metric", style={"marginRight": "8px"}),
+                        html.Button(
+                            "전체 선택",
+                            id="btn-metrics-all",
+                            n_clicks=0,
+                            title="모든 metric을 다시 표시",
+                        ),
+                        html.Button(
+                            "전체 해제",
+                            id="btn-metrics-none",
+                            n_clicks=0,
+                            title="모든 metric 숨김 (Y축 스케일 유지)",
+                        ),
+                        html.Span(
+                            "체크 해제하면 그래프에서 숨깁니다",
+                            style={
+                                "fontSize": "12px",
+                                "color": "#666",
+                                "marginLeft": "8px",
+                            },
+                        ),
+                    ],
+                    style={
+                        "display": "flex",
+                        "alignItems": "center",
+                        "flexWrap": "wrap",
+                        "gap": "4px",
+                        "marginBottom": "4px",
+                    },
+                ),
+                dcc.Checklist(
+                    id="metric-filter",
+                    options=_START_METRIC_OPTS,
+                    value=_START_METRIC_VALS,
+                    inline=True,
+                    labelStyle={
+                        "display": "inline-block",
+                        "marginRight": "12px",
+                        "marginBottom": "2px",
+                        "fontSize": "12px",
+                        "whiteSpace": "nowrap",
+                    },
+                    style={"lineHeight": "1.6"},
+                ),
+            ],
+            style={
+                "border": "1px solid #e0e0e0",
+                "padding": "6px 8px",
+                "marginBottom": "4px",
+                "maxHeight": "110px",
+                "overflowY": "auto",
+                "background": "#fafafa",
+            },
+        ),
         dcc.Graph(
             id="graph",
             figure=_START_FIGURE,
@@ -1214,6 +1396,8 @@ app.layout = html.Div(
     Output("btn-cancel-range", "style"),
     Output("hover-panel", "children"),
     Output("dd-plmn", "value"),
+    Output("metric-filter", "options"),
+    Output("metric-filter", "value"),
     Input("dd-plmn", "value"),
     Input("btn-prev", "n_clicks"),
     Input("btn-next", "n_clicks"),
@@ -1238,6 +1422,63 @@ app.layout = html.Div(
     prevent_initial_call=False,
 )
 def _main(
+    plmn,
+    n_prev,
+    n_next,
+    _mode_change,
+    anomaly_overlay_mode,
+    n_cancel,
+    n_save,
+    n_reload,
+    n_delete,
+    n_clear_selection,
+    n_zoom_sel,
+    selected_label,
+    key_event,
+    edge_drag,
+    shape_click,
+    click_data,
+    hover_data,
+    relayout,
+    note,
+    click_mode,
+    view_range,
+):
+    result = _main_body(
+        plmn,
+        n_prev,
+        n_next,
+        _mode_change,
+        anomaly_overlay_mode,
+        n_cancel,
+        n_save,
+        n_reload,
+        n_delete,
+        n_clear_selection,
+        n_zoom_sel,
+        selected_label,
+        key_event,
+        edge_drag,
+        shape_click,
+        click_data,
+        hover_data,
+        relayout,
+        note,
+        click_mode,
+        view_range,
+    )
+    if result is None:
+        return (no_update,) * 9
+    out = list(result) if len(result) == 9 else list(result) + [no_update, no_update]
+    # Keep filter order in sync with the current on-screen window whenever the
+    # figure is rebuilt (zoom / pan / PLMN load already set options explicitly).
+    if out[0] is not no_update and state.get("df") is not None and out[7] is no_update:
+        m_opts, _ = _metric_filter_ui()
+        out[7] = m_opts
+    return tuple(out)
+
+
+def _main_body(
     plmn,
     n_prev,
     n_next,
@@ -1304,6 +1545,7 @@ def _main(
         if already:
             # Startup prefetch already loaded rank #1 — keep it, clear status.
             opts = _label_options()
+            m_opts, m_vals = _metric_filter_ui()
             return (
                 _build_graph(click_mode),
                 opts,
@@ -1312,6 +1554,8 @@ def _main(
                 _cancel_style(click_mode),
                 no_update,
                 no_update,
+                m_opts,
+                m_vals,
             )
         return _do_load(target, click_mode)
 
@@ -1355,8 +1599,7 @@ def _main(
             status = "그래프에서 시점을 클릭하거나 마우스를 올린 뒤 ←/→ 키로 값을 탐색하세요."
         elif click_mode == "label_range":
             status = (
-                "① 왼쪽(시작) 클릭 → 커서를 오른쪽으로 옮기면 빨간 미리보기 → "
-                "② 끝점 클릭으로 완료"
+                "① 왼쪽 시작 클릭 → ② 오른쪽 끝 클릭 · Esc 취소"
             )
         elif click_mode == "label_point":
             status = "그래프에서 시점을 한 번 클릭하면 점(세로선) 라벨이 추가됩니다."
@@ -1365,12 +1608,13 @@ def _main(
                 "빨간 경계선 위에서만 ↔ 커서가 됩니다. 선을 좌우로 드래그하세요. "
                 "화면 이동은 ◀ ▶ 를 사용하세요."
                 if state.get("highlight_id")
-                else "편집할 라벨을 목록에서 선택한 뒤 좌·우 경계선을 드래그하세요."
+                else (
+                    "분홍 구간(또는 목록)을 클릭해 선택한 뒤 "
+                    "좌·우 경계선을 드래그하세요."
+                )
             )
         else:
-            status = (
-                "① 왼쪽(시작) 클릭 → 오른쪽으로 이동 후 ② 끝점 클릭"
-            )
+            status = "① 왼쪽 시작 클릭 → ② 오른쪽 끝 클릭 · Esc 취소"
         return (
             _build_graph(click_mode),
             _label_options(),
@@ -1394,16 +1638,7 @@ def _main(
         )
 
     if prop == "btn-cancel-range.n_clicks":
-        state["label_range_anchor"] = None
-        return (
-            _build_graph(click_mode),
-            no_update,
-            no_update,
-            "구간 시작점 취소됨",
-            _cancel_style(click_mode),
-            no_update,
-            no_update,
-        )
+        return _cancel_pending_range(click_mode)
 
     if prop == "btn-save.n_clicks":
         path = save_labels(state["doc"])
@@ -1499,6 +1734,10 @@ def _main(
         )
 
     if prop == "key-event.data":
+        if key_event and key_event.get("key") == "Escape":
+            if state.get("label_range_anchor") is not None:
+                return _cancel_pending_range(click_mode)
+            return (no_update,) * 7
         if click_mode != "inspect" or not key_event:
             return (no_update,) * 7
         current = state.get("value_cursor_pos")
@@ -1529,14 +1768,13 @@ def _main(
         nearest = (state["df"]["time"] - ts).abs().idxmin()
         state["hover_pos"] = int(state["df"].index.get_loc(nearest))
         row = state["df"].loc[nearest]
-        html_str = ranked_hover_html(row["time"], row, state["metrics"])
         return (
             no_update,
             no_update,
             no_update,
             no_update,
             no_update,
-            dcc.Markdown(html_str, dangerously_allow_html=True),
+            _hover_panel_at_row(row),
             no_update,
         )
 
@@ -1560,8 +1798,6 @@ def _main(
         # Click on plot area (shapes themselves are not clickable).
         if state.get("df") is None or state.get("doc") is None:
             return (no_update,) * 7
-        if click_mode == "edit_range":
-            return (no_update,) * 7
         try:
             ts = parse_time(shape_click["x"])
         except (ValueError, TypeError):
@@ -1575,7 +1811,7 @@ def _main(
         ):
             return (no_update,) * 7
         # shape-click + clickData often fire for one gesture — drop the second.
-        if click_mode in ("label_range", "label_point") and now - last_at < 0.35:
+        if click_mode in ("label_range", "label_point", "edit_range", "inspect") and now - last_at < 0.35:
             return (no_update,) * 7
         state["_last_click"] = (ts, now)
 
@@ -1584,13 +1820,42 @@ def _main(
             placed = _place_label_click(ts, click_mode, note)
             return placed if placed is not None else (no_update,) * 7
 
+        # 값 탐색: empty-area clicks snap to the nearest sample (same as line clicks).
+        if click_mode == "inspect":
+            pos = int((state["df"]["time"] - ts).abs().to_numpy().argmin())
+            selected = _select_value_pos(pos)
+            if selected is None:
+                return (no_update,) * 7
+            row, panel = selected
+            return (
+                _build_graph(click_mode),
+                no_update,
+                no_update,
+                f"값 탐색: {format_kst(row['time'])} · ←/→ 키로 이동",
+                _cancel_style(click_mode),
+                panel,
+                no_update,
+            )
+
         hit = _label_at_time(ts)
         if hit is None:
             return (no_update,) * 7
         state["label_range_anchor"] = None
-        _zoom_to_label_item(hit)
         kind = (hit.get("kind") or "point").lower()
         tag = "점" if kind == "point" else "구간"
+        # Edit mode: select in place (no auto-zoom) so edge drag stays usable.
+        if click_mode == "edit_range":
+            state["highlight_id"] = hit["id"]
+            return (
+                _build_graph(click_mode),
+                _label_options(),
+                hit["id"],
+                f"선택 ({tag}): {label_line(hit)} — 빨간 경계를 드래그하세요.",
+                _cancel_style(click_mode),
+                no_update,
+                no_update,
+            )
+        _zoom_to_label_item(hit)
         return (
             _build_graph(click_mode),
             _label_options(),
@@ -1621,13 +1886,16 @@ def _main(
             and now - last_at < 0.35
         ):
             return (no_update,) * 7
-        if click_mode in ("label_range", "label_point") and now - last_at < 0.35:
+        if click_mode in ("label_range", "label_point", "inspect") and now - last_at < 0.35:
             return (no_update,) * 7
         state["_last_click"] = (ts, now)
 
         if click_mode == "inspect":
             pos = int((state["df"]["time"] - ts).abs().to_numpy().argmin())
-            row, panel = _select_value_pos(pos)
+            selected = _select_value_pos(pos)
+            if selected is None:
+                return (no_update,) * 7
+            row, panel = selected
             return (
                 _build_graph(click_mode),
                 no_update,
@@ -1647,9 +1915,20 @@ def _main(
         hit = _label_at_time(ts)
         if hit is not None:
             state["label_range_anchor"] = None
-            _zoom_to_label_item(hit)
             kind = (hit.get("kind") or "point").lower()
             tag = "점" if kind == "point" else "구간"
+            if click_mode == "edit_range":
+                state["highlight_id"] = hit["id"]
+                return (
+                    _build_graph(click_mode),
+                    _label_options(),
+                    hit["id"],
+                    f"선택 ({tag}): {label_line(hit)} — 빨간 경계를 드래그하세요.",
+                    _cancel_style(click_mode),
+                    no_update,
+                    no_update,
+                )
+            _zoom_to_label_item(hit)
             return (
                 _build_graph(click_mode),
                 _label_options(),
@@ -1664,6 +1943,66 @@ def _main(
 
     return (no_update,) * 7
 
+
+@app.callback(
+    Output("graph", "figure", allow_duplicate=True),
+    Output("metric-filter", "value", allow_duplicate=True),
+    Output("status", "children", allow_duplicate=True),
+    Output("hover-panel", "children", allow_duplicate=True),
+    Input("metric-filter", "value"),
+    Input("btn-metrics-all", "n_clicks"),
+    Input("btn-metrics-none", "n_clicks"),
+    State("click-mode", "value"),
+    prevent_initial_call=True,
+)
+def _metric_filter_changed(selected, _n_all, _n_none, click_mode):
+    """Toggle drawn metrics. 전체 선택 → Y 자동; 전체 해제 → Y 유지."""
+    if state.get("df") is None:
+        return no_update, no_update, no_update, no_update
+    all_m = list(state.get("metrics") or [])
+    if not all_m:
+        return no_update, no_update, no_update, no_update
+    tid = getattr(callback_context, "triggered_id", None)
+    click_mode = click_mode or "zoom"
+
+    def _bump_metric_rev() -> None:
+        state["metric_rev"] = int(state.get("metric_rev") or 0) + 1
+
+    if tid == "btn-metrics-all":
+        state["visible_metrics"] = list(all_m)
+        _bump_metric_rev()
+        _reset_y()
+        return (
+            _build_graph(click_mode),
+            list(all_m),
+            f"metric 전체 선택 ({len(all_m)})",
+            _refresh_hover_panel(),
+        )
+    if tid == "btn-metrics-none":
+        # Keep the pre-clear Y scale so the empty plot doesn't jump.
+        _pin_y_before_x_change()
+        state["y_gen"] = int(state.get("y_gen") or 0) + 1
+        state["visible_metrics"] = []
+        _bump_metric_rev()
+        return (
+            _build_graph(click_mode),
+            [],
+            "metric 전체 해제 (Y축 유지)",
+            _refresh_hover_panel(),
+        )
+    selected_set = set(selected or [])
+    new_vis = [m for m in all_m if m in selected_set]
+    if new_vis == list(state.get("visible_metrics") or []):
+        return no_update, no_update, no_update, no_update
+    state["visible_metrics"] = new_vis
+    _bump_metric_rev()
+    _reset_y()
+    return (
+        _build_graph(click_mode),
+        no_update,
+        f"표시 metric {len(new_vis)}/{len(all_m)}",
+        _refresh_hover_panel(),
+    )
 
 
 @app.callback(
@@ -1784,15 +2123,17 @@ def _drag_axis_nav(relayout, click_mode):
 
 @app.callback(
     Output("graph", "figure", allow_duplicate=True),
+    Output("metric-filter", "options", allow_duplicate=True),
     Input("rebuild-trigger", "data"),
     State("click-mode", "value"),
     prevent_initial_call=True,
 )
 def _rebuild_after_axis(trigger, click_mode):
     if not trigger or state["df"] is None:
-        return no_update
+        return no_update, no_update
     _arm_zoom_guard(3.0)
-    return _build_graph(click_mode or "zoom")
+    m_opts, _ = _metric_filter_ui()
+    return _build_graph(click_mode or "zoom"), m_opts
 
 
 app.clientside_callback(
@@ -1889,10 +2230,25 @@ app.clientside_callback(
     function(mode) {
         window.__valueInspectMode = mode === 'inspect';
         window.__editRangeMode = mode === 'edit_range';
+        window.__labelPlaceMode = (mode === 'label_range' || mode === 'label_point');
+        // Empty-area time tip (+ spike): place / edit / inspect / pan / zoom.
+        window.__showPlaceTimeTip = (
+            mode === 'label_range' || mode === 'label_point'
+            || mode === 'edit_range' || mode === 'inspect'
+            || mode === 'pan' || mode === 'pan_keep_y'
+            || mode === 'zoom'
+        );
+        if (!window.__showPlaceTimeTip) {
+            var placeTip = document.getElementById('place-time-tip');
+            if (placeTip) placeTip.style.display = 'none';
+            var placeSpike = document.getElementById('place-time-spike');
+            if (placeSpike) placeSpike.style.display = 'none';
+        }
         window.__desiredDragmode = (
-            (mode === 'edit_range' || mode === 'label_range' || mode === 'label_point')
+            (mode === 'edit_range' || mode === 'label_range'
+                || mode === 'label_point' || mode === 'inspect')
                 ? false
-                : (mode === 'pan' || mode === 'pan_keep_y' || mode === 'inspect')
+                : (mode === 'pan' || mode === 'pan_keep_y')
                     ? 'pan' : 'zoom'
         );
 
@@ -1908,9 +2264,18 @@ app.clientside_callback(
 
         if (!window.__valueInspectKeyHandler) {
             window.__valueInspectKeyHandler = function(event) {
+                if (isTextEntry(event.target)) return;
+                // Esc cancels in-progress range placement (any mode).
+                if (event.key === 'Escape') {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    window.dash_clientside.set_props('key-event', {
+                        data: {key: 'Escape', sequence: Date.now()}
+                    });
+                    return;
+                }
                 if (!window.__valueInspectMode) return;
                 if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
-                if (isTextEntry(event.target)) return;
                 event.preventDefault();
                 event.stopPropagation();
                 window.dash_clientside.set_props('key-event', {
@@ -2247,6 +2612,7 @@ app.clientside_callback(
                     if (!hit) return;
                     ev.preventDefault();
                     ev.stopPropagation();
+                    window.__edgeDragging = true;
                     var x0 = snapToSample(xFromClientX(ev.clientX));
                     dragState = {index: hit.index, name: hit.name, lastX: x0};
                     setEdgeHit(true);
@@ -2258,6 +2624,9 @@ app.clientside_callback(
                     var name = dragState.name;
                     var idx = dragState.index;
                     dragState = null;
+                    window.__edgeDragging = false;
+                    // Edge drag ends with a click; don't treat it as fill select.
+                    window.__skipNextShapeClick = true;
                     hideTip();
                     var shapes = (gd.layout && gd.layout.shapes) || [];
                     var shape = shapes[idx];
@@ -2351,13 +2720,13 @@ app.clientside_callback(
             };
         }
 
-        // Click near anomaly divider lines → zoom (shapes themselves are not clickable).
+        // Click anywhere in the plot → time (snap on server). Used for range/point
+        // placement and anomaly divider select — not only on series traces.
         if (!window.__installAnomalyShapeClick) {
             window.__installAnomalyShapeClick = function(gd) {
                 if (!gd) return;
-                var drag = gd.querySelector('.nsewdrag');
-                if (!drag || drag.__anomalyZoomBound) return;
-                drag.__anomalyZoomBound = true;
+                if (gd.__anomalyZoomBound) return;
+                gd.__anomalyZoomBound = true;
                 var ptr = null;
 
                 function formatPlotX(val) {
@@ -2375,7 +2744,6 @@ app.clientside_callback(
                     var dt = (val instanceof Date) ? val : new Date(val);
                     if (isNaN(dt.getTime())) return null;
                     var p = function(n) { return (n < 10 ? '0' : '') + n; };
-                    // Plot uses KST-naive wall clock encoded as UTC components.
                     return dt.getUTCFullYear() + '-' + p(dt.getUTCMonth() + 1) + '-'
                         + p(dt.getUTCDate()) + ' ' + p(dt.getUTCHours()) + ':'
                         + p(dt.getUTCMinutes()) + ':' + p(dt.getUTCSeconds());
@@ -2385,7 +2753,7 @@ app.clientside_callback(
                     var full = gd._fullLayout;
                     var xa = full && full.xaxis;
                     if (!xa) return null;
-                    var layer = gd.querySelector('.nsewdrag');
+                    var layer = gd.querySelector('.nsewdrag') || gd.querySelector('.plotly');
                     if (!layer) return null;
                     var bb = layer.getBoundingClientRect();
                     var px = clientX - bb.left;
@@ -2399,19 +2767,34 @@ app.clientside_callback(
                     return null;
                 }
 
-                drag.addEventListener('pointerdown', function(ev) {
-                    ptr = {x: ev.clientX, y: ev.clientY};
-                });
-                drag.addEventListener('click', function(ev) {
-                    if (window.__editRangeMode) return;
-                    if (ptr && Math.hypot(ev.clientX - ptr.x, ev.clientY - ptr.y) > 8) return;
+                function emitPlotX(ev) {
+                    // After edge drag, the trailing click must not re-select.
+                    if (window.__skipNextShapeClick) {
+                        window.__skipNextShapeClick = false;
+                        return;
+                    }
+                    if (window.__edgeDragging) return;
+                    if (ptr && Math.hypot(ev.clientX - ptr.x, ev.clientY - ptr.y) > 10) return;
+                    var layer = gd.querySelector('.nsewdrag') || gd;
+                    var bb = layer.getBoundingClientRect();
+                    // Any Y inside the plot area counts (vertical time column / 5-min tick).
+                    if (ev.clientY < bb.top || ev.clientY > bb.bottom) return;
+                    if (ev.clientX < bb.left || ev.clientX > bb.right) return;
                     var xVal = clientXToPlotX(ev.clientX);
                     if (xVal == null) return;
                     if (!window.dash_clientside || !window.dash_clientside.set_props) return;
+                    // edit_range: select pink fill / empty area at this time.
+                    // label_range / label_point: place. Other modes: select+zoom.
                     window.dash_clientside.set_props('shape-click-event', {
                         data: {x: xVal, sequence: Date.now()}
                     });
-                });
+                }
+
+                gd.addEventListener('pointerdown', function(ev) {
+                    ptr = {x: ev.clientX, y: ev.clientY};
+                }, true);
+                // Capture on the whole plot so empty space (not only traces) works.
+                gd.addEventListener('click', emitPlotX, true);
             };
 
             window.__installPendingRangePreview = function(gd) {
@@ -2510,6 +2893,245 @@ app.clientside_callback(
                     });
                 });
             };
+
+            // Empty-area time tooltip + royalblue dotted spike (match Plotly spikes).
+            // Match Plotly hoverlabel look + %{x|%Y년 %m월 %d일 %H:%M} + 5-min snap.
+            window.__installPlaceTimeTip = function(gd) {
+                if (!gd || gd.__placeTimeTipBound) return;
+                gd.__placeTimeTipBound = true;
+                var onTrace = false;
+                var raf = null;
+                var lastText = '';
+                var lastSpikeX = null;
+
+                function ensureTip() {
+                    var tip = document.getElementById('place-time-tip');
+                    if (!tip) {
+                        tip = document.createElement('div');
+                        tip.id = 'place-time-tip';
+                        // Mirror fig.layout.hoverlabel (white / monospace / 11px).
+                        tip.style.cssText = [
+                            'position:fixed',
+                            'z-index:99999',
+                            'pointer-events:none',
+                            'display:none',
+                            'background:#fff',
+                            'color:#444',
+                            'padding:6px 8px',
+                            'border:1px solid #bbb',
+                            'border-radius:2px',
+                            'font:11px/1.4 monospace',
+                            'white-space:nowrap',
+                            'box-shadow:0 1px 3px rgba(0,0,0,.18)'
+                        ].join(';');
+                        document.body.appendChild(tip);
+                    }
+                    return tip;
+                }
+
+                function ensureSpike() {
+                    var spike = document.getElementById('place-time-spike');
+                    if (!spike) {
+                        spike = document.createElement('div');
+                        spike.id = 'place-time-spike';
+                        // Match layout.xaxis spikedash/spikecolor/spikethickness.
+                        spike.style.cssText = [
+                            'position:fixed',
+                            'z-index:99998',
+                            'pointer-events:none',
+                            'display:none',
+                            'width:0',
+                            'border-left:1px dotted royalblue',
+                            'box-sizing:border-box'
+                        ].join(';');
+                        document.body.appendChild(spike);
+                    }
+                    return spike;
+                }
+
+                function hideTip() {
+                    var tip = document.getElementById('place-time-tip');
+                    if (tip) tip.style.display = 'none';
+                    var spike = document.getElementById('place-time-spike');
+                    if (spike) spike.style.display = 'none';
+                    lastText = '';
+                    lastSpikeX = null;
+                }
+
+                function formatPlotNaive(ms) {
+                    var d = new Date(ms);
+                    function pad(n) { return (n < 10 ? '0' : '') + n; }
+                    return d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1) + '-'
+                        + pad(d.getUTCDate()) + ' ' + pad(d.getUTCHours()) + ':'
+                        + pad(d.getUTCMinutes()) + ':' + pad(d.getUTCSeconds());
+                }
+
+                function toAxisPx(xa, xVal) {
+                    try {
+                        var px = xa.d2p(xVal);
+                        if (px == null || isNaN(px)) px = xa.d2p(new Date(xVal));
+                        return px;
+                    } catch (err) {
+                        try { return xa.d2p(new Date(xVal)); } catch (err2) { return NaN; }
+                    }
+                }
+
+                function showSpikeAtMs(ms, plotRect) {
+                    var xa = gd._fullLayout && gd._fullLayout.xaxis;
+                    if (!xa || !plotRect) return;
+                    var px = toAxisPx(xa, formatPlotNaive(ms));
+                    if (px == null || isNaN(px)) return;
+                    var left = plotRect.left + px;
+                    if (left < plotRect.left || left > plotRect.right) return;
+                    if (lastSpikeX === left) {
+                        var spike0 = ensureSpike();
+                        if (spike0.style.display === 'block') return;
+                    }
+                    lastSpikeX = left;
+                    var spike = ensureSpike();
+                    spike.style.left = left + 'px';
+                    spike.style.top = plotRect.top + 'px';
+                    spike.style.height = Math.max(0, plotRect.height) + 'px';
+                    spike.style.display = 'block';
+                }
+
+                function nearestSampleMs(ms, samples) {
+                    if (!samples || !samples.length || !isFinite(ms)) return NaN;
+                    var lo = 0, hi = samples.length - 1;
+                    if (ms <= samples[0]) return samples[0];
+                    if (ms >= samples[hi]) return samples[hi];
+                    while (lo <= hi) {
+                        var mid = (lo + hi) >> 1;
+                        if (samples[mid] < ms) lo = mid + 1;
+                        else hi = mid - 1;
+                    }
+                    var a = samples[Math.max(0, lo - 1)];
+                    var b = samples[Math.min(samples.length - 1, lo)];
+                    return (Math.abs(ms - a) <= Math.abs(ms - b)) ? a : b;
+                }
+
+                // Fallback when sample_ms missing: round to 5-minute wall clock.
+                function snapFiveMinMs(ms) {
+                    if (!isFinite(ms)) return NaN;
+                    var step = 5 * 60 * 1000;
+                    return Math.round(ms / step) * step;
+                }
+
+                function plotXToMs(xVal) {
+                    if (xVal == null) return NaN;
+                    if (typeof xVal === 'number' && isFinite(xVal)) return xVal;
+                    if (xVal instanceof Date) {
+                        return Date.UTC(
+                            xVal.getUTCFullYear(), xVal.getUTCMonth(), xVal.getUTCDate(),
+                            xVal.getUTCHours(), xVal.getUTCMinutes(), xVal.getUTCSeconds()
+                        );
+                    }
+                    var s = String(xVal).replace('T', ' ');
+                    var y = +s.slice(0, 4), mo = +s.slice(5, 7), d = +s.slice(8, 10);
+                    var h = +s.slice(11, 13), mi = +s.slice(14, 16), sec = +s.slice(17, 19) || 0;
+                    if (!(y > 0) || !(mo > 0)) return NaN;
+                    return Date.UTC(y, mo - 1, d, h, mi, sec);
+                }
+
+                // Same as Plotly hoverformat / hovertemplate %{x|%Y년 %m월 %d일 %H:%M}
+                function formatHoverTime(ms) {
+                    var d = new Date(ms);
+                    function pad(n) { return (n < 10 ? '0' : '') + n; }
+                    return d.getUTCFullYear() + '년 ' + pad(d.getUTCMonth() + 1) + '월 '
+                        + pad(d.getUTCDate()) + '일 ' + pad(d.getUTCHours()) + ':'
+                        + pad(d.getUTCMinutes());
+                }
+
+                function clientXToPlotX(clientX) {
+                    var full = gd._fullLayout;
+                    var xa = full && full.xaxis;
+                    if (!xa) return null;
+                    var layer = gd.querySelector('.nsewdrag') || gd;
+                    var bb = layer.getBoundingClientRect();
+                    var px = clientX - bb.left;
+                    if (px < 0 || px > bb.width) return null;
+                    try {
+                        if (typeof xa.p2d === 'function') return xa.p2d(px);
+                        if (typeof xa.p2c === 'function' && typeof xa.c2d === 'function') {
+                            return xa.c2d(xa.p2c(px));
+                        }
+                    } catch (err) {}
+                    return null;
+                }
+
+                gd.on('plotly_hover', function() {
+                    onTrace = true;
+                    // Hide tip text only — keep the single custom spike.
+                    var tip = document.getElementById('place-time-tip');
+                    if (tip) tip.style.display = 'none';
+                    lastText = '';
+                });
+                gd.on('plotly_unhover', function() {
+                    onTrace = false;
+                });
+
+                gd.addEventListener('pointermove', function(ev) {
+                    if (!window.__showPlaceTimeTip) {
+                        hideTip();
+                        return;
+                    }
+                    // Hide while dragging (box-zoom / pan / edge edit).
+                    if (ev.buttons || window.__edgeDragging) {
+                        hideTip();
+                        return;
+                    }
+                    var layer = gd.querySelector('.nsewdrag') || gd;
+                    var bb = layer.getBoundingClientRect();
+                    if (ev.clientX < bb.left || ev.clientX > bb.right ||
+                        ev.clientY < bb.top || ev.clientY > bb.bottom) {
+                        hideTip();
+                        return;
+                    }
+                    var xVal = clientXToPlotX(ev.clientX);
+                    if (xVal == null) {
+                        hideTip();
+                        return;
+                    }
+                    var ms = plotXToMs(xVal);
+                    var meta = (gd.layout && gd.layout.meta) || {};
+                    var snapped = nearestSampleMs(ms, meta.sample_ms);
+                    if (!isFinite(snapped)) snapped = snapFiveMinMs(ms);
+                    if (!isFinite(snapped)) {
+                        hideTip();
+                        return;
+                    }
+                    // Always one custom spike at the snapped time (Plotly spikes off).
+                    showSpikeAtMs(snapped, bb);
+                    // On a series, Plotly hoverlabel already shows the time.
+                    if (onTrace && !window.__editRangeMode) {
+                        return;
+                    }
+                    var text = formatHoverTime(snapped);
+                    if (text === lastText && document.getElementById('place-time-tip')
+                        && document.getElementById('place-time-tip').style.display === 'block') {
+                        var tip0 = document.getElementById('place-time-tip');
+                        tip0.style.left = (ev.clientX + 14) + 'px';
+                        tip0.style.top = Math.max(8, ev.clientY - 32) + 'px';
+                        return;
+                    }
+                    lastText = text;
+                    if (raf) cancelAnimationFrame(raf);
+                    raf = requestAnimationFrame(function() {
+                        var tip = ensureTip();
+                        tip.textContent = text;
+                        tip.style.display = 'block';
+                        var left = ev.clientX + 14;
+                        var top = ev.clientY - 32;
+                        var w = tip.offsetWidth || 160;
+                        if (left + w > window.innerWidth - 8) left = ev.clientX - w - 14;
+                        if (top < 8) top = ev.clientY + 18;
+                        tip.style.left = left + 'px';
+                        tip.style.top = top + 'px';
+                    });
+                }, true);
+
+                gd.addEventListener('pointerleave', hideTip, true);
+            };
         }
 
         setTimeout(function() {
@@ -2522,6 +3144,9 @@ app.clientside_callback(
             window.__installAnomalyShapeClick(gd);
             if (window.__installPendingRangePreview) {
                 window.__installPendingRangePreview(gd);
+            }
+            if (window.__installPlaceTimeTip) {
+                window.__installPlaceTimeTip(gd);
             }
             var drag = gd.querySelector('.nsewdrag');
             if (drag && !window.__editRangeMode) {

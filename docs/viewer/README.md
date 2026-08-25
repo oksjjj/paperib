@@ -1,19 +1,22 @@
 # Anomaly Label Viewer (GitHub Pages)
 
-M971 순위 **상위 100개** 사업자 시계열을 정적 페이지로 보여 줍니다.  
-라벨이 있는 사업자는 anomaly 목록·하이라이트도 함께 표시합니다.
+**라벨이 있는 사업자만** 정적 페이지로 보여 줍니다 (권장 ≤ 20개).  
+시계열은 기본 **전체 5분 해상도**에 가깝게 export합니다.
 
-- 이동 / 박스 줌 / 줌인·줌아웃 / 전체 (X 변경 시 Y 자동)
+- 이동 / 박스 줌 / **값 탐색**(클릭·←→, 드래그 이동 없음) / 줌인·줌아웃 / 전체
 - Y+ / Y- / Y 자동 (세로축 확대·축소·자동 맞춤)
+- **표시 metric** 체크리스트 (해제 시 숨김 · 전체 선택/해제 · 화면 합계 내림차순 · 개별 변경 시 Y 자동 · 전체 해제 시 Y 유지)
+- 이 시점 특성값 패널 (표시 중인 metric만, 초기부터 표시)
+- 빈 영역 시간 툴팁 + 파란 수직 점선
 - 선 hover 시 메트릭 이름·값
 - anomaly 목록 클릭 시 강조 + 구간 이동
-- export 시 시계열은 **균일 min/max 다운샘플** (줌·이동 시 해상도가 섞여 보이지 않도록)
+- 라벨링 앱과 같은 mid-tone 선 색
 - anomaly 구간/점은 shape 오버레이로 표시 (라벨 JSON 임베드)
 
 ## 로컬에서 보기
 
 ```bash
-# 상위 100개 PLMN JSON 생성
+# 라벨 있는 PLMN만 (기본) · 고해상도
 .venv/bin/python labeling/export_viewer.py
 
 # 정적 서버 (docs/viewer 기준)
@@ -24,9 +27,9 @@ cd docs/viewer && ../../.venv/bin/python -m http.server 8765
 옵션:
 
 ```bash
-.venv/bin/python labeling/export_viewer.py --top-n 50
-.venv/bin/python labeling/export_viewer.py --all-labeled
+.venv/bin/python labeling/export_viewer.py --top-n 50      # 순위 상위 N (다운샘플 필요할 수 있음)
 .venv/bin/python labeling/export_viewer.py --plmn P0480 P0193
+.venv/bin/python labeling/export_viewer.py --max-points 5000  # 용량 줄이기
 ```
 
 ## GitHub Pages 설정

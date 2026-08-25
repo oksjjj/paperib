@@ -134,6 +134,133 @@ h1 {
   font-size: 0.85rem;
 }
 
+.metric-filter {
+  margin-bottom: 10px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px 12px 8px;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.metric-filter-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.metric-filter-head strong {
+  font-size: 0.9rem;
+}
+
+.metric-filter-head button {
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  border-radius: 8px;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 0.82rem;
+}
+
+.hint-inline {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.metric-filter-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  line-height: 1.55;
+}
+
+.metric-filter-list label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.78rem;
+  white-space: nowrap;
+  cursor: pointer;
+  color: var(--ink);
+}
+
+.metric-filter-list input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.hover-panel-wrap {
+  margin-top: 14px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px 14px 10px;
+}
+
+.hover-panel-wrap h2 {
+  margin: 0 0 4px;
+  font-size: 1.05rem;
+}
+
+.hover-panel {
+  height: 200px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px;
+  font-size: 0.82rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: #fff;
+}
+
+.hover-panel em {
+  color: var(--muted);
+  font-style: italic;
+  font-family: inherit;
+}
+
+.hover-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0;
+}
+
+.hover-cell {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 3px 6px;
+  min-width: 0;
+}
+
+.hover-cell .rank {
+  min-width: 22px;
+  flex: 0 0 auto;
+  color: #888;
+}
+
+.hover-cell .name {
+  flex: 1 1 auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hover-cell .val {
+  font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
+}
+
+@media (max-width: 720px) {
+  .hover-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 #graph {
   width: 100%;
   height: min(56dvh, 480px);
