@@ -1,5 +1,6 @@
 .venv/
-data/
+# Raw PLMN CSV/parquet at repo root only (not docs/viewer/data).
+/data/
 mapping/
 graph/
 analysis/
@@ -7,6 +8,7 @@ results/
 cache/
 labeling/__pycache__/
 labeling/cache/
+# Source labels stay local; public subset is docs/viewer/data/ (via export_viewer.py).
 labeling/labels/*_labels.json
 
 metric_mapping.txt

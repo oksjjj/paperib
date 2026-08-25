@@ -34,8 +34,13 @@ cd docs/viewer && ../../.venv/bin/python -m http.server 8765
 4. 몇 분 후:
    - `https://<user>.github.io/<repo>/viewer/`
 
-`docs/viewer/data/` 아래 JSON은 공개용으로보내진 데이터입니다.  
-원본 `labeling/labels/*.json`은 gitignore일 수 있으니, Pages에 올릴 내용은 `export_viewer.py`로 다시 생성해 커밋하세요.
+`docs/viewer/data/` 아래 JSON은 공개용으로보내진 데이터이며 **git에 포함**합니다.  
+원본 `labeling/labels/*.json`은 gitignore입니다. 라벨을 바꾼 뒤 Pages에 반영하려면:
+
+```bash
+.venv/bin/python labeling/export_viewer.py
+git add docs/viewer/data && git commit && git push
+```
 
 메트릭·PLMN **mapping은 적용하지 않습니다**(마스킹 ID만 공개).
 
