@@ -15,7 +15,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
+import time
 
 import numpy as np
 import pandas as pd
@@ -43,11 +45,36 @@ from tool import (  # noqa: E402
 set_mapping_enabled(False)
 
 OUT_DIR = os.path.join(os.path.dirname(ROOT), "docs", "viewer", "data")
+VIEWER_DIR = os.path.join(os.path.dirname(ROOT), "docs", "viewer")
 # Background min/max budget; label windows are kept at full sample rate.
 DEFAULT_MAX_POINTS = 12000
 DEFAULT_MAX_METRICS = 30
 # Full-resolution keep window around each label (minutes each side).
 DEFAULT_LABEL_PAD_MIN = 12 * 60
+
+
+def stamp_viewer_assets(build_id: str | None = None) -> str:
+    """Bump ?v= on app.js / style.css so browsers and GH CDN fetch fresh assets."""
+    build_id = build_id or str(int(time.time()))
+    index_html = os.path.join(VIEWER_DIR, "index.html")
+    if not os.path.isfile(index_html):
+        return build_id
+    text = open(index_html, encoding="utf-8").read()
+    text2 = re.sub(
+        r'(href="style\.css)(?:\?v=[^"]*)?(")',
+        rf"\1?v={build_id}\2",
+        text,
+    )
+    text2 = re.sub(
+        r'(src="app\.js)(?:\?v=[^"]*)?(")',
+        rf"\1?v={build_id}\2",
+        text2,
+    )
+    if text2 != text:
+        with open(index_html, "w", encoding="utf-8") as f:
+            f.write(text2)
+        print(f"stamped viewer assets ?v={build_id}", flush=True)
+    return build_id
 
 
 def _round_series(values: np.ndarray) -> list[float | None]:
@@ -279,9 +306,15 @@ def main() -> None:
         )
 
     index_path = os.path.join(OUT_DIR, "index.json")
+    build_id = stamp_viewer_assets()
     with open(index_path, "w", encoding="utf-8") as f:
-        json.dump({"plmns": index}, f, ensure_ascii=False, indent=2)
-    print(f"wrote {index_path} ({len(index)} PLMNs)")
+        json.dump(
+            {"build": build_id, "plmns": index},
+            f,
+            ensure_ascii=False,
+            indent=2,
+        )
+    print(f"wrote {index_path} ({len(index)} PLMNs, build={build_id})")
 
 
 if __name__ == "__main__":

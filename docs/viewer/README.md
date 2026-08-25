@@ -39,9 +39,11 @@ cd docs/viewer && ../../.venv/bin/python -m http.server 8765
 
 ```bash
 .venv/bin/python labeling/export_viewer.py
-git add docs/viewer/data && git commit && git push
+git add docs/viewer && git commit && git push
 ```
 
+`export_viewer.py`가 `app.js`/`style.css`에 `?v=타임스탬프`를 붙여서, 푸시 후 캐시를 지우지 않아도 새 화면이 로드되도록 합니다.  
+JSON 데이터는 `cache: "no-store"`로 가져옵니다.
 메트릭·PLMN **mapping은 적용하지 않습니다**(마스킹 ID만 공개).
 
 사업자 목록은 `labeling/labels/*_labels.json`이 있고 라벨이 1개 이상인 경우만 포함합니다.

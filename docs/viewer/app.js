@@ -455,7 +455,7 @@
     yRange = null;
     yAuto = true;
     syncYAutoButton();
-    const res = await fetch(`${DATA_BASE}/${plmn}.json`);
+    const res = await fetch(`${DATA_BASE}/${plmn}.json`, { cache: "no-store" });
     if (!res.ok) throw new Error(`failed to load ${plmn}`);
     payload = await res.json();
     renderLabelList();
@@ -489,7 +489,7 @@
   }
 
   async function init() {
-    const res = await fetch(`${DATA_BASE}/index.json`);
+    const res = await fetch(`${DATA_BASE}/index.json`, { cache: "no-store" });
     if (!res.ok) {
       setStatus("data/index.json 없음 — export_viewer.py 를 실행하세요.");
       return;
