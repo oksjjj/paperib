@@ -531,13 +531,18 @@ def update_label(doc: dict[str, Any], label_id: str, **fields: Any) -> dict[str,
     return doc
 
 
-def ranked_metric_pairs(row: pd.Series, cols: list[str]) -> list[tuple[str, float]]:
+def ranked_metric_pairs(
+    row: pd.Series, cols: list[str], *, nonzero_only: bool = False
+) -> list[tuple[str, float]]:
     pairs: list[tuple[str, float]] = []
     for col in cols:
         val = row[col]
         if pd.isna(val):
             continue
-        pairs.append((col, float(val)))
+        fval = float(val)
+        if nonzero_only and fval == 0:
+            continue
+        pairs.append((col, fval))
     pairs.sort(key=lambda x: x[1], reverse=True)
     return pairs
 
@@ -560,7 +565,7 @@ def ranked_hover_text(
     sep: str = "<br>",
     top_n: int | None = 12,
 ) -> str:
-    pairs = ranked_metric_pairs(row, cols)
+    pairs = ranked_metric_pairs(row, cols, nonzero_only=True)
     total = len(pairs)
     shown = pairs if top_n is None else pairs[:top_n]
     lines = [f"{display_metric(name)}={format_metric_value(val)}" for name, val in shown]
@@ -571,7 +576,7 @@ def ranked_hover_text(
 
 def ranked_hover_html(ts, row: pd.Series, cols: list[str], *, cols_per_row: int = 4) -> str:
     """Scrollable grid of metric values, largest first, left-to-right then wrap."""
-    pairs = ranked_metric_pairs(row, cols)
+    pairs = ranked_metric_pairs(row, cols, nonzero_only=True)
     items = []
     for i, (name, val) in enumerate(pairs, start=1):
         bg = "#f6f8fa" if ((i - 1) // cols_per_row) % 2 else "#ffffff"

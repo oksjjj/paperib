@@ -52,6 +52,7 @@ from tool import (  # noqa: E402
     pending_anchor_shape,
     pending_range_fill_shape,
     ranked_hover_html,
+    ranked_metric_pairs,
     remove_label,
     save_labels,
     to_plot_time,
@@ -149,7 +150,7 @@ def _plot_metrics() -> list[str]:
 
 
 def _metrics_by_view_sum() -> list[str]:
-    """All metrics ranked by sum over the current on-screen time window (desc)."""
+    """Metrics with a non-zero value in the on-screen window, ranked by sum (desc)."""
     df = state.get("df")
     metrics = list(state.get("metrics") or [])
     if df is None or not len(df) or not metrics:
@@ -175,7 +176,15 @@ def _metrics_by_view_sum() -> list[str]:
             return 0.0
         return v
 
-    return sorted(metrics, key=sort_key, reverse=True)
+    def has_nonzero(m: str) -> bool:
+        try:
+            col = view[m]
+        except KeyError:
+            return False
+        return bool((col.notna() & (col != 0)).any())
+
+    active = [m for m in metrics if has_nonzero(m)]
+    return sorted(active, key=sort_key, reverse=True)
 
 
 def _metric_filter_ui() -> tuple[list[dict], list[str]]:
@@ -751,10 +760,13 @@ def _select_value_pos(pos: int):
 
 
 def _hover_panel_at_row(row: pd.Series):
-    """Bottom '이 시점 특성값' panel — only currently visible metrics."""
+    """Bottom '이 시점 특성값' panel — visible metrics with non-zero values only."""
     cols = _plot_metrics()
     if not cols:
         return html.I("표시 중인 metric이 없습니다. 위에서 metric을 선택하세요.")
+    pairs = ranked_metric_pairs(row, cols, nonzero_only=True)
+    if not pairs:
+        return html.I("이 시점에 0이 아닌 특성값이 없습니다.")
     return dcc.Markdown(
         ranked_hover_html(row["time"], row, cols),
         dangerously_allow_html=True,
@@ -1969,13 +1981,14 @@ def _metric_filter_changed(selected, _n_all, _n_none, click_mode):
         state["metric_rev"] = int(state.get("metric_rev") or 0) + 1
 
     if tid == "btn-metrics-all":
-        state["visible_metrics"] = list(all_m)
+        ranked = _metrics_by_view_sum()
+        state["visible_metrics"] = list(ranked)
         _bump_metric_rev()
         _reset_y()
         return (
             _build_graph(click_mode),
-            list(all_m),
-            f"metric 전체 선택 ({len(all_m)})",
+            list(ranked),
+            f"metric 전체 선택 ({len(ranked)})",
             _refresh_hover_panel(),
         )
     if tid == "btn-metrics-none":

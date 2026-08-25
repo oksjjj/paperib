@@ -7,13 +7,13 @@
   <meta http-equiv="Pragma" content="no-cache" />
   <title>Anomaly Label Viewer</title>
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
-  <link rel="stylesheet" href="style.css?v=1787684058" />
+  <link rel="stylesheet" href="style.css?v=1787696961" />
 </head>
 <body>
   <header class="top">
     <div>
       <h1>Anomaly Label Viewer</h1>
-      <p class="sub">라벨 있는 사업자 · metric 필터 · 이동 / 줌 / 값 탐색 · 라벨 목록</p>
+      <p class="sub">라벨 있는 사업자 · metric 필터 · 줌 / 이동 / 값 탐색 · 라벨 목록</p>
     </div>
     <div class="top-controls">
       <label class="plmn-pick">
@@ -28,8 +28,8 @@
   </header>
 
   <section class="toolbar">
-    <button type="button" id="btn-pan" class="active" title="드래그로 이동">이동</button>
-    <button type="button" id="btn-zoom" title="드래그로 구간 확대">줌</button>
+    <button type="button" id="btn-zoom" class="active" title="드래그로 구간 확대">줌</button>
+    <button type="button" id="btn-pan" title="드래그로 이동">이동</button>
     <button type="button" id="btn-inspect" title="클릭·←→로 시점 값 탐색 (드래그 이동 없음)">값 탐색</button>
     <button type="button" id="btn-zoom-in" title="시간축 확대">줌인</button>
     <button type="button" id="btn-zoom-out" title="시간축 축소">줌아웃</button>
@@ -74,6 +74,6 @@
     Plotly.js 정적 뷰어 · <code>python labeling/export_viewer.py</code> 로 data/ 갱신
   </footer>
 
-  <script src="app.js?v=1787684058"></script>
+  <script src="app.js?v=1787696961"></script>
 </body>
 </html>

@@ -34,8 +34,8 @@
   let payload = null;
   let selectedId = null;
   /** pan | zoom | inspect */
-  let interactionMode = "pan";
-  let dragmode = "pan";
+  let interactionMode = "zoom";
+  let dragmode = "zoom";
   let xRange = null;
   let yRange = null;
   let yAuto = true;
@@ -89,7 +89,7 @@
     return [lo, hi];
   }
 
-  /** Metrics ranked by sum over the current on-screen time window (desc). */
+  /** Metrics with a non-zero value in the on-screen window, ranked by sum (desc). */
   function metricsByViewSum() {
     const names = allMetricNames();
     if (!payload?.t?.length || !names.length) return names;
@@ -104,16 +104,20 @@
     const scored = names.map((name) => {
       const series = payload.metrics[name] || [];
       let sum = 0;
+      let hasNonzero = false;
       for (let i = lo0; i <= hi0; i++) {
         const ms = parseTime(payload.t[i]);
         if (ms < x0ms || ms > x1ms) continue;
         const v = series[i];
-        if (v != null && isFinite(v)) sum += v;
+        if (v != null && isFinite(v)) {
+          if (v !== 0) hasNonzero = true;
+          sum += v;
+        }
       }
-      return { name, sum };
+      return { name, sum, hasNonzero };
     });
     scored.sort((a, b) => b.sum - a.sum || a.name.localeCompare(b.name));
-    return scored.map((x) => x.name);
+    return scored.filter((x) => x.hasNonzero).map((x) => x.name);
   }
 
   function renderMetricFilter() {
@@ -151,11 +155,11 @@
       syncYAutoButton();
     }
     const n = visibleMetrics.size;
-    const total = allMetricNames().length;
+    const active = metricsByViewSum().length;
     setStatus(
       keepY && n === 0
         ? "metric 전체 해제 (Y축 유지)"
-        : `표시 metric ${n}/${total}`
+        : `표시 metric ${n}/${active}`
     );
     renderMetricFilter();
     refreshHoverPanel();
@@ -163,7 +167,7 @@
   }
 
   function selectAllMetrics() {
-    visibleMetrics = new Set(allMetricNames());
+    visibleMetrics = new Set(metricsByViewSum());
     onVisibleMetricsChanged({ keepY: false });
   }
 
@@ -239,9 +243,15 @@
     const pairs = names
       .map((name) => {
         const v = payload.metrics[name]?.[index];
-        return { name, val: v == null || !isFinite(v) ? -Infinity : Number(v) };
+        return { name, val: v == null || !isFinite(v) ? NaN : Number(v) };
       })
+      .filter((p) => isFinite(p.val) && p.val !== 0)
       .sort((a, b) => b.val - a.val);
+    if (!pairs.length) {
+      hoverPanelEl.innerHTML =
+        "<em>이 시점에 0이 아닌 특성값이 없습니다.</em>";
+      return;
+    }
     const when = payload.t[index] || "";
     const cells = pairs
       .map((p, i) => {
