@@ -136,11 +136,31 @@ h1 {
 
 #graph {
   width: 100%;
-  height: 420px;
+  height: min(56dvh, 480px);
+  min-height: 300px;
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: 12px;
   overflow: hidden;
+  /* Avoid Safari reporting 0-height before first paint settles. */
+  position: relative;
+}
+
+@media (max-width: 720px) {
+  body {
+    padding: 12px 12px 28px;
+  }
+
+  #graph {
+    height: min(48dvh, 420px);
+    min-height: 280px;
+    border-radius: 8px;
+  }
+
+  .plmn-pick select {
+    min-width: 0;
+    width: 100%;
+  }
 }
 
 /* Let plot-area clicks pass through shape overlays to the drag layer. */

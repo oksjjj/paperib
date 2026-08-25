@@ -15,9 +15,42 @@
   let suppressRelayout = false;
   /** Show/hide anomaly overlays on the current chart (does not filter PLMNs). */
   let showAnomalies = true;
+  let _resizeTimer = null;
+  const coarsePointer =
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(pointer: coarse)").matches;
 
   function setStatus(text) {
     statusEl.textContent = text || "";
+  }
+
+  function graphHeightPx() {
+    const h = graphEl?.clientHeight || 0;
+    return Math.max(h > 40 ? h : 420, 260);
+  }
+
+  function resizePlot() {
+    if (!graphEl || !graphEl.data) return;
+    try {
+      Plotly.Plots.resize(graphEl);
+    } catch (_) {
+      /* plot not ready */
+    }
+  }
+
+  /** Mobile Safari often paints Plotly/WebGL before the container settles. */
+  function scheduleResize() {
+    if (_resizeTimer) clearTimeout(_resizeTimer);
+    requestAnimationFrame(() => {
+      resizePlot();
+      requestAnimationFrame(() => {
+        resizePlot();
+        _resizeTimer = setTimeout(() => {
+          resizePlot();
+          _resizeTimer = setTimeout(resizePlot, 200);
+        }, 60);
+      });
+    });
   }
 
   function syncYAutoButton() {
@@ -149,6 +182,86 @@
       }
     }
     return shapes;
+  }
+
+  /** Nearest series envelope Y at plot time (for touchable anomaly markers). */
+  function nearestEnvelopeY(ms) {
+    if (!payload?.t?.length || !isFinite(ms)) return null;
+    const tms = (i) => parseTime(payload.t[i]);
+    let a = 0;
+    let b = payload.t.length - 1;
+    while (a < b) {
+      const m = (a + b) >> 1;
+      if (tms(m) < ms) a = m + 1;
+      else b = m;
+    }
+    let best = a;
+    let bestD = Math.abs(tms(a) - ms);
+    if (a > 0) {
+      const d = Math.abs(tms(a - 1) - ms);
+      if (d < bestD) {
+        best = a - 1;
+        bestD = d;
+      }
+    }
+    if (a + 1 < payload.t.length) {
+      const d = Math.abs(tms(a + 1) - ms);
+      if (d < bestD) best = a + 1;
+    }
+    let ymax = -Infinity;
+    for (const series of Object.values(payload.metrics || {})) {
+      const v = series[best];
+      if (v != null && isFinite(v) && v > ymax) ymax = v;
+    }
+    return isFinite(ymax) ? ymax : null;
+  }
+
+  /** SVG markers (not WebGL) so mobile taps register via plotly_click. */
+  function anomalyMarkerTrace(labels, highlightId) {
+    const xs = [];
+    const ys = [];
+    const colors = [];
+    const sizes = [];
+    const ids = [];
+    const baseSize = coarsePointer ? 18 : 11;
+    for (const item of labels || []) {
+      const kind = (item.kind || "point").toLowerCase();
+      const edges =
+        kind === "point" || item.start === item.end
+          ? [utcIsoToPlotNaive(item.start)]
+          : [
+              utcIsoToPlotNaive(item.start),
+              utcIsoToPlotNaive(item.end || item.start),
+            ];
+      const hi = item.id === highlightId;
+      for (const x of edges) {
+        const y = nearestEnvelopeY(parseTime(x));
+        if (y == null) continue;
+        xs.push(x);
+        ys.push(y);
+        colors.push(hi ? "#c9a227" : "crimson");
+        sizes.push(hi ? baseSize + 4 : baseSize);
+        ids.push(item.id);
+      }
+    }
+    if (!xs.length) return null;
+    return {
+      type: "scatter",
+      mode: "markers",
+      name: "__anomaly_markers",
+      x: xs,
+      y: ys,
+      customdata: ids,
+      marker: {
+        symbol: "x",
+        size: sizes,
+        color: colors,
+        line: { width: coarsePointer ? 2.5 : 2, color: colors },
+      },
+      hoverinfo: "skip",
+      showlegend: false,
+      cliponaxis: false,
+    };
   }
 
   /** Y auto from values visible in [x0ms, x1ms] (no forced zero). */
@@ -300,6 +413,11 @@
         "<b>%{fullData.name}</b><br>%{x}<br>값=%{y}<extra></extra>",
     }));
 
+    if (showAnomalies) {
+      const markers = anomalyMarkerTrace(data.labels, highlightId);
+      if (markers) traces.push(markers);
+    }
+
     let x0ms = null;
     let x1ms = null;
     if (xRange) {
@@ -333,7 +451,7 @@
 
     const layout = {
       margin: { l: 52, r: 20, t: 36, b: 48 },
-      height: 420,
+      height: graphHeightPx(),
       autosize: true,
       showlegend: false,
       hovermode: "closest",
@@ -362,9 +480,26 @@
       responsive: true,
       displayModeBar: true,
       displaylogo: false,
+      // Help mobile: scroll parent, pan plot
+      scrollZoom: false,
     });
+    // scattergl often keeps a stale viewport until an explicit resize + Y pin.
+    const win = visibleXWindowMs();
+    let yr = yRange;
+    if (yAuto && win) yr = syncYFromX(win[0], win[1]);
+    const post = { height: graphHeightPx() };
+    if (yr && yr[1] > yr[0]) {
+      post["yaxis.range"] = yr;
+      post["yaxis.autorange"] = false;
+    }
+    if (xRange) {
+      post["xaxis.range"] = xRange;
+      post["xaxis.autorange"] = false;
+    }
+    await Plotly.relayout(graphEl, post);
     suppressRelayout = false;
     bindAnomalyShapeClicks();
+    scheduleResize();
   }
 
   /** Map a mouse click in the plot area to data-X (ms). */
@@ -394,13 +529,15 @@
     return cur[0] + (px / bb.width) * (cur[1] - cur[0]);
   }
 
-  function labelAtPlotTime(ts) {
+  function labelAtPlotTime(ts, forTouch) {
     if (!isFinite(ts) || !payload?.labels?.length) return null;
     const win = currentXRangeMs();
     const winW =
       win && win[1] > win[0] ? win[1] - win[0] : 24 * 3600 * 1000;
-    // ~8px equivalent as fraction of view; min 15 minutes.
-    const lineTol = Math.max(15 * 60 * 1000, winW * 0.012);
+    // Touch needs a wider hit area than mouse.
+    const frac = forTouch || coarsePointer ? 0.035 : 0.012;
+    const minTol = forTouch || coarsePointer ? 45 * 60 * 1000 : 15 * 60 * 1000;
+    const lineTol = Math.max(minTol, winW * frac);
 
     let best = null;
     let bestScore = Infinity;
@@ -440,23 +577,78 @@
   }
 
   let _ptrDown = null;
+  let _tapLockUntil = 0;
   function bindAnomalyShapeClicks() {
     const layer = graphEl.querySelector(".nsewdrag");
     if (!layer) return;
     if (layer.__anomalyClickBound) return;
     layer.__anomalyClickBound = true;
-    layer.addEventListener("pointerdown", (ev) => {
-      _ptrDown = { x: ev.clientX, y: ev.clientY, t: Date.now() };
-    });
-    layer.addEventListener("click", (ev) => {
-      if (!showAnomalies || !payload) return;
-      if (_ptrDown) {
-        const dist = Math.hypot(ev.clientX - _ptrDown.x, ev.clientY - _ptrDown.y);
-        if (dist > 8) return; // pan/box-drag, not a click
+
+    layer.addEventListener(
+      "pointerdown",
+      (ev) => {
+        _ptrDown = {
+          x: ev.clientX,
+          y: ev.clientY,
+          t: Date.now(),
+          type: ev.pointerType || "mouse",
+        };
+      },
+      { passive: true }
+    );
+
+    const handleTap = (clientX, clientY, pointerType) => {
+      if (!showAnomalies || !payload) return false;
+      if (Date.now() < _tapLockUntil) return false;
+      if (!_ptrDown) return false;
+      const dist = Math.hypot(clientX - _ptrDown.x, clientY - _ptrDown.y);
+      const dt = Date.now() - _ptrDown.t;
+      const isTouch =
+        pointerType === "touch" ||
+        pointerType === "pen" ||
+        _ptrDown.type === "touch" ||
+        _ptrDown.type === "pen" ||
+        coarsePointer;
+      const maxDist = isTouch ? 24 : 8;
+      const maxDt = isTouch ? 500 : 700;
+      if (dist > maxDist || dt > maxDt) return false;
+      const ts = clientXToPlotMs(clientX);
+      const hit = labelAtPlotTime(ts, isTouch);
+      _ptrDown = null;
+      if (!hit) return false;
+      _tapLockUntil = Date.now() + 350;
+      selectLabel(hit.id, true);
+      return true;
+    };
+
+    layer.addEventListener("pointerup", (ev) => {
+      if (handleTap(ev.clientX, ev.clientY, ev.pointerType)) {
+        ev.preventDefault();
+        ev.stopPropagation();
       }
-      const ts = clientXToPlotMs(ev.clientX);
-      const hit = labelAtPlotTime(ts);
-      if (hit) selectLabel(hit.id, true);
+    });
+
+    // Some mobile browsers fire touchend without a reliable click.
+    layer.addEventListener(
+      "touchend",
+      (ev) => {
+        const t = ev.changedTouches?.[0];
+        if (!t) return;
+        if (handleTap(t.clientX, t.clientY, "touch")) {
+          ev.preventDefault();
+          ev.stopPropagation();
+        }
+      },
+      { passive: false }
+    );
+
+    layer.addEventListener("click", (ev) => {
+      if (Date.now() < _tapLockUntil) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        return;
+      }
+      handleTap(ev.clientX, ev.clientY, "mouse");
     });
   }
 
@@ -516,11 +708,31 @@
       xRange = [msToPlotNaive(lo), msToPlotNaive(hi)];
       yAuto = true;
       syncYAutoButton();
+      // Compute Y before draw so both react + post-relayout share the same range.
+      const yr = syncYFromX(lo, hi);
       setStatus(`선택: ${item.line || item.id}`);
+      await draw();
+      if (yr) {
+        suppressRelayout = true;
+        try {
+          await Plotly.relayout(graphEl, {
+            "xaxis.range": xRange,
+            "xaxis.autorange": false,
+            "yaxis.range": yr,
+            "yaxis.autorange": false,
+            height: graphHeightPx(),
+          });
+        } finally {
+          suppressRelayout = false;
+        }
+        scheduleResize();
+      }
     } else if (item) {
       setStatus(`선택: ${item.line || item.id}`);
+      await draw();
+    } else {
+      await draw();
     }
-    await draw();
   }
 
   async function setShowAnomalies(on) {
@@ -642,10 +854,32 @@
       setShowAnomalies(false);
     syncYAutoButton();
 
+    window.addEventListener("resize", scheduleResize);
+    window.addEventListener("orientationchange", () => {
+      // Wait for viewport to settle after rotate, then full redraw.
+      setTimeout(async () => {
+        await draw();
+        scheduleResize();
+      }, 280);
+    });
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener("resize", scheduleResize);
+    }
+
     // First plot must run before graphEl.on (Plotly attaches .on only after plot).
     await loadPlmn(catalog[0].plmn);
 
     graphEl.on("plotly_relayout", onRelayout);
+    graphEl.on("plotly_click", (ev) => {
+      if (!showAnomalies || !payload || !ev?.points?.length) return;
+      const pt = ev.points[0];
+      const id = pt.customdata;
+      if (id == null || pt.data?.name !== "__anomaly_markers") return;
+      if (Date.now() < _tapLockUntil) return;
+      _tapLockUntil = Date.now() + 350;
+      selectLabel(id, true);
+    });
+    scheduleResize();
   }
 
   init().catch((err) => {
