@@ -496,12 +496,15 @@
     }
     const idx = await res.json();
     // Public viewer: only operators that currently have labels.
-    catalog = (idx.plmns || []).filter((row) => (row.n_labels || 0) > 0);
+    catalog = idx.plmns || [];
     selectEl.innerHTML = "";
     for (const row of catalog) {
       const opt = document.createElement("option");
       opt.value = row.plmn;
-      opt.textContent = `#${String(row.rank ?? "").padStart(3, "0")} ${row.display} (${row.n_labels})`;
+      const nLab = row.n_labels || 0;
+      const lab =
+        nLab > 0 ? ` · labels ${nLab}` : "";
+      opt.textContent = `#${String(row.rank ?? "").padStart(3, "0")} ${row.display}${lab}`;
       selectEl.appendChild(opt);
     }
     if (!catalog.length) {

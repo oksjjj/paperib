@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-"""Export labeled PLMNs as static JSON for the GitHub Pages viewer.
+"""Export top-ranked PLMNs as static JSON for the GitHub Pages viewer.
 
 Usage:
-    python labeling/export_viewer.py
+    python labeling/export_viewer.py              # top 100 by M971 rank
+    python labeling/export_viewer.py --top-n 50
     python labeling/export_viewer.py --plmn P0480 P0193
     python labeling/export_viewer.py --all-labeled
 
 Output goes to docs/viewer/data/ (committed for Pages).
-Source labeling/labels/*.json can stay gitignored.
+Source labeling/labels/*.json can stay gitignored; labels are embedded when present.
 """
 
 from __future__ import annotations
@@ -46,9 +47,10 @@ set_mapping_enabled(False)
 
 OUT_DIR = os.path.join(os.path.dirname(ROOT), "docs", "viewer", "data")
 VIEWER_DIR = os.path.join(os.path.dirname(ROOT), "docs", "viewer")
-# Background min/max budget; label windows are kept at full sample rate.
-DEFAULT_MAX_POINTS = 12000
+# Keep Pages / git size manageable for ~100 PLMNs; labels still get dense windows.
+DEFAULT_MAX_POINTS = 2500
 DEFAULT_MAX_METRICS = 30
+DEFAULT_TOP_N = 100
 # Full-resolution keep window around each label (minutes each side).
 DEFAULT_LABEL_PAD_MIN = 12 * 60
 
@@ -87,6 +89,11 @@ def _round_series(values: np.ndarray) -> list[float | None]:
     return out
 
 
+def _top_plmns(top_n: int) -> list[str]:
+    rank = load_or_build_ranking(top_n=None)
+    return [str(p) for p in rank["PLMN"].tolist()[: int(top_n)]]
+
+
 def _labeled_plmns() -> list[str]:
     """PLMNs that currently have a non-empty ``*_labels.json`` on disk."""
     if not os.path.isdir(LABEL_DIR):
@@ -110,7 +117,7 @@ def _labeled_plmns() -> list[str]:
 
 
 def _purge_stale_exports(keep_plmns: list[str]) -> None:
-    """Remove viewer JSON for PLMNs that no longer have labels."""
+    """Remove viewer JSON not in the current export set."""
     if not os.path.isdir(OUT_DIR):
         return
     keep = {f"{p}.json" for p in keep_plmns}
@@ -155,10 +162,8 @@ def _merge_sample_indices(
 
     dense = np.unique(dense.astype(int))
     dense = dense[(dense >= 0) & (dense < n)]
-    # Budget for background after reserving dense points.
-    bg_budget = max(max_points, len(dense) + 2000)
+    bg_budget = max(max_points, len(dense) + min(2000, max_points))
     if len(dense) >= bg_budget:
-        # Still add ends + a light envelope so overview isn't empty.
         bg = minmax_indices(envelope, min(2000, max_points))
         idx = np.unique(np.concatenate([dense, bg, [0, n - 1]]))
         return idx[idx < n]
@@ -236,9 +241,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--plmn", nargs="*", default=None, help="PLMN ids to export")
     parser.add_argument(
+        "--top-n",
+        type=int,
+        default=DEFAULT_TOP_N,
+        help=f"Export top N by M971 rank (default {DEFAULT_TOP_N})",
+    )
+    parser.add_argument(
         "--all-labeled",
         action="store_true",
-        help="Export every PLMN that currently has labels",
+        help="Export every PLMN that currently has labels (instead of top-N)",
     )
     parser.add_argument("--max-points", type=int, default=DEFAULT_MAX_POINTS)
     parser.add_argument("--max-metrics", type=int, default=DEFAULT_MAX_METRICS)
@@ -252,37 +263,29 @@ def main() -> None:
 
     if args.plmn:
         plmns = list(args.plmn)
-    else:
+    elif args.all_labeled:
         plmns = _labeled_plmns()
-        if not args.all_labeled and not args.plmn:
-            # Default: all labeled
-            pass
+    else:
+        plmns = _top_plmns(args.top_n)
 
     if not plmns:
-        raise SystemExit("No PLMNs to export (add labels or pass --plmn).")
-
-    # Only operators with a non-empty label file belong on the public viewer.
-    kept = []
-    for p in plmns:
-        if load_labels(p).get("labels"):
-            kept.append(p)
-        else:
-            print(f"skip {p} (no label file / empty labels)", flush=True)
-    plmns = kept
-    if not plmns:
-        raise SystemExit("No PLMNs with label files to export.")
+        raise SystemExit("No PLMNs to export.")
 
     os.makedirs(OUT_DIR, exist_ok=True)
     _purge_stale_exports(plmns)
     index = []
-    for plmn in plmns:
-        print(f"export {plmn} ...", flush=True)
-        payload = export_one(
-            plmn,
-            max_points=args.max_points,
-            max_metrics=args.max_metrics,
-            label_pad_min=args.label_pad_min,
-        )
+    for i, plmn in enumerate(plmns, 1):
+        print(f"[{i}/{len(plmns)}] export {plmn} ...", flush=True)
+        try:
+            payload = export_one(
+                plmn,
+                max_points=args.max_points,
+                max_metrics=args.max_metrics,
+                label_pad_min=args.label_pad_min,
+            )
+        except Exception as exc:
+            print(f"  !! skip {plmn}: {exc}", flush=True)
+            continue
         path = os.path.join(OUT_DIR, f"{plmn}.json")
         with open(path, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, separators=(",", ":"))
@@ -305,16 +308,25 @@ def main() -> None:
             }
         )
 
+    if not index:
+        raise SystemExit("No PLMNs exported successfully.")
+
     index_path = os.path.join(OUT_DIR, "index.json")
     build_id = stamp_viewer_assets()
     with open(index_path, "w", encoding="utf-8") as f:
         json.dump(
-            {"build": build_id, "plmns": index},
+            {"build": build_id, "top_n": args.top_n, "plmns": index},
             f,
             ensure_ascii=False,
             indent=2,
         )
-    print(f"wrote {index_path} ({len(index)} PLMNs, build={build_id})")
+    total_mb = sum(
+        os.path.getsize(os.path.join(OUT_DIR, row["file"])) for row in index
+    ) / (1024 * 1024)
+    print(
+        f"wrote {index_path} ({len(index)} PLMNs, "
+        f"build={build_id}, data≈{total_mb:.1f} MiB)"
+    )
 
 
 if __name__ == "__main__":
