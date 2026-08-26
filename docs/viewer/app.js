@@ -384,6 +384,24 @@
     );
   }
 
+  /** Same KST wall format as labeling value-cursor tooltip. */
+  function formatHoverTimeKst(ms) {
+    if (!isFinite(ms)) return "";
+    const d = new Date(ms);
+    const pad = (n) => (n < 10 ? "0" : "") + n;
+    return (
+      d.getUTCFullYear() +
+      "년 " +
+      pad(d.getUTCMonth() + 1) +
+      "월 " +
+      pad(d.getUTCDate()) +
+      "일 " +
+      pad(d.getUTCHours()) +
+      ":" +
+      pad(d.getUTCMinutes())
+    );
+  }
+
   function edgeLine(x, color, width) {
     return {
       type: "line",
@@ -738,17 +756,45 @@
             y1: 1,
             line: { color: "royalblue", width: 2, dash: "dot" },
             layer: "above",
+            name: "value_cursor",
           });
         }
         return out;
+      })(),
+      annotations: (() => {
+        const cursorIdx =
+          interactionMode === "inspect" && inspectIndex != null
+            ? inspectIndex
+            : null;
+        if (cursorIdx == null || data.t?.[cursorIdx] == null) return [];
+        const x = data.t[cursorIdx];
+        const ms = parseTime(x);
+        return [
+          {
+            x,
+            y: 1,
+            xref: "x",
+            yref: "paper",
+            text: `값 탐색 · ${formatHoverTimeKst(ms)}`,
+            showarrow: false,
+            yshift: -8,
+            font: { size: 11, color: "white" },
+            bgcolor: "royalblue",
+            borderpad: 3,
+            name: "value_cursor",
+          },
+        ];
       })(),
     };
 
     return { data: traces, layout };
   }
 
+  let _drawGen = 0;
+
   async function draw() {
     if (!payload) return;
+    const gen = ++_drawGen;
     suppressRelayout = true;
     const fig = buildFigure(payload, selectedId);
     await Plotly.react(graphEl, fig.data, fig.layout, {
@@ -758,6 +804,8 @@
       // Help mobile: scroll parent, pan plot
       scrollZoom: false,
     });
+    // A newer draw (or inspect stepping) started while we were awaiting react.
+    if (gen !== _drawGen) return;
     // scattergl often keeps a stale viewport until an explicit resize + Y pin.
     const win = visibleXWindowMs();
     let yr = yRange;
@@ -778,10 +826,15 @@
       post["xaxis.autorange"] = false;
     }
     await Plotly.relayout(graphEl, post);
+    if (gen !== _drawGen) return;
     suppressRelayout = false;
     bindAnomalyShapeClicks();
     bindInspectClicks();
     installPlaceTimeTip();
+    // Re-paint inspect cursor from the live index (react may have used a stale snapshot).
+    if (interactionMode === "inspect" && inspectIndex != null) {
+      syncInspectCursorShape();
+    }
     scheduleResize();
   }
 
@@ -1267,19 +1320,90 @@
     });
   }
 
+  /** Move inspect cursor via shapes/annotations relayout only — never full Plotly.react. */
+  let _inspectCursorBusy = false;
+  let _inspectCursorNeedsSync = false;
+
+  function syncInspectCursorShape() {
+    if (!graphEl?.layout || !payload?.t?.length) return;
+    if (_inspectCursorBusy) {
+      _inspectCursorNeedsSync = true;
+      return;
+    }
+    const shapes = showAnomalies
+      ? shapesForLabels(payload.labels, selectedId)
+      : [];
+    let annotations = (graphEl.layout.annotations || []).filter(
+      (a) => a && a.name !== "value_cursor"
+    );
+    if (
+      interactionMode === "inspect" &&
+      inspectIndex != null &&
+      payload.t[inspectIndex] != null
+    ) {
+      const x = payload.t[inspectIndex];
+      const ms = parseTime(x);
+      shapes.push({
+        type: "line",
+        xref: "x",
+        yref: "paper",
+        x0: x,
+        x1: x,
+        y0: 0,
+        y1: 1,
+        line: { color: "royalblue", width: 2, dash: "dot" },
+        layer: "above",
+        name: "value_cursor",
+      });
+      annotations = [
+        ...annotations,
+        {
+          x,
+          y: 1,
+          xref: "x",
+          yref: "paper",
+          text: `값 탐색 · ${formatHoverTimeKst(ms)}`,
+          showarrow: false,
+          yshift: -8,
+          font: { size: 11, color: "white" },
+          bgcolor: "royalblue",
+          borderpad: 3,
+          name: "value_cursor",
+        },
+      ];
+    }
+    _inspectCursorBusy = true;
+    _inspectCursorNeedsSync = false;
+    suppressRelayout = true;
+    Plotly.relayout(graphEl, { shapes, annotations })
+      .catch(() => {})
+      .finally(() => {
+        _inspectCursorBusy = false;
+        suppressRelayout = false;
+        if (_inspectCursorNeedsSync) syncInspectCursorShape();
+      });
+  }
+
   function selectInspectAtMs(ms) {
     if (!payload?.t?.length || !isFinite(ms)) return;
     const idx = nearestTimeIndex(ms);
     if (idx == null) return;
+    _drawGen += 1;
     inspectIndex = idx;
     hoverIndex = idx;
     refreshHoverPanel(idx);
     setStatus(`값 탐색: ${payload.t[idx]} · ←/→ 키로 이동`);
-    draw();
+    syncInspectCursorShape();
   }
 
-  function stepInspect(delta) {
-    if (interactionMode !== "inspect" || !payload?.t?.length) return;
+  let _inspectStepPending = 0;
+  let _inspectStepRaf = null;
+  let _inspectPanelTimer = null;
+
+  function applyInspectStep(delta) {
+    if (interactionMode !== "inspect" || !payload?.t?.length || !delta) return;
+    // Invalidate in-flight full draws so a stale Plotly.react cannot snap the cursor back.
+    _drawGen += 1;
     let idx = inspectIndex;
     if (idx == null) idx = hoverIndex;
     if (idx == null) idx = defaultHoverIndex();
@@ -1287,9 +1411,23 @@
     idx = Math.max(0, Math.min(payload.t.length - 1, idx + delta));
     inspectIndex = idx;
     hoverIndex = idx;
-    refreshHoverPanel(idx);
     setStatus(`값 탐색: ${payload.t[idx]} · ←/→ 키로 이동`);
-    draw();
+    syncInspectCursorShape();
+    // Debounce the heavy hover-panel DOM rebuild while a key is held.
+    clearTimeout(_inspectPanelTimer);
+    _inspectPanelTimer = setTimeout(() => refreshHoverPanel(inspectIndex), 40);
+  }
+
+  function stepInspect(delta) {
+    // Coalesce key-repeat into one move per animation frame.
+    _inspectStepPending += delta;
+    if (_inspectStepRaf != null) return;
+    _inspectStepRaf = requestAnimationFrame(() => {
+      _inspectStepRaf = null;
+      const d = _inspectStepPending;
+      _inspectStepPending = 0;
+      applyInspectStep(d);
+    });
   }
 
   function bindInspectClicks() {

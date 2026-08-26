@@ -457,6 +457,8 @@ def _build_graph(click_mode: str):
         shape, note = value_cursor_overlays(row["time"])
         fig.add_shape(**shape)
         fig.add_annotation(**note)
+        meta["value_cursor_pos"] = int(state["value_cursor_pos"])
+        fig.update_layout(meta=meta)
 
     return fig
 
@@ -1752,13 +1754,16 @@ def _main_body(
             return (no_update,) * 7
         if click_mode != "inspect" or not key_event:
             return (no_update,) * 7
+        if key_event.get("key") not in ("ArrowLeft", "ArrowRight"):
+            return (no_update,) * 7
         current = state.get("value_cursor_pos")
         if current is None:
             current = state.get("hover_pos")
         if current is None:
             return (no_update,) * 7
         step = -1 if key_event.get("key") == "ArrowLeft" else 1
-        selected = _select_value_pos(current + step)
+        steps = max(1, int(key_event.get("steps") or 1))
+        selected = _select_value_pos(current + step * steps)
         if selected is None:
             return (no_update,) * 7
         row, panel = selected
@@ -2276,6 +2281,44 @@ app.clientside_callback(
         }
 
         if (!window.__valueInspectKeyHandler) {
+            window.__inspectPendingStep = 0;
+            window.__inspectInFlight = false;
+            window.__inspectFlushTimer = null;
+
+            window.__flushInspectKeys = function() {
+                window.__inspectFlushTimer = null;
+                if (!window.__valueInspectMode) {
+                    window.__inspectPendingStep = 0;
+                    return;
+                }
+                if (window.__inspectInFlight) {
+                    // Wait for the current figure update, then send accumulated steps.
+                    if (!window.__inspectFlushTimer) {
+                        window.__inspectFlushTimer = setTimeout(window.__flushInspectKeys, 40);
+                    }
+                    return;
+                }
+                var delta = window.__inspectPendingStep || 0;
+                if (!delta) return;
+                window.__inspectPendingStep = 0;
+                window.__inspectInFlight = true;
+                clearTimeout(window.__inspectInFlightWatchdog);
+                // If the server returns no_update (no figure event), unlock after a beat.
+                window.__inspectInFlightWatchdog = setTimeout(function() {
+                    window.__inspectInFlight = false;
+                    if ((window.__inspectPendingStep || 0) !== 0 && window.__flushInspectKeys) {
+                        window.__flushInspectKeys();
+                    }
+                }, 1500);
+                window.dash_clientside.set_props('key-event', {
+                    data: {
+                        key: delta < 0 ? 'ArrowLeft' : 'ArrowRight',
+                        steps: Math.abs(delta),
+                        sequence: Date.now()
+                    }
+                });
+            };
+
             window.__valueInspectKeyHandler = function(event) {
                 if (isTextEntry(event.target)) return;
                 // Esc cancels in-progress range placement (any mode).
@@ -2291,11 +2334,18 @@ app.clientside_callback(
                 if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
                 event.preventDefault();
                 event.stopPropagation();
-                window.dash_clientside.set_props('key-event', {
-                    data: {key: event.key, sequence: Date.now()}
-                });
+                var step = event.key === 'ArrowLeft' ? -1 : 1;
+                window.__inspectPendingStep = (window.__inspectPendingStep || 0) + step;
+                if (window.__inspectFlushTimer) return;
+                // Coalesce key-repeat into one server step burst (no clientside cursor fight).
+                window.__inspectFlushTimer = setTimeout(window.__flushInspectKeys, 30);
             };
             window.addEventListener('keydown', window.__valueInspectKeyHandler, true);
+        }
+
+        if (!window.__valueInspectMode) {
+            window.__inspectPendingStep = 0;
+            window.__inspectInFlight = false;
         }
 
         var active = document.activeElement;
@@ -3170,6 +3220,14 @@ app.clientside_callback(
                 var cur = gd._fullLayout && gd._fullLayout.dragmode;
                 if (cur !== window.__desiredDragmode) {
                     window.Plotly.relayout(gd, {dragmode: window.__desiredDragmode});
+                }
+            }
+            // Unlock inspect key coalescing after the server figure lands.
+            window.__inspectInFlight = false;
+            clearTimeout(window.__inspectInFlightWatchdog);
+            if (window.__valueInspectMode && (window.__inspectPendingStep || 0) !== 0) {
+                if (!window.__inspectFlushTimer && window.__flushInspectKeys) {
+                    window.__inspectFlushTimer = setTimeout(window.__flushInspectKeys, 0);
                 }
             }
         }, 80);
