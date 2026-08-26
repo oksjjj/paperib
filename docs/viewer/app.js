@@ -804,6 +804,7 @@
       responsive: true,
       displayModeBar: true,
       displaylogo: false,
+      showTips: false,
       // Help mobile: scroll parent, pan plot
       scrollZoom: false,
     });
@@ -813,7 +814,7 @@
     const win = visibleXWindowMs();
     let yr = yRange;
     if (yAuto && win) yr = syncYFromX(win[0], win[1]);
-    const post = { height: graphHeightPx() };
+    const post = { height: graphHeightPx(), dragmode };
     if (yr && yr[1] > yr[0]) {
       post["yaxis.range"] = yr;
       post["yaxis.autorange"] = false;
@@ -1193,7 +1194,7 @@
     return [na, nb];
   }
 
-  function applyXYRelayout(x0ms, x1ms) {
+  function applyXYRelayout(x0ms, x1ms, { checkOffscreen = false } = {}) {
     if (!(x1ms > x0ms)) return;
     [x0ms, x1ms] = clampTimeWindow(x0ms, x1ms);
     if (!(x1ms > x0ms)) return;
@@ -1210,11 +1211,35 @@
       update["yaxis.range"] = yRange;
     }
     suppressRelayout = true;
-    Plotly.relayout(graphEl, update).then(() => {
+    Plotly.relayout(graphEl, update).then(async () => {
       suppressRelayout = false;
+      // After drag/button zoom-in: drop selection if it left the view.
+      if (checkOffscreen) await clearHighlightIfOffscreen();
       renderMetricFilter();
       refreshHoverPanel();
     });
+  }
+
+  function labelOverlapsView(item, lo, hi) {
+    const a = parseTime(utcIsoToPlotNaive(item.start));
+    const b = parseTime(utcIsoToPlotNaive(item.end || item.start));
+    if (!isFinite(a) || !isFinite(b) || !(hi > lo)) return false;
+    const s = Math.min(a, b);
+    const e = Math.max(a, b);
+    return s <= hi && e >= lo;
+  }
+
+  async function clearHighlightIfOffscreen() {
+    if (selectedId == null || !payload?.labels?.length) return false;
+    const item = payload.labels.find((x) => String(x.id) === String(selectedId));
+    const cur = currentXRangeMs();
+    if (!item || !cur) {
+      await clearLabelHighlight();
+      return true;
+    }
+    if (labelOverlapsView(item, cur[0], cur[1])) return false;
+    await clearLabelHighlight();
+    return true;
   }
 
   let _labelListSyncing = false;
@@ -1283,7 +1308,8 @@
 
   async function selectLabel(id, zoomTo) {
     if (id == null || id === "") {
-      await clearLabelSelection();
+      // Keep zoom; only the 「선택 해제」 button resets to full.
+      await clearLabelHighlight();
       return;
     }
     const sid = String(id);
@@ -1295,10 +1321,22 @@
       const b = parseTime(utcIsoToPlotNaive(item.end || item.start));
       let lo = Math.min(a, b);
       let hi = Math.max(a, b);
-      // Tight fit, then zoom-out ×7 (same idea as labeling "선택 구간으로 줌").
-      const tight = Math.max(hi - lo, 30 * 60 * 1000);
+      const kind = (item.kind || "point").toLowerCase();
+      const isPoint = kind === "point" || item.start === item.end || lo === hi;
+      // Point: fixed window = 30 min × (1/0.7)^9 (two more zoom-outs than ^7).
+      // Range: tight fit (min 30 min) then × (1/0.7)^7.
+      const minTight = 30 * 60 * 1000;
+      const widenRange = Math.pow(1 / 0.7, 7);
+      const widenPoint = Math.pow(1 / 0.7, 9);
+      const fixedPoint = minTight * widenPoint;
+      let wide;
+      if (isPoint) {
+        wide = fixedPoint;
+      } else {
+        wide = Math.max(hi - lo, minTight) * widenRange;
+      }
       const mid = (lo + hi) / 2;
-      const half = (tight * Math.pow(1 / 0.7, 7)) / 2;
+      const half = wide / 2;
       lo = mid - half;
       hi = mid + half;
       [lo, hi] = clampTimeWindow(lo, hi);
@@ -1307,23 +1345,27 @@
       syncYAutoButton();
       // Compute Y before draw so both react + post-relayout share the same range.
       const yr = syncYFromX(lo, hi);
+      // 「선택 구간으로 줌」 → 이동 (Y auto). Apply before draw so layout.dragmode is pan.
+      setInteractionMode("pan", { redraw: false });
       setStatus(`선택 구간으로 줌: ${item.line || item.id}`);
       await draw();
-      if (yr) {
-        suppressRelayout = true;
-        try {
-          await Plotly.relayout(graphEl, {
-            "xaxis.range": xRange,
-            "xaxis.autorange": false,
-            "yaxis.range": yr,
-            "yaxis.autorange": false,
-            height: graphHeightPx(),
-          });
-        } finally {
-          suppressRelayout = false;
+      suppressRelayout = true;
+      try {
+        const patch = {
+          "xaxis.range": xRange,
+          "xaxis.autorange": false,
+          dragmode: "pan",
+          height: graphHeightPx(),
+        };
+        if (yr) {
+          patch["yaxis.range"] = yr;
+          patch["yaxis.autorange"] = false;
         }
-        scheduleResize();
+        await Plotly.relayout(graphEl, patch);
+      } finally {
+        suppressRelayout = false;
       }
+      scheduleResize();
       renderMetricFilter();
       refreshHoverPanel();
     } else if (item) {
@@ -1342,7 +1384,7 @@
     setStatus(on ? "anomaly 표시" : "anomaly 숨김");
   }
 
-  function setInteractionMode(mode) {
+  function setInteractionMode(mode, { redraw = true } = {}) {
     interactionMode = mode;
     dragmode = mode === "inspect" ? false : mode;
     document
@@ -1364,6 +1406,7 @@
     if (graphEl && graphEl.data) {
       Plotly.relayout(graphEl, { dragmode: dragmode });
     }
+    if (!redraw) return;
     draw().then(() => {
       refreshHoverPanel(
         interactionMode === "inspect" ? inspectIndex : hoverIndex
@@ -1512,9 +1555,35 @@
 
   function currentXRangeMs() {
     const layout = graphEl._fullLayout;
-    if (!layout?.xaxis?.range) return null;
+    if (xRange) {
+      return [parseTime(xRange[0]), parseTime(xRange[1])];
+    }
+    if (!layout?.xaxis?.range) {
+      if (payload?.t?.length) {
+        return [
+          parseTime(payload.t[0]),
+          parseTime(payload.t[payload.t.length - 1]),
+        ];
+      }
+      return null;
+    }
     const r = layout.xaxis.range;
     return [parseTime(r[0]), parseTime(r[1])];
+  }
+
+  function isFullXView() {
+    // null xRange means 「전체」. Also treat near-full windows as full.
+    if (xRange == null) return true;
+    if (!payload?.t?.length) return true;
+    const full0 = parseTime(payload.t[0]);
+    const full1 = parseTime(payload.t[payload.t.length - 1]);
+    const cur = currentXRangeMs();
+    if (!cur || !(full1 > full0) || !(cur[1] > cur[0])) return true;
+    const span = Math.max(full1 - full0, cur[1] - cur[0], 1);
+    return (
+      Math.abs(cur[0] - full0) / span < 0.02 &&
+      Math.abs(cur[1] - full1) / span < 0.02
+    );
   }
 
   function scaleX(factor, fromLeft) {
@@ -1532,7 +1601,7 @@
       a = mid - half;
       b = mid + half;
     }
-    applyXYRelayout(a, b);
+    applyXYRelayout(a, b, { checkOffscreen: factor < 1 });
   }
 
   async function resetX() {
@@ -1590,16 +1659,32 @@
       return;
     }
 
-    const cur = currentXRangeMs();
-    if (!cur || !(cur[1] > cur[0])) return;
+    // Prefer the event / live layout — currentXRangeMs() would return the
+    // stale stored xRange and undo the user's drag zoom.
+    let x0 = null;
+    let x1 = null;
+    if (ev["xaxis.range"] != null) {
+      x0 = parseTime(ev["xaxis.range"][0]);
+      x1 = parseTime(ev["xaxis.range"][1]);
+    } else if (
+      ev["xaxis.range[0]"] != null ||
+      ev["xaxis.range[1]"] != null
+    ) {
+      const r = graphEl._fullLayout?.xaxis?.range;
+      if (r) {
+        x0 = parseTime(r[0]);
+        x1 = parseTime(r[1]);
+      }
+    }
+    if (x0 == null || x1 == null || !(x1 > x0)) return;
     // Reject bogus windows from empty-plot autorange (no overlap with data).
     if (payload.t?.length) {
       const d0 = parseTime(payload.t[0]);
       const d1 = parseTime(payload.t[payload.t.length - 1]);
       if (!(d1 > d0)) return;
-      if (cur[1] < d0 || cur[0] > d1) return;
+      if (x1 < d0 || x0 > d1) return;
     }
-    applyXYRelayout(cur[0], cur[1]);
+    applyXYRelayout(x0, x1, { checkOffscreen: true });
   }
 
   async function init() {
@@ -1621,11 +1706,13 @@
       if (_labelListSyncing) return;
       const id = listEl.value;
       if (!id) {
-        clearLabelSelection();
+        // Clear highlight only; keep current zoom window.
+        // 「선택 해제」 button is what resets to full view.
+        clearLabelHighlight();
         return;
       }
-      // Select only (yellow → red). Zoom via 「선택 구간으로 줌」.
-      selectLabel(id, false);
+      // Criterion is view state only (not whether a label is selected).
+      selectLabel(id, !isFullXView());
     });
     document.getElementById("btn-clear-selection").onclick = () =>
       clearLabelSelection();
@@ -1639,7 +1726,20 @@
       setInteractionMode("inspect");
     document.getElementById("btn-zoom-in").onclick = () => scaleX(0.7, false);
     document.getElementById("btn-zoom-out").onclick = () => scaleX(1 / 0.7, false);
-    document.getElementById("btn-reset").onclick = () => resetX();
+    document.getElementById("btn-reset").onclick = async () => {
+      // Switch to 줌 before redraw so layout.dragmode sticks (same idea as
+      // 「선택 구간으로 줌」 → 이동).
+      setInteractionMode("zoom", { redraw: false });
+      await resetX();
+      if (graphEl?.data) {
+        suppressRelayout = true;
+        try {
+          await Plotly.relayout(graphEl, { dragmode: "zoom" });
+        } finally {
+          suppressRelayout = false;
+        }
+      }
+    };
     document.getElementById("btn-y-in").onclick = () => scaleY(0.7);
     document.getElementById("btn-y-out").onclick = () => scaleY(1.4);
     document.getElementById("btn-y-auto").onclick = () => resetYAuto();

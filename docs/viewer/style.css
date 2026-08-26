@@ -343,6 +343,11 @@ h1 {
   font-size: 0.82rem;
 }
 
+/* Hide Plotly's "Double click to zoom back out" toast. */
+.plotly-notifier {
+  display: none !important;
+}
+
 .foot {
   margin-top: 18px;
   color: var(--muted);

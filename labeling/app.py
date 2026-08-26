@@ -86,17 +86,21 @@ state: dict = {
     "metric_rev": 0,
     "zoom_start": None,
     "zoom_end": None,
+    # Explicit full-vs-zoomed flag (avoids stale view-range sync races).
+    "x_full_view": True,
     "y_min": None,
     "y_max": None,
     "y_auto": True,
     "y_gen": 0,
     "y_rendered": None,
     "zoom_guard_until": 0.0,
+    "select_guard_until": 0.0,
     "zoom_rendered": None,
     "zoom_rendered_prev": None,
     "label_range_anchor": None,
     "highlight_id": None,
     "highlight_shape_idxs": None,
+    "confirm_action": None,
     "value_cursor_pos": None,
     "hover_pos": None,
     "_last_click": (None, 0.0),
@@ -259,9 +263,10 @@ def _select_or_toggle_label_hit(hit: dict, click_mode: str):
     )
     if already:
         state["highlight_id"] = None
+        state.pop("_offscreen_cleared", None)
         return (
             _build_graph(click_mode),
-            _label_options(),
+            no_update,
             None,
             "라벨 선택이 해제되었습니다.",
             _cancel_style(click_mode),
@@ -269,6 +274,9 @@ def _select_or_toggle_label_hit(hit: dict, click_mode: str):
             no_update,
         )
     state["highlight_id"] = hit["id"]
+    state.pop("_offscreen_cleared", None)
+    # Block stale plotly_relayout echoes from undoing this highlight.
+    _arm_select_guard()
     if click_mode == "edit_range":
         status = f"선택 ({tag}): {label_line(hit)} — 빨간 경계를 드래그하세요."
     else:
@@ -288,20 +296,29 @@ def _zoom_to_label_item(item: dict) -> None:
     """Zoom X around a label (same window math as the web viewer) and highlight it."""
     start_ts = parse_time(item["start"])
     end_ts = parse_time(item["end"])
-    # Web: tight = max(end - start, 30 minutes), then widen × (1/0.7)^7.
-    min_span = pd.Timedelta(minutes=30)
-    if end_ts > start_ts:
+    kind = (item.get("kind") or "point").lower()
+    is_point = kind == "point" or start_ts == end_ts
+    # Point: fixed window — same base as before, plus two more 「줌아웃」
+    # steps → × (1/0.7)^9 instead of ^7.
+    # Range: tight fit to the label (min 30 min), then widen × (1/0.7)^7.
+    fixed_point = pd.Timedelta(minutes=30) * ((1.0 / 0.7) ** 9)
+    if is_point:
+        mid = start_ts
+        wide = fixed_point
+    elif end_ts > start_ts:
         mid = start_ts + (end_ts - start_ts) / 2
-        tight = max(end_ts - start_ts, min_span)
+        tight = max(end_ts - start_ts, pd.Timedelta(minutes=30))
+        wide = tight * ((1.0 / 0.7) ** 7)
     else:
         mid = start_ts
-        tight = min_span
-    wide = tight * ((1.0 / 0.7) ** 7)
+        wide = fixed_point
     half = wide / 2
     state["zoom_start"], state["zoom_end"] = _clamp_zoom(mid - half, mid + half)
     state["highlight_id"] = item["id"]
+    state["x_full_view"] = False
+    state.pop("_offscreen_cleared", None)
     _reset_y()
-    _arm_zoom_guard()
+    _arm_select_guard()
 
 
 def _cancel_style(click_mode: str):
@@ -869,6 +886,7 @@ def _shift_zoom(
     state["zoom_start"], state["zoom_end"] = new_start, new_end
     if y_auto:
         _reset_y()
+    _note_x_window_changed()
     _arm_zoom_guard()
     return True
 
@@ -894,17 +912,20 @@ def _scale_x(factor: float, *, y_auto: bool = True) -> bool:
     if half < min_half and factor < 1:
         half = min_half
     new_start, new_end = _clamp_zoom(mid - half, mid + half)
-    # If already at the data bounds and zooming out, nothing changed.
-    if factor > 1 and new_start == tmin and new_end == tmax:
-        if start_ts == tmin and end_ts == tmax:
-            return False
-    if new_start == start_ts and new_end == end_ts:
+    # Zoom-out already at full data bounds: nothing to do.
+    if factor > 1 and _same_time_window((start_ts, end_ts), (tmin, tmax)):
+        state["x_full_view"] = True
+        return False
+    if _same_time_window((new_start, new_end), (start_ts, end_ts)):
         return False
     if not y_auto:
         _pin_y_before_x_change()
     state["zoom_start"], state["zoom_end"] = new_start, new_end
     if y_auto:
         _reset_y()
+    _note_x_window_changed()
+    if factor < 1:
+        _clear_highlight_if_offscreen()
     _arm_zoom_guard()
     return True
 
@@ -938,6 +959,8 @@ def _scale_x_from_left(factor: float, *, y_auto: bool = True) -> bool:
     state["zoom_end"] = new_end
     if y_auto:
         _reset_y()
+    _note_x_window_changed()
+    _clear_highlight_if_offscreen()
     _arm_zoom_guard()
     return True
 
@@ -991,9 +1014,78 @@ def _same_time_window(
         return False
 
 
+def _label_overlaps_x_window(item: dict, z0, z1) -> bool:
+    """True if the label's time span intersects [z0, z1]."""
+    try:
+        a = parse_time(item["start"])
+        b = parse_time(item.get("end") or item["start"])
+    except (ValueError, TypeError, KeyError):
+        return False
+    lo, hi = (a, b) if a <= b else (b, a)
+    return lo <= z1 and hi >= z0
+
+
+def _clear_highlight_if_offscreen() -> bool:
+    """Deselect the highlighted label when it lies outside the current X window.
+
+    Returns True if a selection was cleared.
+    """
+    hid = state.get("highlight_id")
+    if hid is None or state.get("df") is None:
+        return False
+    item = _label_by_id(hid)
+    z0, z1 = state.get("zoom_start"), state.get("zoom_end")
+    if item is None or z0 is None or z1 is None:
+        state["highlight_id"] = None
+        state["_offscreen_cleared"] = True
+        return True
+    if _label_overlaps_x_window(item, z0, z1):
+        return False
+    state["highlight_id"] = None
+    state["_offscreen_cleared"] = True
+    return True
+
+
+def _is_full_x_view() -> bool:
+    """True when the time window is the full dataset (「전체」).
+
+    Prefer the explicit flag, but also treat a near-full zoom window as full so
+    a stale ``x_full_view=False`` (e.g. after Plotly double-click autorange left
+    the browser at full while the server stayed zoomed) does not auto-zoom on
+    list select.
+    """
+    if bool(state.get("x_full_view", True)):
+        return True
+    if state.get("df") is None:
+        return True
+    z0, z1 = state.get("zoom_start"), state.get("zoom_end")
+    if z0 is None or z1 is None:
+        return True
+    return _same_time_window((z0, z1), data_time_bounds(state["df"]))
+
+
+def _note_x_window_changed() -> None:
+    """Refresh x_full_view after zoom_start/end change."""
+    if state.get("df") is None:
+        state["x_full_view"] = True
+        return
+    z0, z1 = state.get("zoom_start"), state.get("zoom_end")
+    if z0 is None or z1 is None:
+        state["x_full_view"] = True
+        return
+    state["x_full_view"] = _same_time_window((z0, z1), data_time_bounds(state["df"]))
+
+
 def _arm_zoom_guard(seconds: float = 2.0) -> None:
     """Ignore browser axis echoes after a server-driven zoom/pan (prevents freeze loops)."""
     state["zoom_guard_until"] = time.monotonic() + seconds
+
+
+def _arm_select_guard(seconds: float = 2.0) -> None:
+    """After select/zoom-to-label: block stale relayout from clearing highlight."""
+    until = time.monotonic() + seconds
+    state["select_guard_until"] = until
+    state["zoom_guard_until"] = until
 
 
 def _make_axis_cmd(
@@ -1062,8 +1154,12 @@ def _apply_axes_from_relayout(
             start_ts = parse_time(relayout["xaxis.range"][0])
             end_ts = parse_time(relayout["xaxis.range"][1])
         elif relayout.get("xaxis.autorange"):
-            # Full reset is only via the 전체 button — ignore Plotly echoes.
-            return False
+            # Double-click zoom-out: keep server in sync with the browser full view.
+            state["zoom_start"], state["zoom_end"] = data_time_bounds(state["df"])
+            state["x_full_view"] = True
+            if y_auto:
+                _reset_y()
+            return True
     except (ValueError, TypeError):
         return False
 
@@ -1075,6 +1171,10 @@ def _apply_axes_from_relayout(
             return False
         if _same_time_window(incoming, state.get("zoom_rendered_prev")):
             return False
+        prev0, prev1 = state.get("zoom_start"), state.get("zoom_end")
+        prev_w = None
+        if prev0 is not None and prev1 is not None and prev1 > prev0:
+            prev_w = (prev1 - prev0).total_seconds()
         if y_auto:
             state["zoom_start"], state["zoom_end"] = incoming
             _reset_y()
@@ -1086,6 +1186,11 @@ def _apply_axes_from_relayout(
             if pinned is not None:
                 state["y_min"], state["y_max"] = float(pinned[0]), float(pinned[1])
                 state["y_auto"] = False
+        _note_x_window_changed()
+        # Drag / box zoom-in that leaves the selection off-screen → clear it.
+        new_w = (incoming[1] - incoming[0]).total_seconds()
+        if prev_w is not None and new_w < prev_w * 0.98:
+            _clear_highlight_if_offscreen()
         return True
 
     if relayout.get("yaxis.autorange"):
@@ -1117,6 +1222,9 @@ def _sync_zoom_from_view(view_range) -> None:
 
     Y is not synced from the browser: zoom/pan echo the previous y and would
     undo Y 자동. Vertical scale stays server-driven (Y+/Y-/Y 자동).
+
+    Disabled from `_main_body` (stale Store races). Kept for emergency/debug.
+    Never overwrite an intentional zoom with a full-window echo.
     """
     if state["df"] is None or not view_range:
         return
@@ -1141,7 +1249,13 @@ def _sync_zoom_from_view(view_range) -> None:
                 return
             if _same_time_window(incoming, state.get("zoom_rendered_prev")):
                 return
+            # Refuse stale full-window echoes while we believe we are zoomed.
+            if not state.get("x_full_view", True) and _same_time_window(
+                incoming, data_time_bounds(state["df"])
+            ):
+                return
             state["zoom_start"], state["zoom_end"] = incoming
+            _note_x_window_changed()
 
 
 def _same_range(a: tuple[float, float], b: tuple[float, float]) -> bool:
@@ -1165,6 +1279,7 @@ def _do_load(plmn: str, click_mode: str):
         metric_rev=int(state.get("metric_rev") or 0) + 1,
         zoom_start=tmin,
         zoom_end=tmax,
+        x_full_view=True,
         y_min=None,
         y_max=None,
         y_auto=True,
@@ -1265,7 +1380,7 @@ app.layout = html.Div(
             },
         ),
         html.Div(
-            id="delete-modal",
+            id="confirm-modal",
             style={
                 "display": "none",
                 "position": "fixed",
@@ -1276,7 +1391,7 @@ app.layout = html.Div(
             },
             children=[
                 html.Div(
-                    id="delete-modal-backdrop",
+                    id="confirm-modal-backdrop",
                     n_clicks=0,
                     style={
                         "position": "absolute",
@@ -1287,12 +1402,13 @@ app.layout = html.Div(
                 html.Div(
                     [
                         html.H4(
-                            "라벨 삭제",
+                            id="confirm-modal-title",
+                            children="확인",
                             style={"margin": "0 0 10px", "fontSize": "18px"},
                         ),
                         html.P(
-                            id="delete-modal-message",
-                            children="선택한 라벨을 삭제할까요?",
+                            id="confirm-modal-message",
+                            children="",
                             style={
                                 "margin": "0 0 18px",
                                 "lineHeight": "1.5",
@@ -1304,7 +1420,7 @@ app.layout = html.Div(
                             [
                                 html.Button(
                                     "취소",
-                                    id="btn-delete-cancel",
+                                    id="btn-confirm-cancel",
                                     n_clicks=0,
                                     style={
                                         "padding": "8px 16px",
@@ -1315,14 +1431,14 @@ app.layout = html.Div(
                                     },
                                 ),
                                 html.Button(
-                                    "삭제",
-                                    id="btn-delete-ok",
+                                    "확인",
+                                    id="btn-confirm-ok",
                                     n_clicks=0,
                                     style={
                                         "padding": "8px 16px",
                                         "border": "none",
                                         "borderRadius": "6px",
-                                        "background": "#dc2626",
+                                        "background": "#2563eb",
                                         "color": "#fff",
                                         "cursor": "pointer",
                                         "fontWeight": "600",
@@ -1482,6 +1598,7 @@ app.layout = html.Div(
             config={
                 "responsive": True,
                 "displayModeBar": True,
+                "showTips": False,
             },
             style={"width": "100%", "height": "420px"},
         ),
@@ -1530,9 +1647,7 @@ app.layout = html.Div(
     Input("click-mode", "value"),
     Input("anomaly-overlay-mode", "value"),
     Input("btn-cancel-range", "n_clicks"),
-    Input("btn-save", "n_clicks"),
-    Input("btn-reload", "n_clicks"),
-    Input("btn-delete-ok", "n_clicks"),
+    Input("btn-confirm-ok", "n_clicks"),
     Input("btn-clear-selection", "n_clicks"),
     Input("btn-zoom-selected", "n_clicks"),
     Input("label-list", "value"),
@@ -1553,9 +1668,7 @@ def _main(
     _mode_change,
     anomaly_overlay_mode,
     n_cancel,
-    n_save,
-    n_reload,
-    n_delete,
+    n_confirm_ok,
     n_clear_selection,
     n_zoom_sel,
     selected_label,
@@ -1575,9 +1688,7 @@ def _main(
         _mode_change,
         anomaly_overlay_mode,
         n_cancel,
-        n_save,
-        n_reload,
-        n_delete,
+        n_confirm_ok,
         n_clear_selection,
         n_zoom_sel,
         selected_label,
@@ -1602,17 +1713,53 @@ def _main(
 
 
 @app.callback(
-    Output("delete-modal", "style"),
-    Output("delete-modal-message", "children"),
-    Output("status", "children", allow_duplicate=True),
-    Input("btn-delete", "n_clicks"),
-    Input("btn-delete-cancel", "n_clicks"),
-    Input("btn-delete-ok", "n_clicks"),
-    Input("delete-modal-backdrop", "n_clicks"),
+    Output("click-mode", "value", allow_duplicate=True),
+    Input("btn-zoom-selected", "n_clicks"),
+    Input("label-list", "value"),
+    Input("btn-reset-zoom", "n_clicks"),
     State("label-list", "value"),
     prevent_initial_call=True,
 )
-def _delete_modal_ui(_n_del, _n_cancel, _n_ok, _n_backdrop, selected_label):
+def _sync_click_mode_on_nav(_n_zoom, _list_value, _n_reset, selected_label):
+    """선택 구간 줌 → 이동(Y자동); 「전체」 → 줌."""
+    tid = getattr(callback_context, "triggered_id", None)
+    if tid == "btn-reset-zoom":
+        return "zoom"
+    if tid == "btn-zoom-selected":
+        if not selected_label or _label_by_id(selected_label) is None:
+            return no_update
+        return "pan"
+    if tid == "label-list":
+        if not selected_label:
+            return no_update
+        # Same rule as main: only when already zoomed (not full view).
+        if _is_full_x_view():
+            return no_update
+        if _label_by_id(selected_label) is None:
+            return no_update
+        return "pan"
+    return no_update
+
+
+@app.callback(
+    Output("confirm-modal", "style"),
+    Output("confirm-modal-title", "children"),
+    Output("confirm-modal-message", "children"),
+    Output("btn-confirm-ok", "children"),
+    Output("btn-confirm-ok", "style"),
+    Output("status", "children", allow_duplicate=True),
+    Input("btn-delete", "n_clicks"),
+    Input("btn-save", "n_clicks"),
+    Input("btn-reload", "n_clicks"),
+    Input("btn-confirm-cancel", "n_clicks"),
+    Input("btn-confirm-ok", "n_clicks"),
+    Input("confirm-modal-backdrop", "n_clicks"),
+    State("label-list", "value"),
+    prevent_initial_call=True,
+)
+def _confirm_modal_ui(
+    _n_del, _n_save, _n_reload, _n_cancel, _n_ok, _n_backdrop, selected_label
+):
     tid = getattr(callback_context, "triggered_id", None)
     hidden = {
         "display": "none",
@@ -1623,13 +1770,84 @@ def _delete_modal_ui(_n_del, _n_cancel, _n_ok, _n_backdrop, selected_label):
         "justifyContent": "center",
     }
     shown = {**hidden, "display": "flex"}
+    ok_base = {
+        "padding": "8px 16px",
+        "border": "none",
+        "borderRadius": "6px",
+        "color": "#fff",
+        "cursor": "pointer",
+        "fontWeight": "600",
+    }
     if tid == "btn-delete":
         if not selected_label:
-            return hidden, no_update, "삭제할 라벨을 선택하세요."
+            state["confirm_action"] = None
+            return (
+                hidden,
+                no_update,
+                no_update,
+                no_update,
+                no_update,
+                "삭제할 라벨을 선택하세요.",
+            )
         item = _label_by_id(selected_label)
         detail = label_line(item) if item else str(selected_label)
-        return shown, f"선택한 라벨을 삭제할까요?\n\n{detail}", no_update
-    return hidden, no_update, no_update
+        state["confirm_action"] = "delete"
+        return (
+            shown,
+            "라벨 삭제",
+            f"선택한 라벨을 삭제할까요?\n\n{detail}",
+            "삭제",
+            {**ok_base, "background": "#dc2626"},
+            no_update,
+        )
+    if tid == "btn-save":
+        if state.get("doc") is None:
+            state["confirm_action"] = None
+            return (
+                hidden,
+                no_update,
+                no_update,
+                no_update,
+                no_update,
+                "저장할 라벨이 없습니다.",
+            )
+        plmn = state.get("plmn") or ""
+        n = len((state.get("doc") or {}).get("labels") or [])
+        state["confirm_action"] = "save"
+        return (
+            shown,
+            "라벨 저장",
+            f"현재 라벨을 파일에 저장할까요?\n\n{display_plmn(plmn)} · {n}개",
+            "저장",
+            {**ok_base, "background": "#2563eb"},
+            no_update,
+        )
+    if tid == "btn-reload":
+        if state.get("plmn") is None:
+            state["confirm_action"] = None
+            return (
+                hidden,
+                no_update,
+                no_update,
+                no_update,
+                no_update,
+                "불러올 사업자가 없습니다.",
+            )
+        plmn = state.get("plmn") or ""
+        state["confirm_action"] = "reload"
+        return (
+            shown,
+            "라벨 다시 불러오기",
+            f"저장되지 않은 변경이 있으면 사라집니다.\n파일에서 라벨을 다시 불러올까요?\n\n{display_plmn(plmn)}",
+            "불러오기",
+            {**ok_base, "background": "#2563eb"},
+            no_update,
+        )
+    if tid in ("btn-confirm-cancel", "btn-confirm-ok", "confirm-modal-backdrop"):
+        if tid != "btn-confirm-ok":
+            state["confirm_action"] = None
+        return hidden, no_update, no_update, no_update, no_update, no_update
+    return hidden, no_update, no_update, no_update, no_update, no_update
 
 
 def _main_body(
@@ -1639,9 +1857,7 @@ def _main_body(
     _mode_change,
     anomaly_overlay_mode,
     n_cancel,
-    n_save,
-    n_reload,
-    n_delete,
+    n_confirm_ok,
     n_clear_selection,
     n_zoom_sel,
     selected_label,
@@ -1723,14 +1939,10 @@ def _main_body(
             no_update,
         )
 
-    # Axis buttons live in `_axis_nav`. Avoid replaying a stale browser view.
-    _skip_view_sync = {
-        "btn-zoom-selected.n_clicks",
-        "shape-click-event.data",
-        "graph.clickData",
-    }
-    if prop != "graph.relayoutData" and prop not in _skip_view_sync:
-        _sync_zoom_from_view(view_range)
+    # Drag zoom/pan update state in `_drag_axis_nav`. Do not replay the
+    # browser view-range Store on every main event — it often lags behind
+    # list/button zooms and resets server zoom to full while the plot still
+    # shows the zoomed window (zoom-out no-ops; zoom-in then jumps wide).
 
     # ----- click mode -----
     if prop == "click-mode.value":
@@ -1793,61 +2005,69 @@ def _main_body(
     if prop == "btn-cancel-range.n_clicks":
         return _cancel_pending_range(click_mode)
 
-    if prop == "btn-save.n_clicks":
-        path = save_labels(state["doc"])
-        return (
-            no_update,
-            _label_options(),
-            state.get("highlight_id"),
-            html.Span(f"Saved: {path}", style={"color": "green"}),
-            _cancel_style(click_mode),
-            no_update,
-            no_update,
-        )
-    if prop == "btn-reload.n_clicks":
-        state["doc"] = load_labels(state["plmn"], rank=state["rank"])
-        state["highlight_id"] = None
-        state["label_range_anchor"] = None
-        opts = _label_options()
-        return (
-            _build_graph(click_mode),
-            opts,
-            opts[0]["value"] if opts else None,
-            "라벨 파일을 다시 불러왔습니다.",
-            _cancel_style(click_mode),
-            no_update,
-            no_update,
-        )
-    if prop == "btn-delete-ok.n_clicks":
-        if not selected_label:
+    if prop == "btn-confirm-ok.n_clicks":
+        action = state.pop("confirm_action", None)
+        if action == "save":
+            path = save_labels(state["doc"])
             return (
                 no_update,
-                no_update,
-                no_update,
-                "삭제할 라벨을 선택하세요.",
-                no_update,
+                _label_options(),
+                state.get("highlight_id"),
+                html.Span(f"Saved: {path}", style={"color": "green"}),
+                _cancel_style(click_mode),
                 no_update,
                 no_update,
             )
-        remove_label(state["doc"], selected_label)
-        if state.get("highlight_id") == selected_label:
+        if action == "reload":
+            state["doc"] = load_labels(state["plmn"], rank=state["rank"])
             state["highlight_id"] = None
-        opts = _label_options()
-        return (
-            _build_graph(click_mode),
-            opts,
-            opts[0]["value"] if opts else None,
-            f"삭제됨: {selected_label} — Save Labels로 저장",
-            _cancel_style(click_mode),
-            no_update,
-            no_update,
-        )
+            state["label_range_anchor"] = None
+            if state.get("df") is not None:
+                state["zoom_start"], state["zoom_end"] = data_time_bounds(state["df"])
+                state["x_full_view"] = True
+                _reset_y()
+            opts = _label_options()
+            return (
+                _build_graph(click_mode),
+                opts,
+                None,
+                "라벨 파일을 다시 불러왔습니다.",
+                _cancel_style(click_mode),
+                no_update,
+                no_update,
+            )
+        if action == "delete":
+            if not selected_label:
+                return (
+                    no_update,
+                    no_update,
+                    no_update,
+                    "삭제할 라벨을 선택하세요.",
+                    no_update,
+                    no_update,
+                    no_update,
+                )
+            remove_label(state["doc"], selected_label)
+            if state.get("highlight_id") == selected_label:
+                state["highlight_id"] = None
+            opts = _label_options()
+            return (
+                _build_graph(click_mode),
+                opts,
+                opts[0]["value"] if opts else None,
+                f"삭제됨: {selected_label} — Save Labels로 저장",
+                _cancel_style(click_mode),
+                no_update,
+                no_update,
+            )
+        return (no_update,) * 7
 
     if prop == "btn-clear-selection.n_clicks":
         state["highlight_id"] = None
         state["label_range_anchor"] = None
         if state.get("df") is not None:
             state["zoom_start"], state["zoom_end"] = data_time_bounds(state["df"])
+            state["x_full_view"] = True
             _reset_y()
         return (
             _build_graph(click_mode),
@@ -1864,23 +2084,25 @@ def _main_body(
         if item is None:
             return (no_update,) * 7
         _zoom_to_label_item(item)
+        # Switch UI to 이동(Y자동); click-mode Output is set by sibling callback.
         return (
-            _build_graph(click_mode),
+            _build_graph("pan"),
             _label_options(),
             item["id"],
             f"선택 구간으로 줌: {label_line(item)}",
-            _cancel_style(click_mode),
+            _cancel_style("pan"),
             no_update,
             no_update,
         )
 
     if prop == "label-list.value":
         if not selected_label:
+            # Clear highlight only. Do NOT reset zoom — graph deselect also
+            # writes value=None and must leave a zoomed window intact.
+            # 「라벨 선택해제」 / 「전체」 are what reset to full view.
             state["highlight_id"] = None
             state["label_range_anchor"] = None
-            if state.get("df") is not None:
-                state["zoom_start"], state["zoom_end"] = data_time_bounds(state["df"])
-                _reset_y()
+            state.pop("_offscreen_cleared", None)
             return (
                 _build_graph(click_mode),
                 no_update,
@@ -1891,8 +2113,10 @@ def _main_body(
                 no_update,
             )
         item = _label_by_id(selected_label)
-        state["highlight_id"] = selected_label
         if item is None:
+            state["highlight_id"] = selected_label
+            state.pop("_offscreen_cleared", None)
+            _arm_select_guard()
             return (
                 _build_graph(click_mode),
                 no_update,
@@ -1902,16 +2126,28 @@ def _main_body(
                 no_update,
                 no_update,
             )
-        if click_mode == "edit_range":
-            status = "빨간 좌·우 경계선만 좌우로 드래그하세요. 화면 이동은 ◀ ▶ 버튼을 사용하세요."
+        # Criterion is view state only (not whether a label is selected):
+        # full → select only; already zoomed → select + zoom to the new item.
+        do_zoom = not _is_full_x_view()
+        if do_zoom:
+            _zoom_to_label_item(item)
+            mode = "pan"
+            status = f"선택 구간으로 줌: {label_line(item)}"
         else:
-            status = f"선택: {label_line(item)} · 「선택 구간으로 줌」으로 확대"
+            state["highlight_id"] = item["id"]
+            state.pop("_offscreen_cleared", None)
+            _arm_select_guard()
+            mode = click_mode
+            if click_mode == "edit_range":
+                status = "빨간 좌·우 경계선만 좌우로 드래그하세요. 화면 이동은 ◀ ▶ 버튼을 사용하세요."
+            else:
+                status = f"선택: {label_line(item)}"
         return (
-            _build_graph(click_mode),
+            _build_graph(mode),
             no_update,
             selected_label,
             status,
-            _cancel_style(click_mode),
+            _cancel_style(mode),
             no_update,
             no_update,
         )
@@ -2226,6 +2462,7 @@ def _axis_nav(
     if prop == "btn-reset-zoom.n_clicks":
         state["label_range_anchor"] = None
         state["zoom_start"], state["zoom_end"] = data_time_bounds(state["df"])
+        state["x_full_view"] = True
         _reset_y()
         return _make_axis_cmd("")
     return no_update
@@ -2244,13 +2481,20 @@ def _drag_axis_nav(relayout, click_mode):
     has_x = (
         ("xaxis.range[0]" in relayout and "xaxis.range[1]" in relayout)
         or "xaxis.range" in relayout
+        or relayout.get("xaxis.autorange") is True
     )
     if not has_x:
         return no_update
     click_mode = click_mode or "zoom"
     # 이동(Y고정) only: keep y. Zoom / 이동(Y자동) / others: Y 자동.
     y_auto = click_mode != "pan_keep_y"
-    if not _apply_axes_from_relayout(relayout, ignore_guard=True, y_auto=y_auto):
+    # After select/zoom-to-label, respect zoom_guard so delayed plotly_relayout
+    # echoes cannot overwrite the window / clear the red highlight. Outside that
+    # window keep ignore_guard so toolbar-zoom guards do not block real drags.
+    protect = time.monotonic() < float(state.get("select_guard_until") or 0)
+    if not _apply_axes_from_relayout(
+        relayout, ignore_guard=not protect, y_auto=y_auto
+    ):
         return no_update
     return _make_axis_cmd(
         "",
@@ -2264,16 +2508,23 @@ def _drag_axis_nav(relayout, click_mode):
 @app.callback(
     Output("graph", "figure", allow_duplicate=True),
     Output("metric-filter", "options", allow_duplicate=True),
+    Output("label-list", "value", allow_duplicate=True),
     Input("rebuild-trigger", "data"),
     State("click-mode", "value"),
     prevent_initial_call=True,
 )
 def _rebuild_after_axis(trigger, click_mode):
     if not trigger or state["df"] is None:
-        return no_update, no_update
+        return no_update, no_update, no_update
     _arm_zoom_guard(3.0)
     m_opts, _ = _metric_filter_ui()
-    return _build_graph(click_mode or "zoom"), m_opts
+    # Sync dropdown when zoom-in cleared an off-screen selection — but only if
+    # the user has not already re-selected something before this deferred rebuild.
+    cleared = state.pop("_offscreen_cleared", False)
+    list_val = (
+        None if (cleared and state.get("highlight_id") is None) else no_update
+    )
+    return _build_graph(click_mode or "zoom"), m_opts, list_val
 
 
 app.clientside_callback(
@@ -2478,9 +2729,17 @@ app.clientside_callback(
             config: {
                 responsive: true,
                 displayModeBar: true,
+                showTips: false,
                 edits: {shapePosition: false}
             }
         });
+
+        if (!document.getElementById('plotly-notifier-hide')) {
+            var hideTip = document.createElement('style');
+            hideTip.id = 'plotly-notifier-hide';
+            hideTip.textContent = '.plotly-notifier{display:none!important;}';
+            document.head.appendChild(hideTip);
+        }
 
         if (!document.getElementById('edit-range-pointer-style')) {
             var style = document.createElement('style');
