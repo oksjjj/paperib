@@ -1128,7 +1128,7 @@
       _ptrDown = null;
       if (!hit) return false;
       _tapLockUntil = Date.now() + 350;
-      selectLabel(hit.id, false);
+      toggleLabelFromGraph(hit.id);
       return true;
     };
 
@@ -1242,13 +1242,22 @@
     _labelListSyncing = false;
   }
 
+  async function clearLabelHighlight() {
+    selectedId = null;
+    _labelListSyncing = true;
+    if (listEl) listEl.value = "";
+    _labelListSyncing = false;
+    setStatus("라벨 선택이 해제되었습니다.");
+    await draw();
+  }
+
   async function clearLabelSelection() {
     selectedId = null;
     _labelListSyncing = true;
     if (listEl) listEl.value = "";
     _labelListSyncing = false;
     setStatus("라벨 선택이 해제되었습니다.");
-    // Same as the toolbar 「전체」 button.
+    // Same as the toolbar 「전체」 button (목록 「선택 해제」만).
     await resetX();
   }
 
@@ -1258,6 +1267,18 @@
       return;
     }
     await selectLabel(selectedId, true);
+  }
+
+  async function toggleLabelFromGraph(id) {
+    if (
+      id != null &&
+      selectedId != null &&
+      String(selectedId) === String(id)
+    ) {
+      await clearLabelHighlight();
+      return;
+    }
+    await selectLabel(id, false);
   }
 
   async function selectLabel(id, zoomTo) {
@@ -1686,7 +1707,7 @@
       if (id == null || pt.data?.name !== "__anomaly_markers") return;
       if (Date.now() < _tapLockUntil) return;
       _tapLockUntil = Date.now() + 350;
-      selectLabel(id, false);
+      toggleLabelFromGraph(id);
     });
     scheduleResize();
   }

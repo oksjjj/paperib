@@ -115,7 +115,8 @@ def _empty_figure():
 
     fig = go.Figure()
     fig.update_layout(
-        height=360,
+        height=420,
+        autosize=True,
         margin=dict(l=40, r=20, t=40, b=40),
         annotations=[
             dict(
@@ -244,6 +245,45 @@ def _label_at_time(ts, *, point_tol_seconds: float | None = None):
     return range_hits[0][1]
 
 
+def _select_or_toggle_label_hit(hit: dict, click_mode: str):
+    """Select a graph-clicked label, or clear highlight if already selected.
+
+    Zoom is unchanged (unlike 「라벨 선택해제」 which resets to 전체).
+    """
+    state["label_range_anchor"] = None
+    kind = (hit.get("kind") or "point").lower()
+    tag = "점" if kind == "point" else "구간"
+    already = (
+        state.get("highlight_id") is not None
+        and str(state["highlight_id"]) == str(hit["id"])
+    )
+    if already:
+        state["highlight_id"] = None
+        return (
+            _build_graph(click_mode),
+            _label_options(),
+            None,
+            "라벨 선택이 해제되었습니다.",
+            _cancel_style(click_mode),
+            no_update,
+            no_update,
+        )
+    state["highlight_id"] = hit["id"]
+    if click_mode == "edit_range":
+        status = f"선택 ({tag}): {label_line(hit)} — 빨간 경계를 드래그하세요."
+    else:
+        status = f"선택 ({tag}): {label_line(hit)} · 「선택 구간으로 줌」으로 확대"
+    return (
+        _build_graph(click_mode),
+        _label_options(),
+        hit["id"],
+        status,
+        _cancel_style(click_mode),
+        no_update,
+        no_update,
+    )
+
+
 def _zoom_to_label_item(item: dict) -> None:
     """Zoom X around a label (same window math as the web viewer) and highlight it."""
     start_ts = parse_time(item["start"])
@@ -315,6 +355,10 @@ def _build_graph(click_mode: str):
             f"{fig.layout.datarevision}:{state['fig_gen']}:m{metric_rev}"
         ),
         uirevision=f"{state.get('plmn') or 'labeling'}:m{metric_rev}",
+        # Match dcc.Graph style height so select/redraw never shrinks the plot.
+        # autosize stays True so width keeps filling the host.
+        height=420,
+        autosize=True,
     )
     # Label fills must never be draggable as a whole — only edge lines in edit mode.
     freeze_shape_editing(fig)
@@ -1441,7 +1485,7 @@ app.layout = html.Div(
             },
             style={"width": "100%", "height": "420px"},
         ),
-        html.Div(id="status", style={"minHeight": "1.4em", "margin": "4px 0"}),
+        html.Div(id="status", style={"display": "none"}),
         html.B("이 시점 특성값 (값 내림차순)"),
         html.Div(
             id="hover-panel",
@@ -1982,24 +2026,7 @@ def _main_body(
         hit = _label_at_time(ts)
         if hit is None:
             return (no_update,) * 7
-        state["label_range_anchor"] = None
-        state["highlight_id"] = hit["id"]
-        kind = (hit.get("kind") or "point").lower()
-        tag = "점" if kind == "point" else "구간"
-        # Select in place (no auto-zoom). Use 「선택 구간으로 줌」 to zoom.
-        if click_mode == "edit_range":
-            status = f"선택 ({tag}): {label_line(hit)} — 빨간 경계를 드래그하세요."
-        else:
-            status = f"선택 ({tag}): {label_line(hit)} · 「선택 구간으로 줌」으로 확대"
-        return (
-            _build_graph(click_mode),
-            _label_options(),
-            hit["id"],
-            status,
-            _cancel_style(click_mode),
-            no_update,
-            no_update,
-        )
+        return _select_or_toggle_label_hit(hit, click_mode)
 
     if prop == "graph.relayoutData":
         # Drag zoom/pan: Y 자동 + high-res rebuild go through `_drag_axis_nav`
@@ -2049,23 +2076,7 @@ def _main_body(
 
         hit = _label_at_time(ts)
         if hit is not None:
-            state["label_range_anchor"] = None
-            state["highlight_id"] = hit["id"]
-            kind = (hit.get("kind") or "point").lower()
-            tag = "점" if kind == "point" else "구간"
-            if click_mode == "edit_range":
-                status = f"선택 ({tag}): {label_line(hit)} — 빨간 경계를 드래그하세요."
-            else:
-                status = f"선택 ({tag}): {label_line(hit)} · 「선택 구간으로 줌」으로 확대"
-            return (
-                _build_graph(click_mode),
-                _label_options(),
-                hit["id"],
-                status,
-                _cancel_style(click_mode),
-                no_update,
-                no_update,
-            )
+            return _select_or_toggle_label_hit(hit, click_mode)
 
         return (no_update,) * 7
 
@@ -3313,6 +3324,18 @@ app.clientside_callback(
             var gd = host && host.querySelector('.js-plotly-plot');
             window.__ignoreDataXClampUntil = Date.now() + 1500;
             if (!gd || !window.Plotly) return;
+            // Pin height to the Dash container; keep autosize so width fills
+            // the host (autosize:false freezes Plotly's narrow default width).
+            var hostH = host.clientHeight || 420;
+            var wantH = Math.max(hostH > 40 ? hostH : 420, 260);
+            var curH = (gd.layout && gd.layout.height) || 0;
+            var patch = {autosize: true};
+            if (Math.abs(curH - wantH) > 1) {
+                patch.height = wantH;
+            }
+            window.Plotly.relayout(gd, patch).then(function() {
+                try { window.Plotly.Plots.resize(gd); } catch (err) {}
+            });
             window.__clampPanToData(gd);
             window.__installCustomEdgeEdit(gd);
             window.__installAnomalyShapeClick(gd);

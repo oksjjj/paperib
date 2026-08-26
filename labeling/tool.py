@@ -802,7 +802,8 @@ def add_label_indicator(
 ) -> bool:
     """Draw a label overlay; return True for a range label.
 
-    Unselected anomaly = yellow (web); selected = crimson fill/edges.
+    Match the web viewer: unselected = yellow fill + edge lines above traces;
+    selected = crimson fill/edges (also above).
     """
     s_utc = pd.to_datetime(item["start"], utc=True)
     e_utc = pd.to_datetime(item["end"], utc=True)
@@ -820,23 +821,38 @@ def add_label_indicator(
         line = TAG_LINE.get(tag, "#c9a227")
         line_w = 2
 
+    def _edge(x) -> None:
+        fig.add_shape(
+            type="line",
+            xref="x",
+            yref="paper",
+            x0=x,
+            x1=x,
+            y0=0,
+            y1=1,
+            line=dict(color=line, width=line_w),
+            layer="above",
+            editable=False,
+        )
+
     if is_range:
-        fig.add_vrect(
+        fig.add_shape(
+            type="rect",
+            xref="x",
+            yref="paper",
             x0=s,
             x1=e,
+            y0=0,
+            y1=1,
             fillcolor=color,
-            layer="below",
-            line_width=0,
+            line=dict(width=0),
+            layer="above",
             editable=False,
         )
+        _edge(s)
+        _edge(e)
     else:
-        fig.add_vline(
-            x=s,
-            line_width=line_w,
-            line_dash="solid",
-            line_color=line,
-            editable=False,
-        )
+        _edge(s)
     return is_range
 
 
@@ -1122,7 +1138,10 @@ def build_figure(
     # freezes the browser. datarevision + uid still refresh series data.
     fig.update_layout(
         title=title or f"{display_plmn(str(doc.get('plmn')))} anomaly labeling",
-        height=360,
+        # Fixed height matches dcc.Graph (420px). Keep autosize=True so width
+        # still fills the page; autosize=False freezes a narrow default width.
+        height=420,
+        autosize=True,
         hovermode="closest",
         dragmode="zoom",
         showlegend=False,
