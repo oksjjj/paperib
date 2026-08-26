@@ -245,15 +245,18 @@ def _label_at_time(ts, *, point_tol_seconds: float | None = None):
 
 
 def _zoom_to_label_item(item: dict) -> None:
-    """Zoom X around a label (tight fit, then zoom-out ×7) and highlight it."""
+    """Zoom X around a label (same window math as the web viewer) and highlight it."""
     start_ts = parse_time(item["start"])
     end_ts = parse_time(item["end"])
-    span = end_ts - start_ts
-    pad = span / 2 if span > pd.Timedelta(0) else pd.Timedelta(hours=6)
-    tight_start, tight_end = start_ts - pad, end_ts + pad
-    tight_width = tight_end - tight_start
-    mid = tight_start + tight_width / 2
-    wide = tight_width * ((1.0 / 0.7) ** 7)
+    # Web: tight = max(end - start, 30 minutes), then widen × (1/0.7)^7.
+    min_span = pd.Timedelta(minutes=30)
+    if end_ts > start_ts:
+        mid = start_ts + (end_ts - start_ts) / 2
+        tight = max(end_ts - start_ts, min_span)
+    else:
+        mid = start_ts
+        tight = min_span
+    wide = tight * ((1.0 / 0.7) ** 7)
     half = wide / 2
     state["zoom_start"], state["zoom_end"] = _clamp_zoom(mid - half, mid + half)
     state["highlight_id"] = item["id"]
@@ -287,6 +290,7 @@ def _build_graph(click_mode: str):
         max_metrics=-1,
         max_points=MAX_POINTS,
         show_labels=bool(state.get("show_anomalies", True)),
+        highlight_id=state.get("highlight_id"),
     )
     # Extra revision bump so Dash/Plotly never keep a previous WebGL buffer /
     # axis range after 줌인·이동 buttons.
@@ -487,7 +491,7 @@ def _cancel_pending_range(click_mode: str):
     )
 
 
-def _place_label_click(ts, click_mode: str, note: str | None):
+def _place_label_click(ts, click_mode: str):
     """Handle point/range label placement for a plotted time click."""
     if click_mode == "label_point":
         state["label_range_anchor"] = None
@@ -499,7 +503,6 @@ def _place_label_click(ts, click_mode: str, note: str | None):
             tag="anomaly",
             start=ts,
             metrics=["ALL"],
-            note=(note or "").strip(),
         )
         after = [x for x in state["doc"]["labels"] if x["id"] not in before]
         lid = after[0]["id"] if after else None
@@ -562,7 +565,6 @@ def _place_label_click(ts, click_mode: str, note: str | None):
         start=a,
         end=b,
         metrics=["ALL"],
-        note=(note or "").strip(),
     )
     after = [x for x in state["doc"]["labels"] if x["id"] not in before]
     lid = after[0]["id"] if after else None
@@ -1137,7 +1139,7 @@ def _do_load(plmn: str, click_mode: str):
     return (
         _build_graph(click_mode),
         opts,
-        opts[0]["value"] if opts else None,
+        None,
         "",
         _cancel_style(click_mode),
         html.I("그래프에 커서를 올리면 이 시점의 특성값이 내림차순으로 표시됩니다."),
@@ -1158,9 +1160,7 @@ if _START_PLMN:
     _do_load(_START_PLMN, "zoom")
     _START_FIGURE = _build_graph("zoom")
     _START_LABEL_OPTS = _label_options()
-    _START_LABEL_VALUE = (
-        _START_LABEL_OPTS[0]["value"] if _START_LABEL_OPTS else None
-    )
+    _START_LABEL_VALUE = None
     _START_METRIC_OPTS, _START_METRIC_VALS = _metric_filter_ui()
 else:
     _START_FIGURE = _empty_figure()
@@ -1189,9 +1189,124 @@ app.layout = html.Div(
                 "flexWrap": "wrap",
             },
         ),
+        html.H3("2) Anomaly", style={"margin": "10px 0 4px"}),
+        html.Div(
+            "anomaly 라벨: 구간은 왼쪽 시작 → 오른쪽 끝 2클릭, 점은 시점 1클릭으로 추가하세요. "
+            "목록에서 선택 후 구간 편집으로 경계를 조절할 수 있습니다.",
+            style={"fontSize": "12px", "color": "#666", "marginBottom": "6px"},
+        ),
         html.Div(
             [
-                html.H3("2) 그래프", style={"margin": "0"}),
+                dcc.Dropdown(
+                    id="label-list",
+                    options=_START_LABEL_OPTS,
+                    value=_START_LABEL_VALUE,
+                    clearable=True,
+                    searchable=False,
+                    placeholder="anomaly 구간 선택",
+                    style={"width": "680px", "flex": "0 0 680px"},
+                ),
+                html.Button("라벨 선택해제", id="btn-clear-selection", n_clicks=0),
+                html.Button("선택 구간으로 줌", id="btn-zoom-selected", n_clicks=0),
+                html.Button("선택 라벨 삭제", id="btn-delete", n_clicks=0),
+                html.Button("Save Labels", id="btn-save", n_clicks=0),
+                html.Button("Reload Saved", id="btn-reload", n_clicks=0),
+            ],
+            style={
+                "display": "flex",
+                "gap": "8px",
+                "alignItems": "center",
+                "flexWrap": "wrap",
+                "marginBottom": "8px",
+            },
+        ),
+        html.Div(
+            id="delete-modal",
+            style={
+                "display": "none",
+                "position": "fixed",
+                "inset": "0",
+                "zIndex": 2000,
+                "alignItems": "center",
+                "justifyContent": "center",
+            },
+            children=[
+                html.Div(
+                    id="delete-modal-backdrop",
+                    n_clicks=0,
+                    style={
+                        "position": "absolute",
+                        "inset": "0",
+                        "background": "rgba(15, 23, 42, 0.45)",
+                    },
+                ),
+                html.Div(
+                    [
+                        html.H4(
+                            "라벨 삭제",
+                            style={"margin": "0 0 10px", "fontSize": "18px"},
+                        ),
+                        html.P(
+                            id="delete-modal-message",
+                            children="선택한 라벨을 삭제할까요?",
+                            style={
+                                "margin": "0 0 18px",
+                                "lineHeight": "1.5",
+                                "whiteSpace": "pre-wrap",
+                                "color": "#334155",
+                            },
+                        ),
+                        html.Div(
+                            [
+                                html.Button(
+                                    "취소",
+                                    id="btn-delete-cancel",
+                                    n_clicks=0,
+                                    style={
+                                        "padding": "8px 16px",
+                                        "border": "1px solid #cbd5e1",
+                                        "borderRadius": "6px",
+                                        "background": "#fff",
+                                        "cursor": "pointer",
+                                    },
+                                ),
+                                html.Button(
+                                    "삭제",
+                                    id="btn-delete-ok",
+                                    n_clicks=0,
+                                    style={
+                                        "padding": "8px 16px",
+                                        "border": "none",
+                                        "borderRadius": "6px",
+                                        "background": "#dc2626",
+                                        "color": "#fff",
+                                        "cursor": "pointer",
+                                        "fontWeight": "600",
+                                    },
+                                ),
+                            ],
+                            style={
+                                "display": "flex",
+                                "justifyContent": "flex-end",
+                                "gap": "8px",
+                            },
+                        ),
+                    ],
+                    style={
+                        "position": "relative",
+                        "zIndex": 1,
+                        "width": "min(420px, calc(100vw - 32px))",
+                        "background": "#fff",
+                        "borderRadius": "10px",
+                        "padding": "20px 22px",
+                        "boxShadow": "0 18px 40px rgba(15, 23, 42, 0.25)",
+                    },
+                ),
+            ],
+        ),
+        html.Div(
+            [
+                html.H3("3) 그래프", style={"margin": "0"}),
                 dcc.RadioItems(
                     id="anomaly-overlay-mode",
                     options=[
@@ -1324,7 +1439,7 @@ app.layout = html.Div(
                 "responsive": True,
                 "displayModeBar": True,
             },
-            style={"width": "100%", "height": "360px"},
+            style={"width": "100%", "height": "420px"},
         ),
         html.Div(id="status", style={"minHeight": "1.4em", "margin": "4px 0"}),
         html.B("이 시점 특성값 (값 내림차순)"),
@@ -1341,53 +1456,6 @@ app.layout = html.Div(
                 "width": "100%",
                 "boxSizing": "border-box",
             },
-        ),
-        html.H3("3) 라벨 추가 / 수정", style={"margin": "10px 0 4px"}),
-        html.Div(
-            "anomaly 라벨: 구간은 왼쪽 시작 → 오른쪽 끝 2클릭, 점은 시점 1클릭으로 추가하세요. "
-            "목록에서 선택 후 구간 편집으로 경계를 조절할 수 있습니다.",
-            style={"fontSize": "12px", "color": "#666", "marginBottom": "6px"},
-        ),
-        html.Div(
-            [
-                dcc.Input(
-                    id="note",
-                    type="text",
-                    placeholder="Note",
-                    style={"width": "420px"},
-                ),
-                html.Button("Save Labels", id="btn-save", n_clicks=0),
-                html.Button("Reload Saved", id="btn-reload", n_clicks=0),
-            ],
-            style={
-                "display": "flex",
-                "gap": "8px",
-                "alignItems": "center",
-                "flexWrap": "wrap",
-            },
-        ),
-        html.Div(
-            [
-                html.Button("라벨 선택해제", id="btn-clear-selection", n_clicks=0),
-                html.Button("선택 라벨로 줌", id="btn-zoom-selected", n_clicks=0),
-                html.Button("선택 라벨 삭제", id="btn-delete", n_clicks=0),
-            ],
-            style={"display": "flex", "gap": "8px", "marginTop": "8px"},
-        ),
-        html.Div(
-            [
-                html.B("저장된 라벨 (한 줄 = 라벨 1개)"),
-                html.Span(
-                    " — 한 줄을 클릭하면 그래프에서 노란색으로 강조됩니다.",
-                    style={"fontSize": "12px", "color": "#666"},
-                ),
-            ],
-            style={"marginTop": "8px"},
-        ),
-        dcc.RadioItems(
-            id="label-list",
-            options=_START_LABEL_OPTS,
-            value=_START_LABEL_VALUE,
         ),
         dcc.Store(id="key-event"),
         dcc.Store(id="key-listener-state"),
@@ -1420,7 +1488,7 @@ app.layout = html.Div(
     Input("btn-cancel-range", "n_clicks"),
     Input("btn-save", "n_clicks"),
     Input("btn-reload", "n_clicks"),
-    Input("btn-delete", "n_clicks"),
+    Input("btn-delete-ok", "n_clicks"),
     Input("btn-clear-selection", "n_clicks"),
     Input("btn-zoom-selected", "n_clicks"),
     Input("label-list", "value"),
@@ -1430,7 +1498,6 @@ app.layout = html.Div(
     Input("graph", "clickData"),
     Input("graph", "hoverData"),
     Input("graph", "relayoutData"),
-    State("note", "value"),
     State("click-mode", "value"),
     State("view-range", "data"),
     prevent_initial_call=False,
@@ -1454,7 +1521,6 @@ def _main(
     click_data,
     hover_data,
     relayout,
-    note,
     click_mode,
     view_range,
 ):
@@ -1477,7 +1543,6 @@ def _main(
         click_data,
         hover_data,
         relayout,
-        note,
         click_mode,
         view_range,
     )
@@ -1490,6 +1555,37 @@ def _main(
         m_opts, _ = _metric_filter_ui()
         out[7] = m_opts
     return tuple(out)
+
+
+@app.callback(
+    Output("delete-modal", "style"),
+    Output("delete-modal-message", "children"),
+    Output("status", "children", allow_duplicate=True),
+    Input("btn-delete", "n_clicks"),
+    Input("btn-delete-cancel", "n_clicks"),
+    Input("btn-delete-ok", "n_clicks"),
+    Input("delete-modal-backdrop", "n_clicks"),
+    State("label-list", "value"),
+    prevent_initial_call=True,
+)
+def _delete_modal_ui(_n_del, _n_cancel, _n_ok, _n_backdrop, selected_label):
+    tid = getattr(callback_context, "triggered_id", None)
+    hidden = {
+        "display": "none",
+        "position": "fixed",
+        "inset": "0",
+        "zIndex": 2000,
+        "alignItems": "center",
+        "justifyContent": "center",
+    }
+    shown = {**hidden, "display": "flex"}
+    if tid == "btn-delete":
+        if not selected_label:
+            return hidden, no_update, "삭제할 라벨을 선택하세요."
+        item = _label_by_id(selected_label)
+        detail = label_line(item) if item else str(selected_label)
+        return shown, f"선택한 라벨을 삭제할까요?\n\n{detail}", no_update
+    return hidden, no_update, no_update
 
 
 def _main_body(
@@ -1511,7 +1607,6 @@ def _main_body(
     click_data,
     hover_data,
     relayout,
-    note,
     click_mode,
     view_range,
 ):
@@ -1679,7 +1774,7 @@ def _main_body(
             no_update,
             no_update,
         )
-    if prop == "btn-delete.n_clicks":
+    if prop == "btn-delete-ok.n_clicks":
         if not selected_label:
             return (
                 no_update,
@@ -1706,6 +1801,10 @@ def _main_body(
 
     if prop == "btn-clear-selection.n_clicks":
         state["highlight_id"] = None
+        state["label_range_anchor"] = None
+        if state.get("df") is not None:
+            state["zoom_start"], state["zoom_end"] = data_time_bounds(state["df"])
+            _reset_y()
         return (
             _build_graph(click_mode),
             no_update,
@@ -1725,18 +1824,44 @@ def _main_body(
             _build_graph(click_mode),
             _label_options(),
             item["id"],
-            "",
+            f"선택 구간으로 줌: {label_line(item)}",
             _cancel_style(click_mode),
             no_update,
             no_update,
         )
 
     if prop == "label-list.value":
+        if not selected_label:
+            state["highlight_id"] = None
+            state["label_range_anchor"] = None
+            if state.get("df") is not None:
+                state["zoom_start"], state["zoom_end"] = data_time_bounds(state["df"])
+                _reset_y()
+            return (
+                _build_graph(click_mode),
+                no_update,
+                None,
+                "라벨 선택이 해제되었습니다.",
+                _cancel_style(click_mode),
+                no_update,
+                no_update,
+            )
+        item = _label_by_id(selected_label)
         state["highlight_id"] = selected_label
-        if selected_label and click_mode == "edit_range":
+        if item is None:
+            return (
+                _build_graph(click_mode),
+                no_update,
+                selected_label,
+                "",
+                _cancel_style(click_mode),
+                no_update,
+                no_update,
+            )
+        if click_mode == "edit_range":
             status = "빨간 좌·우 경계선만 좌우로 드래그하세요. 화면 이동은 ◀ ▶ 버튼을 사용하세요."
         else:
-            status = ""
+            status = f"선택: {label_line(item)} · 「선택 구간으로 줌」으로 확대"
         return (
             _build_graph(click_mode),
             no_update,
@@ -1834,7 +1959,7 @@ def _main_body(
 
         # Range/point placement: prefer this path (works on empty plot area).
         if click_mode in ("label_range", "label_point"):
-            placed = _place_label_click(ts, click_mode, note)
+            placed = _place_label_click(ts, click_mode)
             return placed if placed is not None else (no_update,) * 7
 
         # 값 탐색: empty-area clicks snap to the nearest sample (same as line clicks).
@@ -1858,26 +1983,19 @@ def _main_body(
         if hit is None:
             return (no_update,) * 7
         state["label_range_anchor"] = None
+        state["highlight_id"] = hit["id"]
         kind = (hit.get("kind") or "point").lower()
         tag = "점" if kind == "point" else "구간"
-        # Edit mode: select in place (no auto-zoom) so edge drag stays usable.
+        # Select in place (no auto-zoom). Use 「선택 구간으로 줌」 to zoom.
         if click_mode == "edit_range":
-            state["highlight_id"] = hit["id"]
-            return (
-                _build_graph(click_mode),
-                _label_options(),
-                hit["id"],
-                f"선택 ({tag}): {label_line(hit)} — 빨간 경계를 드래그하세요.",
-                _cancel_style(click_mode),
-                no_update,
-                no_update,
-            )
-        _zoom_to_label_item(hit)
+            status = f"선택 ({tag}): {label_line(hit)} — 빨간 경계를 드래그하세요."
+        else:
+            status = f"선택 ({tag}): {label_line(hit)} · 「선택 구간으로 줌」으로 확대"
         return (
             _build_graph(click_mode),
             _label_options(),
             hit["id"],
-            f"선택·줌 ({tag}): {label_line(hit)}",
+            status,
             _cancel_style(click_mode),
             no_update,
             no_update,
@@ -1926,31 +2044,24 @@ def _main_body(
         # label_range / label_point: shape-click handles empty-area taps;
         # clickData still places when the click lands on a trace.
         if click_mode in ("label_range", "label_point"):
-            placed = _place_label_click(ts, click_mode, note)
+            placed = _place_label_click(ts, click_mode)
             return placed if placed is not None else (no_update,) * 7
 
         hit = _label_at_time(ts)
         if hit is not None:
             state["label_range_anchor"] = None
+            state["highlight_id"] = hit["id"]
             kind = (hit.get("kind") or "point").lower()
             tag = "점" if kind == "point" else "구간"
             if click_mode == "edit_range":
-                state["highlight_id"] = hit["id"]
-                return (
-                    _build_graph(click_mode),
-                    _label_options(),
-                    hit["id"],
-                    f"선택 ({tag}): {label_line(hit)} — 빨간 경계를 드래그하세요.",
-                    _cancel_style(click_mode),
-                    no_update,
-                    no_update,
-                )
-            _zoom_to_label_item(hit)
+                status = f"선택 ({tag}): {label_line(hit)} — 빨간 경계를 드래그하세요."
+            else:
+                status = f"선택 ({tag}): {label_line(hit)} · 「선택 구간으로 줌」으로 확대"
             return (
                 _build_graph(click_mode),
                 _label_options(),
                 hit["id"],
-                f"선택·줌 ({tag}): {label_line(hit)}",
+                status,
                 _cancel_style(click_mode),
                 no_update,
                 no_update,

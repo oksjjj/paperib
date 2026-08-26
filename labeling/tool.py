@@ -37,13 +37,13 @@ CACHE_DIR = os.path.join(os.path.dirname(__file__), "cache")
 RANK_SIGNATURE_PATH = os.path.join(CACHE_DIR, "plmn_rank.signature")
 
 TAG_COLORS = {
-    # Stronger fills so ranges stay visible on white plot background.
-    "anomaly": "rgba(200, 16, 46, 0.38)",
+    # Unselected anomaly matches web yellow; selected highlight uses crimson edges.
+    "anomaly": "rgba(201, 162, 39, 0.28)",
     "normal": "rgba(20, 120, 50, 0.32)",
     "uncertain": "rgba(200, 110, 0, 0.36)",
 }
 TAG_LINE = {
-    "anomaly": "#b01028",
+    "anomaly": "#c9a227",
     "normal": "#147832",
     "uncertain": "#c86e00",
 }
@@ -409,6 +409,12 @@ def load_labels(plmn: str, rank: int | None = None) -> dict[str, Any]:
 def save_labels(doc: dict[str, Any]) -> str:
     doc = dict(doc)
     doc["updated_at"] = datetime.now(timezone.utc).isoformat()
+    cleaned = []
+    for item in doc.get("labels", []):
+        item = dict(item)
+        item.pop("note", None)
+        cleaned.append(item)
+    doc["labels"] = cleaned
     path = label_path(doc["plmn"])
     with open(path, "w", encoding="utf-8") as f:
         json.dump(doc, f, ensure_ascii=False, indent=2)
@@ -432,7 +438,6 @@ def labels_to_frame(doc: dict[str, Any]) -> pd.DataFrame:
                 "metrics": ",".join(
                     m if m == "ALL" else display_metric(m) for m in metrics
                 ),
-                "note": item.get("note", ""),
                 "updated_at": format_kst(item.get("updated_at"), seconds=True),
             }
         )
@@ -444,7 +449,6 @@ def labels_to_frame(doc: dict[str, Any]) -> pd.DataFrame:
                 "tag",
                 "시각 / 구간 (KST)",
                 "metrics",
-                "note",
                 "updated_at",
             ]
         )
@@ -459,7 +463,6 @@ def add_label(
     start: str | pd.Timestamp,
     end: str | pd.Timestamp | None = None,
     metrics: list[str] | None = None,
-    note: str = "",
     label_id: str | None = None,
 ) -> dict[str, Any]:
     kind = kind.lower()
@@ -481,7 +484,6 @@ def add_label(
         "start": start_ts.isoformat(),
         "end": end_ts.isoformat(),
         "metrics": metrics or ["ALL"],
-        "note": note,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -510,8 +512,6 @@ def update_label(doc: dict[str, Any], label_id: str, **fields: Any) -> dict[str,
         found["kind"] = fields["kind"]
     if "tag" in fields:
         found["tag"] = fields["tag"]
-    if "note" in fields:
-        found["note"] = fields["note"]
     if "metrics" in fields:
         found["metrics"] = fields["metrics"]
     if "start" in fields:
@@ -797,16 +797,28 @@ def plot_series_window(
     return out
 
 
-def add_label_indicator(fig: go.Figure, item: dict[str, Any]) -> bool:
-    """Draw a label overlay; return True for a range label."""
+def add_label_indicator(
+    fig: go.Figure, item: dict[str, Any], *, highlight: bool = False
+) -> bool:
+    """Draw a label overlay; return True for a range label.
+
+    Unselected anomaly = yellow (web); selected = crimson fill/edges.
+    """
     s_utc = pd.to_datetime(item["start"], utc=True)
     e_utc = pd.to_datetime(item["end"], utc=True)
     s = to_plot_time(s_utc)
     e = to_plot_time(e_utc)
     tag = item.get("tag", "anomaly")
-    color = TAG_COLORS.get(tag, TAG_COLORS["anomaly"])
-    line = TAG_LINE.get(tag, "crimson")
     is_range = item.get("kind") == "range" or s_utc != e_utc
+
+    if highlight:
+        color = "rgba(220, 20, 60, 0.42)"
+        line = "crimson"
+        line_w = 3
+    else:
+        color = TAG_COLORS.get(tag, TAG_COLORS["anomaly"])
+        line = TAG_LINE.get(tag, "#c9a227")
+        line_w = 2
 
     if is_range:
         fig.add_vrect(
@@ -820,7 +832,7 @@ def add_label_indicator(fig: go.Figure, item: dict[str, Any]) -> bool:
     else:
         fig.add_vline(
             x=s,
-            line_width=2,
+            line_width=line_w,
             line_dash="solid",
             line_color=line,
             editable=False,
@@ -851,9 +863,6 @@ def label_line(item: dict[str, Any]) -> str:
         text = f"[점] anomaly · {start}"
     else:
         text = f"[구간] anomaly · {start} → {end}"
-    note = (item.get("note") or "").strip()
-    if note:
-        text += f" · {note}"
     return f"{text}  ({item.get('id')})"
 
 
@@ -993,6 +1002,7 @@ def build_figure(
     max_points: int = 1500,
     show_labels: bool = True,
     color_metrics: list[str] | None = None,
+    highlight_id: str | None = None,
 ) -> go.Figure:
     """Trend with label overlays. Zoom via xaxis range (keep full data for click/drag)."""
     view = _filter_df(df, start, end) if filter_data else df
@@ -1080,13 +1090,15 @@ def build_figure(
     y_ref = view[cols].max(axis=1) if len(view) and cols else None
 
     if show_labels:
+        hi = str(highlight_id) if highlight_id is not None else None
         for item in doc.get("labels", []):
             s_utc = pd.to_datetime(item["start"], utc=True)
-            tag = item.get("tag", "anomaly")
-            line = TAG_LINE.get(tag, "crimson")
-            note = item.get("note") or ""
             label_id = item.get("id", "")
-            add_label_indicator(fig, item)
+            selected = hi is not None and str(label_id) == hi
+            line = "crimson" if selected else TAG_LINE.get(
+                item.get("tag", "anomaly"), "#c9a227"
+            )
+            add_label_indicator(fig, item, highlight=selected)
 
             if y_ref is not None and len(view):
                 nearest = (view["time"] - s_utc).abs().idxmin()
@@ -1095,9 +1107,12 @@ def build_figure(
                         x=[to_plot_time(view.loc[nearest, "time"])],
                         y=[float(y_ref.loc[nearest])],
                         mode="markers",
-                        marker=dict(size=10, color=line, symbol="x"),
-                        name=f"{tag}:{label_id}",
-                        hovertext=f"{label_id} | {tag} | {note}",
+                        marker=dict(
+                            size=14 if selected else 10,
+                            color=line,
+                            symbol="x",
+                        ),
+                        name=f"{item.get('tag', 'anomaly')}:{label_id}",
                         hoverinfo="skip",
                         showlegend=False,
                     )

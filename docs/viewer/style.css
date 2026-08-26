@@ -101,6 +101,47 @@ h1 {
   margin-bottom: 10px;
 }
 
+.anomaly-bar {
+  margin-bottom: 10px;
+}
+
+.anomaly-title {
+  margin: 0 0 6px;
+  font-size: 1.05rem;
+}
+
+.anomaly-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.anomaly-row select {
+  width: min(680px, 100%);
+  min-width: 280px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--ink);
+  font-size: 0.92rem;
+}
+
+.anomaly-row button {
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--ink);
+  border-radius: 8px;
+  padding: 7px 12px;
+  cursor: pointer;
+  font-size: 0.88rem;
+}
+
+.anomaly-row button:hover {
+  border-color: #b8aea0;
+}
+
 .toolbar button {
   border: 1px solid var(--line);
   background: var(--card);
@@ -296,54 +337,10 @@ h1 {
   pointer-events: none !important;
 }
 
-.labels-panel {
-  margin-top: 18px;
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 14px 16px 10px;
-}
-
-.labels-panel h2 {
-  margin: 0 0 4px;
-  font-size: 1.05rem;
-}
-
 .hint {
-  margin: 0 0 10px;
+  margin: 0 0 8px;
   color: var(--muted);
   font-size: 0.82rem;
-}
-
-#label-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  max-height: 320px;
-  overflow: auto;
-}
-
-.label-item {
-  display: block;
-  width: 100%;
-  text-align: left;
-  border: 1px solid transparent;
-  background: transparent;
-  border-radius: 8px;
-  padding: 8px 10px;
-  cursor: pointer;
-  font-size: 0.88rem;
-  color: var(--ink);
-}
-
-.label-item:hover {
-  background: #f3eee4;
-}
-
-.label-item.selected {
-  border-color: var(--accent);
-  background: #f8ebe8;
-  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 .foot {

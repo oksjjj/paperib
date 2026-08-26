@@ -194,7 +194,6 @@ def export_one(
                 "tag": item.get("tag", "anomaly"),
                 "start": item.get("start"),
                 "end": item.get("end"),
-                "note": item.get("note") or "",
                 "line": label_line(item),
             }
         )

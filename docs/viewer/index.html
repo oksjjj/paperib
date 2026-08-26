@@ -7,7 +7,7 @@
   <meta http-equiv="Pragma" content="no-cache" />
   <title>Anomaly Label Viewer</title>
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
-  <link rel="stylesheet" href="style.css?v=1787708838" />
+  <link rel="stylesheet" href="style.css?v=1787737565" />
 </head>
 <body>
   <header class="top">
@@ -26,6 +26,17 @@
       </div>
     </div>
   </header>
+
+  <section class="anomaly-bar" aria-label="Anomaly">
+    <h2 class="anomaly-title">Anomaly</h2>
+    <div class="anomaly-row">
+      <select id="label-list" aria-label="anomaly 구간 선택">
+        <option value="">anomaly 구간 선택</option>
+      </select>
+      <button type="button" id="btn-clear-selection" title="라벨 선택 해제">선택 해제</button>
+      <button type="button" id="btn-zoom-selected" title="선택한 anomaly 구간으로 줌">선택 구간으로 줌</button>
+    </div>
+  </section>
 
   <section class="toolbar">
     <button type="button" id="btn-zoom" class="active" title="드래그로 구간 확대">줌</button>
@@ -64,16 +75,10 @@
     </div>
   </section>
 
-  <section class="labels-panel">
-    <h2>Anomaly 목록</h2>
-    <p class="hint">한 줄을 클릭하면 그래프에서 강조되고 해당 구간으로 이동합니다.</p>
-    <div id="label-list"></div>
-  </section>
-
   <footer class="foot">
     Plotly.js 정적 뷰어 · <code>python labeling/export_viewer.py</code> 로 data/ 갱신
   </footer>
 
-  <script src="app.js?v=1787708838"></script>
+  <script src="app.js?v=1787737565"></script>
 </body>
 </html>

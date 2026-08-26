@@ -418,12 +418,14 @@
 
   function shapesForLabels(labels, highlightId) {
     const shapes = [];
+    const hiId = highlightId == null ? null : String(highlightId);
     for (const item of labels || []) {
       const kind = (item.kind || "point").toLowerCase();
       const x0 = utcIsoToPlotNaive(item.start);
       const x1 = utcIsoToPlotNaive(item.end || item.start);
-      const hi = item.id === highlightId;
-      const stroke = hi ? "#c9a227" : "crimson";
+      const hi = hiId != null && String(item.id) === hiId;
+      // Unselected = yellow, selected = crimson (thicker).
+      const stroke = hi ? "crimson" : "#c9a227";
       const strokeW = hi ? 3 : 2;
       const isPoint = kind === "point" || item.start === item.end;
 
@@ -438,7 +440,7 @@
           x1,
           y0: 0,
           y1: 1,
-          fillcolor: hi ? "rgba(201,162,39,0.28)" : "rgba(220,20,60,0.28)",
+          fillcolor: hi ? "rgba(220,20,60,0.42)" : "rgba(201,162,39,0.28)",
           line: { width: 0 },
           layer: "above",
         });
@@ -491,6 +493,7 @@
     const sizes = [];
     const ids = [];
     const baseSize = coarsePointer ? 18 : 11;
+    const hiId = highlightId == null ? null : String(highlightId);
     for (const item of labels || []) {
       const kind = (item.kind || "point").toLowerCase();
       const edges =
@@ -500,14 +503,14 @@
               utcIsoToPlotNaive(item.start),
               utcIsoToPlotNaive(item.end || item.start),
             ];
-      const hi = item.id === highlightId;
+      const hi = hiId != null && String(item.id) === hiId;
       for (const x of edges) {
         const y = nearestEnvelopeY(parseTime(x));
         if (y == null) continue;
         xs.push(x);
         ys.push(y);
-        colors.push(hi ? "#c9a227" : "crimson");
-        sizes.push(hi ? baseSize + 4 : baseSize);
+        colors.push(hi ? "crimson" : "#c9a227");
+        sizes.push(hi ? baseSize + 5 : baseSize);
         ids.push(item.id);
       }
     }
@@ -1125,7 +1128,7 @@
       _ptrDown = null;
       if (!hit) return false;
       _tapLockUntil = Date.now() + 350;
-      selectLabel(hit.id, true);
+      selectLabel(hit.id, false);
       return true;
     };
 
@@ -1214,34 +1217,64 @@
     });
   }
 
+  let _labelListSyncing = false;
+
   function renderLabelList() {
-    listEl.innerHTML = "";
+    if (!listEl) return;
     const labels = payload?.labels || [];
-    if (!labels.length) {
-      listEl.innerHTML = '<p class="hint">라벨이 없습니다.</p>';
+    const prev = selectedId == null ? "" : String(selectedId);
+    _labelListSyncing = true;
+    listEl.innerHTML = "";
+    const empty = document.createElement("option");
+    empty.value = "";
+    empty.textContent = labels.length
+      ? "anomaly 구간 선택"
+      : "라벨 없음";
+    listEl.appendChild(empty);
+    for (const item of labels) {
+      const opt = document.createElement("option");
+      opt.value = String(item.id);
+      opt.textContent = item.line || `${item.kind} ${item.id}`;
+      listEl.appendChild(opt);
+    }
+    const keep = prev && labels.some((x) => String(x.id) === prev);
+    listEl.value = keep ? prev : "";
+    _labelListSyncing = false;
+  }
+
+  async function clearLabelSelection() {
+    selectedId = null;
+    _labelListSyncing = true;
+    if (listEl) listEl.value = "";
+    _labelListSyncing = false;
+    setStatus("라벨 선택이 해제되었습니다.");
+    // Same as the toolbar 「전체」 button.
+    await resetX();
+  }
+
+  async function zoomSelectedLabel() {
+    if (selectedId == null) {
+      setStatus("선택된 anomaly가 없습니다.");
       return;
     }
-    for (const item of labels) {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className =
-        "label-item" + (item.id === selectedId ? " selected" : "");
-      btn.textContent = item.line || `${item.kind} ${item.id}`;
-      btn.addEventListener("click", () => selectLabel(item.id, true));
-      listEl.appendChild(btn);
-    }
+    await selectLabel(selectedId, true);
   }
 
   async function selectLabel(id, zoomTo) {
-    selectedId = id;
-    const item = (payload.labels || []).find((x) => x.id === id);
+    if (id == null || id === "") {
+      await clearLabelSelection();
+      return;
+    }
+    const sid = String(id);
+    const item = (payload.labels || []).find((x) => String(x.id) === sid);
+    selectedId = item ? item.id : sid;
     renderLabelList();
     if (item && zoomTo) {
       const a = parseTime(utcIsoToPlotNaive(item.start));
       const b = parseTime(utcIsoToPlotNaive(item.end || item.start));
       let lo = Math.min(a, b);
       let hi = Math.max(a, b);
-      // Tight fit, then zoom-out ×7 (same idea as labeling "선택 라벨로 줌").
+      // Tight fit, then zoom-out ×7 (same idea as labeling "선택 구간으로 줌").
       const tight = Math.max(hi - lo, 30 * 60 * 1000);
       const mid = (lo + hi) / 2;
       const half = (tight * Math.pow(1 / 0.7, 7)) / 2;
@@ -1253,7 +1286,7 @@
       syncYAutoButton();
       // Compute Y before draw so both react + post-relayout share the same range.
       const yr = syncYFromX(lo, hi);
-      setStatus(`선택: ${item.line || item.id}`);
+      setStatus(`선택 구간으로 줌: ${item.line || item.id}`);
       await draw();
       if (yr) {
         suppressRelayout = true;
@@ -1563,6 +1596,20 @@
       return;
     }
     selectEl.addEventListener("change", () => loadPlmn(selectEl.value));
+    listEl.addEventListener("change", () => {
+      if (_labelListSyncing) return;
+      const id = listEl.value;
+      if (!id) {
+        clearLabelSelection();
+        return;
+      }
+      // Select only (yellow → red). Zoom via 「선택 구간으로 줌」.
+      selectLabel(id, false);
+    });
+    document.getElementById("btn-clear-selection").onclick = () =>
+      clearLabelSelection();
+    document.getElementById("btn-zoom-selected").onclick = () =>
+      zoomSelectedLabel();
     document.getElementById("btn-pan").onclick = () =>
       setInteractionMode("pan");
     document.getElementById("btn-zoom").onclick = () =>
@@ -1639,7 +1686,7 @@
       if (id == null || pt.data?.name !== "__anomaly_markers") return;
       if (Date.now() < _tapLockUntil) return;
       _tapLockUntil = Date.now() + 350;
-      selectLabel(id, true);
+      selectLabel(id, false);
     });
     scheduleResize();
   }
