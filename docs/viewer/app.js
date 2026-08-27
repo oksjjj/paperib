@@ -1,5 +1,21 @@
 (() => {
-  const DATA_BASE = "data";
+  const CATALOGS = {
+    labeled: {
+      dataBase: "data",
+      title: "Anomaly Label Viewer",
+      sub: "라벨 있는 사업자 · metric 필터 · 줌 / 이동 / 값 탐색 · 라벨 목록",
+      emptyIndex: "data/index.json 없음 — export_viewer.py 를 실행하세요.",
+    },
+    top100: {
+      dataBase: "data-top100",
+      title: "Top 100 사업자",
+      sub: "top100.txt 샘플링 시계열 · metric 필터 · 줌 / 이동 / 값 탐색",
+      emptyIndex:
+        "data-top100/index.json 없음 — export_viewer.py --catalog top100 를 실행하세요.",
+    },
+  };
+  let activeCatalog = "labeled";
+  let dataBase = CATALOGS.labeled.dataBase;
   // Same mid-tone palette as labeling/tool.py SERIES_COLORWAY.
   const SERIES_COLORWAY = [
     "#3d7ab5",
@@ -29,6 +45,10 @@
   const statusEl = document.getElementById("status");
   const metricListEl = document.getElementById("metric-filter-list");
   const hoverPanelEl = document.getElementById("hover-panel");
+  const pageTitleEl = document.getElementById("page-title");
+  const pageSubEl = document.getElementById("page-sub");
+  const tabLabeledEl = document.getElementById("tab-labeled");
+  const tabTop100El = document.getElementById("tab-top100");
 
   let catalog = [];
   let payload = null;
@@ -56,6 +76,69 @@
 
   function setStatus(text) {
     statusEl.textContent = text || "";
+  }
+
+  function catalogFromHash() {
+    const raw = (location.hash || "").replace(/^#/, "").trim().toLowerCase();
+    return raw === "top100" ? "top100" : "labeled";
+  }
+
+  function isLabeledCatalog() {
+    return activeCatalog === "labeled";
+  }
+
+  function anomaliesEnabled() {
+    return isLabeledCatalog() && showAnomalies;
+  }
+
+  function syncCatalogTabs() {
+    const isLabeled = isLabeledCatalog();
+    document.body.classList.toggle("catalog-labeled", isLabeled);
+    document.body.classList.toggle("catalog-top100", !isLabeled);
+    tabLabeledEl.classList.toggle("active", isLabeled);
+    tabTop100El.classList.toggle("active", !isLabeled);
+    tabLabeledEl.setAttribute("aria-selected", isLabeled ? "true" : "false");
+    tabTop100El.setAttribute("aria-selected", isLabeled ? "false" : "true");
+    const meta = CATALOGS[activeCatalog] || CATALOGS.labeled;
+    if (pageTitleEl) pageTitleEl.textContent = meta.title;
+    if (pageSubEl) pageSubEl.textContent = meta.sub;
+    document.title = meta.title;
+  }
+
+  function resetViewState() {
+    selectedId = null;
+    payload = null;
+    catalog = [];
+    xRange = null;
+    yRange = null;
+    yAuto = true;
+    hoverIndex = null;
+    inspectIndex = null;
+    visibleMetrics = new Set();
+    interactionMode = "zoom";
+    dragmode = "zoom";
+    showAnomalies = isLabeledCatalog();
+    syncYAutoButton();
+    syncOverlayButtons();
+    setInteractionMode("zoom", { redraw: false });
+    if (listEl) listEl.innerHTML = "";
+    if (selectEl) selectEl.innerHTML = "";
+    if (metricListEl) metricListEl.innerHTML = "";
+    if (hoverPanelEl) {
+      hoverPanelEl.innerHTML = "<em>그래프에 커서를 올리세요.</em>";
+    }
+  }
+
+  async function switchCatalog(next) {
+    if (!CATALOGS[next] || next === activeCatalog) return;
+    activeCatalog = next;
+    dataBase = CATALOGS[next].dataBase;
+    syncCatalogTabs();
+    if (location.hash !== `#${next}`) {
+      history.replaceState(null, "", `#${next}`);
+    }
+    resetViewState();
+    await loadCatalog();
   }
 
   function allMetricNames() {
@@ -320,7 +403,7 @@
       const opt = document.createElement("option");
       opt.value = row.plmn;
       const nLab = row.n_labels || 0;
-      const lab = nLab > 0 ? ` · labels ${nLab}` : "";
+      const lab = isLabeledCatalog() && nLab > 0 ? ` · labels ${nLab}` : "";
       opt.textContent = `#${String(row.rank ?? "").padStart(3, "0")} ${row.display}${lab}`;
       selectEl.appendChild(opt);
     }
@@ -676,7 +759,7 @@
         };
       });
 
-    if (showAnomalies) {
+    if (anomaliesEnabled()) {
       const markers = anomalyMarkerTrace(data.labels, highlightId);
       if (markers) traces.push(markers);
     }
@@ -734,13 +817,15 @@
         namelength: -1,
       },
       title: {
-        text: `${data.display || data.plmn} · labels=${(data.labels || []).length}`,
+        text: isLabeledCatalog()
+          ? `${data.display || data.plmn} · labels=${(data.labels || []).length}`
+          : `${data.display || data.plmn}`,
         font: { size: 14 },
       },
       xaxis,
       yaxis,
       shapes: (() => {
-        const out = showAnomalies
+        const out = anomaliesEnabled()
           ? shapesForLabels(data.labels, highlightId)
           : [];
         const cursorIdx =
@@ -1110,7 +1195,7 @@
     );
 
     const handleTap = (clientX, clientY, pointerType) => {
-      if (!showAnomalies || !payload) return false;
+      if (!anomaliesEnabled() || !payload) return false;
       if (Date.now() < _tapLockUntil) return false;
       if (!_ptrDown) return false;
       const dist = Math.hypot(clientX - _ptrDown.x, clientY - _ptrDown.y);
@@ -1377,6 +1462,7 @@
   }
 
   async function setShowAnomalies(on) {
+    if (!isLabeledCatalog()) return;
     if (showAnomalies === on) return;
     showAnomalies = on;
     syncOverlayButtons();
@@ -1427,7 +1513,7 @@
       _inspectCursorNeedsSync = true;
       return;
     }
-    const shapes = showAnomalies
+    const shapes = anomaliesEnabled()
       ? shapesForLabels(payload.labels, selectedId)
       : [];
     let annotations = (graphEl.layout.annotations || []).filter(
@@ -1623,20 +1709,22 @@
     hoverIndex = null;
     inspectIndex = null;
     syncYAutoButton();
-    const res = await fetch(`${DATA_BASE}/${plmn}.json`, { cache: "no-store" });
+    const res = await fetch(`${dataBase}/${plmn}.json`, { cache: "no-store" });
     if (!res.ok) throw new Error(`failed to load ${plmn}`);
     payload = await res.json();
     visibleMetrics = new Set(allMetricNames());
     hoverIndex = defaultHoverIndex();
     if (interactionMode === "inspect") inspectIndex = hoverIndex;
     renderMetricFilter();
-    renderLabelList();
+    if (isLabeledCatalog()) renderLabelList();
     await draw();
     refreshHoverPanel(hoverIndex);
     setStatus(
-      `${payload.start_kst} ~ ${payload.end_kst} · ${payload.n_points} pts · ${
-        (payload.labels || []).length
-      } labels`
+      isLabeledCatalog()
+        ? `${payload.start_kst} ~ ${payload.end_kst} · ${payload.n_points} pts · ${
+            (payload.labels || []).length
+          } labels`
+        : `${payload.start_kst} ~ ${payload.end_kst} · ${payload.n_points} pts`
     );
   }
 
@@ -1687,10 +1775,11 @@
     applyXYRelayout(x0, x1, { checkOffscreen: true });
   }
 
-  async function init() {
-    const res = await fetch(`${DATA_BASE}/index.json`, { cache: "no-store" });
+  async function loadCatalog() {
+    const meta = CATALOGS[activeCatalog] || CATALOGS.labeled;
+    const res = await fetch(`${dataBase}/index.json`, { cache: "no-store" });
     if (!res.ok) {
-      setStatus("data/index.json 없음 — export_viewer.py 를 실행하세요.");
+      setStatus(meta.emptyIndex);
       return;
     }
     const idx = await res.json();
@@ -1698,9 +1787,23 @@
     syncOverlayButtons();
     fillPlmnSelect(catalog);
     if (!catalog.length) {
-      setStatus("내보낼 사업자가 없습니다.");
+      setStatus("보낼 사업자가 없습니다.");
       return;
     }
+    await loadPlmn(catalog[0].plmn);
+  }
+
+  async function init() {
+    activeCatalog = catalogFromHash();
+    dataBase = CATALOGS[activeCatalog].dataBase;
+    syncCatalogTabs();
+    tabLabeledEl.addEventListener("click", () => switchCatalog("labeled"));
+    tabTop100El.addEventListener("click", () => switchCatalog("top100"));
+    window.addEventListener("hashchange", () => {
+      const next = catalogFromHash();
+      if (next !== activeCatalog) switchCatalog(next);
+    });
+
     selectEl.addEventListener("change", () => loadPlmn(selectEl.value));
     listEl.addEventListener("change", () => {
       if (_labelListSyncing) return;
@@ -1779,7 +1882,7 @@
     }
 
     // First plot must run before graphEl.on (Plotly attaches .on only after plot).
-    await loadPlmn(catalog[0].plmn);
+    await loadCatalog();
 
     graphEl.on("plotly_relayout", onRelayout);
     graphEl.on("plotly_hover", (ev) => {
@@ -1802,7 +1905,7 @@
         if (isFinite(ms)) selectInspectAtMs(ms);
         return;
       }
-      if (!showAnomalies) return;
+      if (!anomaliesEnabled()) return;
       const id = pt.customdata;
       if (id == null || pt.data?.name !== "__anomaly_markers") return;
       if (Date.now() < _tapLockUntil) return;

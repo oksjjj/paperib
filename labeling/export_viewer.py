@@ -1,17 +1,26 @@
 #!/usr/bin/env python3
-"""Export labeled PLMNs as static JSON for the GitHub Pages viewer.
+"""Export static JSON for the GitHub Pages viewer (two catalogs).
 
-Default: only PLMNs with non-empty ``labeling/labels/*_labels.json``,
-at full (or near-full) time resolution — intended for ≤ ~20 labeled operators.
+Catalogs (selected with ``--catalog``):
+
+- **labeled** (default): PLMNs with non-empty ``labeling/labels/*_labels.json``
+  → ``docs/viewer/data/`` · high resolution (≤ ~20 operators recommended)
+- **top100**: every PLMN in repo-root ``top100.txt``
+  → ``docs/viewer/data-top100/`` · downsampled (default 5k points)
+- **both**: run labeled + top100 (use before ``git push`` for the full web UI)
 
 Usage:
-    python labeling/export_viewer.py                 # labeled only (default)
-    python labeling/export_viewer.py --all-labeled   # same as default
-    python labeling/export_viewer.py --top-n 50      # M971 rank top-N instead
+    python labeling/export_viewer.py                      # labeled only
+    python labeling/export_viewer.py --catalog both       # Pages: 라벨링 + Top 100 탭
+    python labeling/export_viewer.py --catalog top100   # Top 100 only
     python labeling/export_viewer.py --plmn P0480 P0193
 
-Output goes to docs/viewer/data/ (committed for Pages).
-Source labeling/labels/*.json can stay gitignored; labels are embedded when present.
+Git / Pages:
+    python labeling/export_viewer.py --catalog both
+    git add docs/viewer/ && git commit && git push
+
+Source ``labeling/labels/*.json`` can stay gitignored; labels are embedded in
+labeled JSON when present. Top-100 JSON has no anomaly UI on the web tab.
 """
 
 from __future__ import annotations
@@ -48,10 +57,14 @@ from tool import (  # noqa: E402
 # Viewer JSON is public (GitHub Pages) — never embed PLMN/metric mapping.
 set_mapping_enabled(False)
 
-OUT_DIR = os.path.join(os.path.dirname(ROOT), "docs", "viewer", "data")
+LABELED_OUT_DIR = os.path.join(os.path.dirname(ROOT), "docs", "viewer", "data")
+TOP100_OUT_DIR = os.path.join(os.path.dirname(ROOT), "docs", "viewer", "data-top100")
 VIEWER_DIR = os.path.join(os.path.dirname(ROOT), "docs", "viewer")
 # Labeled-only set is small (≤~20): keep full 5-min cadence when possible.
 DEFAULT_MAX_POINTS = 100_000
+# Top-100 tab: downsample for local browsing (not committed to git by default).
+DEFAULT_TOP100_MAX_POINTS = 5_000
+TOP100_LIST_PATH = os.path.join(os.path.dirname(ROOT), "top100.txt")
 DEFAULT_MAX_METRICS = 46
 # Soft guidance — Pages stays light if labeling stays within this.
 DEFAULT_LABELED_SOFT_CAP = 20
@@ -120,16 +133,29 @@ def _labeled_plmns() -> list[str]:
     return found
 
 
-def _purge_stale_exports(keep_plmns: list[str]) -> None:
+def _top100_plmns() -> list[str]:
+    """PLMNs listed in repo-root top100.txt (order preserved)."""
+    if not os.path.isfile(TOP100_LIST_PATH):
+        raise SystemExit(f"top100 list not found: {TOP100_LIST_PATH}")
+    out: list[str] = []
+    with open(TOP100_LIST_PATH, encoding="utf-8") as f:
+        for line in f:
+            plmn = line.strip()
+            if plmn and not plmn.startswith("#"):
+                out.append(plmn)
+    return out
+
+
+def _purge_stale_exports(keep_plmns: list[str], out_dir: str) -> None:
     """Remove viewer JSON not in the current export set."""
-    if not os.path.isdir(OUT_DIR):
+    if not os.path.isdir(out_dir):
         return
     keep = {f"{p}.json" for p in keep_plmns}
     keep.add("index.json")
-    for name in os.listdir(OUT_DIR):
+    for name in os.listdir(out_dir):
         if not name.endswith(".json") or name in keep:
             continue
-        path = os.path.join(OUT_DIR, name)
+        path = os.path.join(out_dir, name)
         os.remove(path)
         print(f"removed stale {path}", flush=True)
 
@@ -215,68 +241,35 @@ def export_one(
     return payload
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--plmn", nargs="*", default=None, help="PLMN ids to export")
-    parser.add_argument(
-        "--top-n",
-        type=int,
-        default=None,
-        help="Export top N by M971 rank (overrides labeled-only default)",
-    )
-    parser.add_argument(
-        "--all-labeled",
-        action="store_true",
-        help="Export every PLMN that currently has labels (default if --top-n/--plmn omitted)",
-    )
-    parser.add_argument("--max-points", type=int, default=DEFAULT_MAX_POINTS)
-    parser.add_argument("--max-metrics", type=int, default=DEFAULT_MAX_METRICS)
-    parser.add_argument(
-        "--label-pad-min",
-        type=int,
-        default=DEFAULT_LABEL_PAD_MIN,
-        help="Full-resolution minutes kept on each side of a label",
-    )
-    args = parser.parse_args()
-
-    if args.plmn:
-        plmns = list(args.plmn)
-    elif args.top_n is not None:
-        plmns = _top_plmns(args.top_n)
-    else:
-        # Default + --all-labeled: only operators with saved anomaly labels.
-        plmns = _labeled_plmns()
-        if len(plmns) > DEFAULT_LABELED_SOFT_CAP:
-            print(
-                f"warning: {len(plmns)} labeled PLMNs "
-                f"(soft cap {DEFAULT_LABELED_SOFT_CAP}); "
-                f"Pages/git size may grow — keep labeling ≤{DEFAULT_LABELED_SOFT_CAP} "
-                f"or pass --max-points lower",
-                flush=True,
-            )
-
+def export_catalog(
+    plmns: list[str],
+    out_dir: str,
+    *,
+    catalog: str,
+    max_points: int,
+    max_metrics: int,
+    label_pad_min: int,
+    top_n: int | None = None,
+) -> None:
     if not plmns:
-        raise SystemExit(
-            "No PLMNs to export. Add labels under labeling/labels/, "
-            "or pass --top-n / --plmn."
-        )
+        raise SystemExit(f"No PLMNs to export for catalog={catalog!r}.")
 
-    os.makedirs(OUT_DIR, exist_ok=True)
-    _purge_stale_exports(plmns)
+    os.makedirs(out_dir, exist_ok=True)
+    _purge_stale_exports(plmns, out_dir)
     index = []
     for i, plmn in enumerate(plmns, 1):
-        print(f"[{i}/{len(plmns)}] export {plmn} ...", flush=True)
+        print(f"[{catalog} {i}/{len(plmns)}] export {plmn} ...", flush=True)
         try:
             payload = export_one(
                 plmn,
-                max_points=args.max_points,
-                max_metrics=args.max_metrics,
-                label_pad_min=args.label_pad_min,
+                max_points=max_points,
+                max_metrics=max_metrics,
+                label_pad_min=label_pad_min,
             )
         except Exception as exc:
             print(f"  !! skip {plmn}: {exc}", flush=True)
             continue
-        path = os.path.join(OUT_DIR, f"{plmn}.json")
+        path = os.path.join(out_dir, f"{plmn}.json")
         with open(path, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, separators=(",", ":"))
         size_kb = os.path.getsize(path) / 1024
@@ -299,24 +292,116 @@ def main() -> None:
         )
 
     if not index:
-        raise SystemExit("No PLMNs exported successfully.")
+        raise SystemExit(f"No PLMNs exported successfully for catalog={catalog!r}.")
 
-    index_path = os.path.join(OUT_DIR, "index.json")
-    build_id = stamp_viewer_assets()
+    index_path = os.path.join(out_dir, "index.json")
     with open(index_path, "w", encoding="utf-8") as f:
         json.dump(
-            {"build": build_id, "top_n": args.top_n, "plmns": index},
+            {
+                "catalog": catalog,
+                "build": None,
+                "top_n": top_n,
+                "plmns": index,
+            },
             f,
             ensure_ascii=False,
             indent=2,
         )
     total_mb = sum(
-        os.path.getsize(os.path.join(OUT_DIR, row["file"])) for row in index
+        os.path.getsize(os.path.join(out_dir, row["file"])) for row in index
     ) / (1024 * 1024)
     print(
-        f"wrote {index_path} ({len(index)} PLMNs, "
-        f"build={build_id}, data≈{total_mb:.1f} MiB)"
+        f"wrote {index_path} ({len(index)} PLMNs, data≈{total_mb:.1f} MiB)",
+        flush=True,
     )
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--plmn", nargs="*", default=None, help="PLMN ids to export")
+    parser.add_argument(
+        "--top-n",
+        type=int,
+        default=None,
+        help="Export top N by M971 rank (legacy; writes to labeled data/)",
+    )
+    parser.add_argument(
+        "--catalog",
+        choices=("labeled", "top100", "both"),
+        default="labeled",
+        help="labeled=data/ (default), top100=data-top100/, both=both dirs",
+    )
+    parser.add_argument(
+        "--all-labeled",
+        action="store_true",
+        help="Export every PLMN that currently has labels (default if --top-n/--plmn omitted)",
+    )
+    parser.add_argument("--max-points", type=int, default=None)
+    parser.add_argument(
+        "--top100-max-points",
+        type=int,
+        default=DEFAULT_TOP100_MAX_POINTS,
+        help=f"Max points per PLMN for --catalog top100/both (default {DEFAULT_TOP100_MAX_POINTS})",
+    )
+    parser.add_argument("--max-metrics", type=int, default=DEFAULT_MAX_METRICS)
+    parser.add_argument(
+        "--label-pad-min",
+        type=int,
+        default=DEFAULT_LABEL_PAD_MIN,
+        help="Full-resolution minutes kept on each side of a label",
+    )
+    args = parser.parse_args()
+
+    labeled_max = args.max_points if args.max_points is not None else DEFAULT_MAX_POINTS
+    build_id = stamp_viewer_assets()
+
+    def labeled_plmns() -> list[str]:
+        if args.plmn:
+            return list(args.plmn)
+        if args.top_n is not None:
+            return _top_plmns(args.top_n)
+        plmns = _labeled_plmns()
+        if len(plmns) > DEFAULT_LABELED_SOFT_CAP:
+            print(
+                f"warning: {len(plmns)} labeled PLMNs "
+                f"(soft cap {DEFAULT_LABELED_SOFT_CAP}); "
+                f"Pages/git size may grow — keep labeling ≤{DEFAULT_LABELED_SOFT_CAP} "
+                f"or pass --max-points lower",
+                flush=True,
+            )
+        return plmns
+
+    catalogs: list[tuple[str, str, list[str], int, int | None]] = []
+    if args.catalog in ("labeled", "both"):
+        catalogs.append(("labeled", LABELED_OUT_DIR, labeled_plmns(), labeled_max, args.top_n))
+    if args.catalog in ("top100", "both"):
+        catalogs.append(
+            (
+                "top100",
+                TOP100_OUT_DIR,
+                _top100_plmns(),
+                int(args.top100_max_points),
+                len(_top100_plmns()),
+            )
+        )
+
+    for catalog, out_dir, plmns, max_points, top_n in catalogs:
+        export_catalog(
+            plmns,
+            out_dir,
+            catalog=catalog,
+            max_points=max_points,
+            max_metrics=args.max_metrics,
+            label_pad_min=args.label_pad_min,
+            top_n=top_n,
+        )
+        index_path = os.path.join(out_dir, "index.json")
+        idx = json.loads(open(index_path, encoding="utf-8").read())
+        idx["build"] = build_id
+        with open(index_path, "w", encoding="utf-8") as f:
+            json.dump(idx, f, ensure_ascii=False, indent=2)
+
+    print(f"viewer assets ?v={build_id}", flush=True)
 
 
 if __name__ == "__main__":

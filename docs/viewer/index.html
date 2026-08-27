@@ -7,27 +7,36 @@
   <meta http-equiv="Pragma" content="no-cache" />
   <title>Anomaly Label Viewer</title>
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
-  <link rel="stylesheet" href="style.css?v=1787872977" />
+  <link rel="stylesheet" href="style.css?v=1787874012" />
 </head>
 <body>
+  <nav class="catalog-tabs" role="tablist" aria-label="뷰어 모드">
+    <button type="button" id="tab-labeled" class="active" role="tab" aria-selected="true">
+      라벨링
+    </button>
+    <button type="button" id="tab-top100" role="tab" aria-selected="false">
+      Top 100
+    </button>
+  </nav>
+
   <header class="top">
     <div>
-      <h1>Anomaly Label Viewer</h1>
-      <p class="sub">라벨 있는 사업자 · metric 필터 · 줌 / 이동 / 값 탐색 · 라벨 목록</p>
+      <h1 id="page-title">Anomaly Label Viewer</h1>
+      <p class="sub" id="page-sub">라벨 있는 사업자 · metric 필터 · 줌 / 이동 / 값 탐색 · 라벨 목록</p>
     </div>
     <div class="top-controls">
       <label class="plmn-pick">
         사업자
         <select id="plmn-select"></select>
       </label>
-      <div class="view-mode" role="group" aria-label="anomaly 오버레이">
+      <div class="view-mode anomaly-ui" id="anomaly-overlay-mode" role="group" aria-label="anomaly 오버레이">
         <button type="button" id="btn-mode-anomaly" class="active" title="그래프에 anomaly 표시">anomaly 표시</button>
         <button type="button" id="btn-mode-plain" title="그래프에서 anomaly 숨김">anomaly 숨김</button>
       </div>
     </div>
   </header>
 
-  <section class="anomaly-bar" aria-label="Anomaly">
+  <section class="anomaly-bar anomaly-ui" aria-label="Anomaly">
     <h2 class="anomaly-title">Anomaly</h2>
     <div class="anomaly-row">
       <select id="label-list" aria-label="anomaly 구간 선택">
@@ -79,6 +88,6 @@
     Plotly.js 정적 뷰어 · <code>python labeling/export_viewer.py</code> 로 data/ 갱신
   </footer>
 
-  <script src="app.js?v=1787872977"></script>
+  <script src="app.js?v=1787874012"></script>
 </body>
 </html>

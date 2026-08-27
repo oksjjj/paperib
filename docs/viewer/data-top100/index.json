@@ -1,0 +1,907 @@
+{
+  "catalog": "top100",
+  "build": "1787873698",
+  "top_n": 100,
+  "plmns": [
+    {
+      "plmn": "P0480",
+      "display": "P0480",
+      "rank": 1,
+      "n_labels": 25,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P0480.json"
+    },
+    {
+      "plmn": "P0714",
+      "display": "P0714",
+      "rank": 2,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P0714.json"
+    },
+    {
+      "plmn": "P2794",
+      "display": "P2794",
+      "rank": 3,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P2794.json"
+    },
+    {
+      "plmn": "P1888",
+      "display": "P1888",
+      "rank": 4,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P1888.json"
+    },
+    {
+      "plmn": "P2614",
+      "display": "P2614",
+      "rank": 5,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P2614.json"
+    },
+    {
+      "plmn": "P0975",
+      "display": "P0975",
+      "rank": 6,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P0975.json"
+    },
+    {
+      "plmn": "P2309",
+      "display": "P2309",
+      "rank": 7,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P2309.json"
+    },
+    {
+      "plmn": "P1833",
+      "display": "P1833",
+      "rank": 8,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P1833.json"
+    },
+    {
+      "plmn": "P0193",
+      "display": "P0193",
+      "rank": 9,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P0193.json"
+    },
+    {
+      "plmn": "P0876",
+      "display": "P0876",
+      "rank": 10,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P0876.json"
+    },
+    {
+      "plmn": "P1921",
+      "display": "P1921",
+      "rank": 11,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P1921.json"
+    },
+    {
+      "plmn": "P0899",
+      "display": "P0899",
+      "rank": 12,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P0899.json"
+    },
+    {
+      "plmn": "P1575",
+      "display": "P1575",
+      "rank": 13,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P1575.json"
+    },
+    {
+      "plmn": "P1852",
+      "display": "P1852",
+      "rank": 14,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P1852.json"
+    },
+    {
+      "plmn": "P1106",
+      "display": "P1106",
+      "rank": 15,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P1106.json"
+    },
+    {
+      "plmn": "P0139",
+      "display": "P0139",
+      "rank": 16,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P0139.json"
+    },
+    {
+      "plmn": "P1956",
+      "display": "P1956",
+      "rank": 17,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P1956.json"
+    },
+    {
+      "plmn": "P2765",
+      "display": "P2765",
+      "rank": 18,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P2765.json"
+    },
+    {
+      "plmn": "P0110",
+      "display": "P0110",
+      "rank": 19,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P0110.json"
+    },
+    {
+      "plmn": "P2291",
+      "display": "P2291",
+      "rank": 20,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P2291.json"
+    },
+    {
+      "plmn": "P2187",
+      "display": "P2187",
+      "rank": 21,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P2187.json"
+    },
+    {
+      "plmn": "P2645",
+      "display": "P2645",
+      "rank": 22,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P2645.json"
+    },
+    {
+      "plmn": "P0515",
+      "display": "P0515",
+      "rank": 23,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P0515.json"
+    },
+    {
+      "plmn": "P1066",
+      "display": "P1066",
+      "rank": 24,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P1066.json"
+    },
+    {
+      "plmn": "P1055",
+      "display": "P1055",
+      "rank": 26,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P1055.json"
+    },
+    {
+      "plmn": "P1038",
+      "display": "P1038",
+      "rank": 25,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P1038.json"
+    },
+    {
+      "plmn": "P1669",
+      "display": "P1669",
+      "rank": 27,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P1669.json"
+    },
+    {
+      "plmn": "P2788",
+      "display": "P2788",
+      "rank": 28,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P2788.json"
+    },
+    {
+      "plmn": "P0518",
+      "display": "P0518",
+      "rank": 29,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P0518.json"
+    },
+    {
+      "plmn": "P2875",
+      "display": "P2875",
+      "rank": 30,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P2875.json"
+    },
+    {
+      "plmn": "P1640",
+      "display": "P1640",
+      "rank": 31,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P1640.json"
+    },
+    {
+      "plmn": "P2994",
+      "display": "P2994",
+      "rank": 32,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P2994.json"
+    },
+    {
+      "plmn": "P0634",
+      "display": "P0634",
+      "rank": 33,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P0634.json"
+    },
+    {
+      "plmn": "P2387",
+      "display": "P2387",
+      "rank": 34,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P2387.json"
+    },
+    {
+      "plmn": "P1720",
+      "display": "P1720",
+      "rank": 35,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P1720.json"
+    },
+    {
+      "plmn": "P2812",
+      "display": "P2812",
+      "rank": 36,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P2812.json"
+    },
+    {
+      "plmn": "P2362",
+      "display": "P2362",
+      "rank": 37,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P2362.json"
+    },
+    {
+      "plmn": "P0230",
+      "display": "P0230",
+      "rank": 38,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P0230.json"
+    },
+    {
+      "plmn": "P0902",
+      "display": "P0902",
+      "rank": 39,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P0902.json"
+    },
+    {
+      "plmn": "P1160",
+      "display": "P1160",
+      "rank": 40,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P1160.json"
+    },
+    {
+      "plmn": "P0682",
+      "display": "P0682",
+      "rank": 41,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P0682.json"
+    },
+    {
+      "plmn": "P2838",
+      "display": "P2838",
+      "rank": 43,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P2838.json"
+    },
+    {
+      "plmn": "P1040",
+      "display": "P1040",
+      "rank": 42,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P1040.json"
+    },
+    {
+      "plmn": "P2950",
+      "display": "P2950",
+      "rank": 44,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P2950.json"
+    },
+    {
+      "plmn": "P0504",
+      "display": "P0504",
+      "rank": 45,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P0504.json"
+    },
+    {
+      "plmn": "P0753",
+      "display": "P0753",
+      "rank": 50,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P0753.json"
+    },
+    {
+      "plmn": "P0613",
+      "display": "P0613",
+      "rank": 47,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P0613.json"
+    },
+    {
+      "plmn": "P0235",
+      "display": "P0235",
+      "rank": 46,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P0235.json"
+    },
+    {
+      "plmn": "P1655",
+      "display": "P1655",
+      "rank": 48,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P1655.json"
+    },
+    {
+      "plmn": "P2359",
+      "display": "P2359",
+      "rank": 49,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P2359.json"
+    },
+    {
+      "plmn": "P1065",
+      "display": "P1065",
+      "rank": 51,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P1065.json"
+    },
+    {
+      "plmn": "P0486",
+      "display": "P0486",
+      "rank": 52,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P0486.json"
+    },
+    {
+      "plmn": "P0647",
+      "display": "P0647",
+      "rank": 53,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P0647.json"
+    },
+    {
+      "plmn": "P2090",
+      "display": "P2090",
+      "rank": 54,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P2090.json"
+    },
+    {
+      "plmn": "P2731",
+      "display": "P2731",
+      "rank": 55,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P2731.json"
+    },
+    {
+      "plmn": "P0312",
+      "display": "P0312",
+      "rank": 56,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P0312.json"
+    },
+    {
+      "plmn": "P1095",
+      "display": "P1095",
+      "rank": 57,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P1095.json"
+    },
+    {
+      "plmn": "P0015",
+      "display": "P0015",
+      "rank": 58,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P0015.json"
+    },
+    {
+      "plmn": "P2180",
+      "display": "P2180",
+      "rank": 59,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P2180.json"
+    },
+    {
+      "plmn": "P2335",
+      "display": "P2335",
+      "rank": 61,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P2335.json"
+    },
+    {
+      "plmn": "P1727",
+      "display": "P1727",
+      "rank": 60,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P1727.json"
+    },
+    {
+      "plmn": "P0155",
+      "display": "P0155",
+      "rank": 62,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P0155.json"
+    },
+    {
+      "plmn": "P2680",
+      "display": "P2680",
+      "rank": 64,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P2680.json"
+    },
+    {
+      "plmn": "P0090",
+      "display": "P0090",
+      "rank": 63,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P0090.json"
+    },
+    {
+      "plmn": "P2208",
+      "display": "P2208",
+      "rank": 66,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P2208.json"
+    },
+    {
+      "plmn": "P0815",
+      "display": "P0815",
+      "rank": 65,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P0815.json"
+    },
+    {
+      "plmn": "P1566",
+      "display": "P1566",
+      "rank": 67,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P1566.json"
+    },
+    {
+      "plmn": "P0473",
+      "display": "P0473",
+      "rank": 68,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P0473.json"
+    },
+    {
+      "plmn": "P1719",
+      "display": "P1719",
+      "rank": 69,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P1719.json"
+    },
+    {
+      "plmn": "P1936",
+      "display": "P1936",
+      "rank": 70,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P1936.json"
+    },
+    {
+      "plmn": "P1917",
+      "display": "P1917",
+      "rank": 71,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P1917.json"
+    },
+    {
+      "plmn": "P2495",
+      "display": "P2495",
+      "rank": 72,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P2495.json"
+    },
+    {
+      "plmn": "P2592",
+      "display": "P2592",
+      "rank": 73,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P2592.json"
+    },
+    {
+      "plmn": "P0288",
+      "display": "P0288",
+      "rank": 74,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P0288.json"
+    },
+    {
+      "plmn": "P2465",
+      "display": "P2465",
+      "rank": 75,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P2465.json"
+    },
+    {
+      "plmn": "P2207",
+      "display": "P2207",
+      "rank": 76,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P2207.json"
+    },
+    {
+      "plmn": "P0134",
+      "display": "P0134",
+      "rank": 78,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P0134.json"
+    },
+    {
+      "plmn": "P1243",
+      "display": "P1243",
+      "rank": 77,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P1243.json"
+    },
+    {
+      "plmn": "P2578",
+      "display": "P2578",
+      "rank": 79,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P2578.json"
+    },
+    {
+      "plmn": "P2638",
+      "display": "P2638",
+      "rank": 80,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P2638.json"
+    },
+    {
+      "plmn": "P1475",
+      "display": "P1475",
+      "rank": 81,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P1475.json"
+    },
+    {
+      "plmn": "P1856",
+      "display": "P1856",
+      "rank": 82,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P1856.json"
+    },
+    {
+      "plmn": "P1516",
+      "display": "P1516",
+      "rank": 83,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P1516.json"
+    },
+    {
+      "plmn": "P2935",
+      "display": "P2935",
+      "rank": 84,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P2935.json"
+    },
+    {
+      "plmn": "P0398",
+      "display": "P0398",
+      "rank": 85,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P0398.json"
+    },
+    {
+      "plmn": "P2438",
+      "display": "P2438",
+      "rank": 86,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P2438.json"
+    },
+    {
+      "plmn": "P1467",
+      "display": "P1467",
+      "rank": 87,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P1467.json"
+    },
+    {
+      "plmn": "P1330",
+      "display": "P1330",
+      "rank": 88,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P1330.json"
+    },
+    {
+      "plmn": "P0423",
+      "display": "P0423",
+      "rank": 89,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P0423.json"
+    },
+    {
+      "plmn": "P1323",
+      "display": "P1323",
+      "rank": 90,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P1323.json"
+    },
+    {
+      "plmn": "P2206",
+      "display": "P2206",
+      "rank": 91,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P2206.json"
+    },
+    {
+      "plmn": "P0442",
+      "display": "P0442",
+      "rank": 92,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P0442.json"
+    },
+    {
+      "plmn": "P2897",
+      "display": "P2897",
+      "rank": 93,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P2897.json"
+    },
+    {
+      "plmn": "P1075",
+      "display": "P1075",
+      "rank": 94,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P1075.json"
+    },
+    {
+      "plmn": "P1745",
+      "display": "P1745",
+      "rank": 97,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P1745.json"
+    },
+    {
+      "plmn": "P1837",
+      "display": "P1837",
+      "rank": 96,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P1837.json"
+    },
+    {
+      "plmn": "P1435",
+      "display": "P1435",
+      "rank": 95,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P1435.json"
+    },
+    {
+      "plmn": "P1254",
+      "display": "P1254",
+      "rank": 98,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P1254.json"
+    },
+    {
+      "plmn": "P1943",
+      "display": "P1943",
+      "rank": 99,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P1943.json"
+    },
+    {
+      "plmn": "P2918",
+      "display": "P2918",
+      "rank": 100,
+      "n_labels": 0,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 27일 23:55",
+      "file": "P2918.json"
+    }
+  ]
+}
