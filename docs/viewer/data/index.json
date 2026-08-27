@@ -1,24 +1,15 @@
 {
-  "build": "1787872059",
+  "build": "1787872977",
   "top_n": null,
   "plmns": [
     {
       "plmn": "P0480",
       "display": "P0480",
       "rank": 1,
-      "n_labels": 24,
+      "n_labels": 25,
       "start_kst": "2026년 04월 30일 00:00",
       "end_kst": "2026년 08월 27일 23:55",
       "file": "P0480.json"
-    },
-    {
-      "plmn": "P0714",
-      "display": "P0714",
-      "rank": 2,
-      "n_labels": 2,
-      "start_kst": "2026년 04월 30일 00:00",
-      "end_kst": "2026년 08월 27일 23:55",
-      "file": "P0714.json"
     }
   ]
 }
