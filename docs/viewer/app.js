@@ -39,6 +39,9 @@
     "#9a7aab",
     "#c97a55",
   ];
+  const M971_COL = "M971";
+  const M971_TOD_LABEL = "M971 · 시각별 평균 (전기간)";
+  const M971_TOD_COLOR = "#ff1a1a";
   const graphEl = document.getElementById("graph");
   const selectEl = document.getElementById("plmn-select");
   const listEl = document.getElementById("label-list");
@@ -261,9 +264,7 @@
 
   function formatMetricValue(v) {
     if (v == null || !isFinite(v)) return "—";
-    if (Math.abs(v) >= 1000) return Math.round(v).toLocaleString("en-US");
-    if (Number.isInteger(v)) return String(v);
-    return String(Math.round(v * 1000) / 1000);
+    return Math.round(v).toLocaleString("en-US");
   }
 
   function nearestTimeIndex(ms) {
@@ -303,6 +304,49 @@
     return Math.floor((payload.t.length - 1) / 2);
   }
 
+  function kstTodMinutes(tStr) {
+    const ms = parseTime(tStr);
+    if (!isFinite(ms)) return null;
+    const d = new Date(ms);
+    return d.getUTCHours() * 60 + d.getUTCMinutes();
+  }
+
+  /** Build m971_tod_ref on the client when missing (e.g. old top100 export). */
+  function ensureM971TodRef(data) {
+    if (!data?.t?.length || !data.metrics?.[M971_COL]) return;
+    if (
+      Array.isArray(data.m971_tod_ref) &&
+      data.m971_tod_ref.length === data.t.length
+    ) {
+      return;
+    }
+    const sum = new Map();
+    const cnt = new Map();
+    for (let i = 0; i < data.t.length; i++) {
+      const v = data.metrics[M971_COL][i];
+      if (v == null || !isFinite(v)) continue;
+      const tod = kstTodMinutes(data.t[i]);
+      if (tod == null) continue;
+      sum.set(tod, (sum.get(tod) || 0) + Number(v));
+      cnt.set(tod, (cnt.get(tod) || 0) + 1);
+    }
+    data.m971_tod_ref = data.t.map((t, i) => {
+      const tod = kstTodMinutes(t);
+      if (tod == null) return null;
+      const c = cnt.get(tod);
+      return c ? sum.get(tod) / c : null;
+    });
+  }
+
+  function m971TodRefEnabled(data) {
+    return (
+      visibleMetrics.has(M971_COL) &&
+      data?.metrics?.[M971_COL] &&
+      Array.isArray(data.m971_tod_ref) &&
+      data.m971_tod_ref.length === data.t?.length
+    );
+  }
+
   function refreshHoverPanel(index) {
     if (!hoverPanelEl) return;
     if (index == null) {
@@ -328,8 +372,15 @@
         const v = payload.metrics[name]?.[index];
         return { name, val: v == null || !isFinite(v) ? NaN : Number(v) };
       })
-      .filter((p) => isFinite(p.val) && p.val !== 0)
-      .sort((a, b) => b.val - a.val);
+      .filter((p) => isFinite(p.val) && p.val !== 0);
+    if (m971TodRefEnabled(payload)) {
+      const rv = payload.m971_tod_ref[index];
+      const rval = rv == null || !isFinite(rv) ? NaN : Number(rv);
+      if (isFinite(rval) && rval !== 0) {
+        pairs.push({ name: M971_TOD_LABEL, val: rval });
+      }
+    }
+    pairs.sort((a, b) => b.val - a.val);
     if (!pairs.length) {
       hoverPanelEl.innerHTML =
         "<em>이 시점에 0이 아닌 특성값이 없습니다.</em>";
@@ -639,6 +690,13 @@
         if (v < ymin) ymin = v;
         if (v > ymax) ymax = v;
       }
+      if (m971TodRefEnabled(data)) {
+        const rv = data.m971_tod_ref[i];
+        if (rv != null && isFinite(rv)) {
+          if (rv < ymin) ymin = rv;
+          if (rv > ymax) ymax = rv;
+        }
+      }
     }
     if (!(ymax >= ymin) || !isFinite(ymin) || !isFinite(ymax)) return null;
     const span = ymax - ymin;
@@ -754,10 +812,26 @@
           hovertemplate:
             "<b>%{fullData.name}</b><br>" +
             "%{x|%Y년 %m월 %d일 %H:%M}<br>" +
-            "값=%{y}<extra></extra>",
+            "값=%{y:,.0f}<extra></extra>",
           uid: name,
         };
       });
+
+    if (m971TodRefEnabled(data)) {
+      traces.push({
+        type: "scatter",
+        mode: "lines",
+        name: M971_TOD_LABEL,
+        x: data.t,
+        y: data.m971_tod_ref,
+        line: { width: 2, color: M971_TOD_COLOR },
+        hovertemplate:
+          `<b>${M971_TOD_LABEL}</b><br>` +
+          "%{x|%Y년 %m월 %d일 %H:%M}<br>" +
+          "값=%{y:,.0f}<extra></extra>",
+        uid: "__m971_tod_ref__",
+      });
+    }
 
     if (anomaliesEnabled()) {
       const markers = anomalyMarkerTrace(data.labels, highlightId);
@@ -1712,6 +1786,7 @@
     const res = await fetch(`${dataBase}/${plmn}.json`, { cache: "no-store" });
     if (!res.ok) throw new Error(`failed to load ${plmn}`);
     payload = await res.json();
+    ensureM971TodRef(payload);
     visibleMetrics = new Set(allMetricNames());
     hoverIndex = defaultHoverIndex();
     if (interactionMode === "inspect") inspectIndex = hoverIndex;

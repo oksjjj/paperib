@@ -10,7 +10,8 @@ Catalogs (selected with ``--catalog``):
 - **both**: run labeled + top100 (use before ``git push`` for the full web UI)
 
 Usage:
-    python labeling/export_viewer.py                      # labeled only
+    python labeling/export_viewer.py                      # both (labeled + top100)
+    python labeling/export_viewer.py --catalog labeled    # labeled only
     python labeling/export_viewer.py --catalog both       # Pages: 라벨링 + Top 100 탭
     python labeling/export_viewer.py --catalog top100   # Top 100 only
     python labeling/export_viewer.py --plmn P0480 P0193
@@ -42,6 +43,7 @@ os.chdir(ROOT)
 
 from tool import (  # noqa: E402
     LABEL_DIR,
+    M971_COL,
     data_time_bounds,
     format_kst,
     label_line,
@@ -50,6 +52,7 @@ from tool import (  # noqa: E402
     load_plmn,
     metric_columns,
     minmax_indices,
+    m971_tod_mean_series,
     set_mapping_enabled,
     to_plot_times,
 )
@@ -211,6 +214,12 @@ def export_one(
     for col in cols:
         metrics[str(col)] = _round_series(df[col].to_numpy()[idx])
 
+    m971_tod_ref = None
+    if M971_COL in cols:
+        tod_series = m971_tod_mean_series(df)
+        if tod_series is not None:
+            m971_tod_ref = _round_series(tod_series.to_numpy()[idx])
+
     labels = []
     for item in label_items:
         labels.append(
@@ -238,6 +247,8 @@ def export_one(
         "metrics": metrics,
         "labels": labels,
     }
+    if m971_tod_ref is not None:
+        payload["m971_tod_ref"] = m971_tod_ref
     return payload
 
 
@@ -328,8 +339,8 @@ def main() -> None:
     parser.add_argument(
         "--catalog",
         choices=("labeled", "top100", "both"),
-        default="labeled",
-        help="labeled=data/ (default), top100=data-top100/, both=both dirs",
+        default="both",
+        help="labeled=data/, top100=data-top100/, both=both (default)",
     )
     parser.add_argument(
         "--all-labeled",

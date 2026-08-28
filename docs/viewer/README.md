@@ -7,13 +7,13 @@
 | **라벨링** | `data/` | 라벨 있는 사업자 · anomaly UI · 고해상도 (권장 ≤ 20개) |
 | **Top 100** | `data-top100/` | `top100.txt` 100개 · 샘플링 시계열 · anomaly UI 없음 |
 
-공통 기능: 이동 / 박스 줌 / **값 탐색** / 줌인·줌아웃 / 전체 · Y+ / Y- / Y 자동 · metric 필터 · hover 패널
+공통 기능: 이동 / 박스 줌 / **값 탐색** / 줌인·줌아웃 / 전체 · Y+ / Y- / Y 자동 · metric 필터 · hover 패널 · **M971 시각별 평균 (전기간)** 참조선
 
 ## 로컬에서 보기
 
 ```bash
-# 두 탭 모두 쓰려면 both export (처음 또는 데이터 갱신 후)
-.venv/bin/python labeling/export_viewer.py --catalog both
+# 두 탭 모두 쓰려면 export (기본값이 labeled + top100)
+.venv/bin/python labeling/export_viewer.py
 
 cd docs/viewer && ../../.venv/bin/python -m http.server 8765
 # → http://127.0.0.1:8765/
@@ -23,9 +23,9 @@ cd docs/viewer && ../../.venv/bin/python -m http.server 8765
 export 옵션:
 
 ```bash
-.venv/bin/python labeling/export_viewer.py                    # 라벨링 탭만 (data/)
-.venv/bin/python labeling/export_viewer.py --catalog top100   # Top 100만 (data-top100/)
-.venv/bin/python labeling/export_viewer.py --catalog both     # 둘 다 (git push 전 권장)
+.venv/bin/python labeling/export_viewer.py                    # labeled + top100 (기본)
+.venv/bin/python labeling/export_viewer.py --catalog labeled
+.venv/bin/python labeling/export_viewer.py --catalog top100
 .venv/bin/python labeling/export_viewer.py --plmn P0480
 .venv/bin/python labeling/export_viewer.py --top100-max-points 8000  # Top 100 용량 조절
 ```
@@ -33,7 +33,7 @@ export 옵션:
 ## GitHub Pages에 반영
 
 ```bash
-.venv/bin/python labeling/export_viewer.py --catalog both
+.venv/bin/python labeling/export_viewer.py
 git add docs/viewer/
 git commit -m "Update viewer export"
 git push

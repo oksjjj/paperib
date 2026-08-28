@@ -48,6 +48,9 @@ from tool import (  # noqa: E402
     load_or_build_ranking,
     load_plmn,
     metric_columns,
+    m971_daily_mean_series,
+    M971_COL,
+    M971_DAILY_AVG_KEY,
     parse_time,
     pending_anchor_shape,
     pending_range_fill_shape,
@@ -761,6 +764,13 @@ def _visible_y_bounds() -> tuple[float, float] | None:
     series = view[metrics]
     ymin = float(series.min(numeric_only=True).min())
     ymax = float(series.max(numeric_only=True).max())
+    if M971_COL in metrics:
+        dm = state.get("m971_daily_mean")
+        if dm is not None:
+            dmv = dm.loc[view.index]
+            if len(dmv):
+                ymin = min(ymin, float(dmv.min()))
+                ymax = max(ymax, float(dmv.max()))
     if not (ymin == ymin and ymax == ymax):  # NaN check
         return None
     # Metrics are counts, so the baseline stays at zero unless data goes below it.
@@ -829,11 +839,21 @@ def _hover_panel_at_row(row: pd.Series):
     cols = _plot_metrics()
     if not cols:
         return html.I("표시 중인 metric이 없습니다. 위에서 metric을 선택하세요.")
-    pairs = ranked_metric_pairs(row, cols, nonzero_only=True)
+    extra: list[tuple[str, float]] = []
+    if M971_COL in cols:
+        dm = state.get("m971_daily_mean")
+        if dm is not None:
+            try:
+                v = float(dm.loc[row.name])
+            except (KeyError, TypeError, ValueError):
+                v = float("nan")
+            if v == v and v != 0:
+                extra.append((M971_DAILY_AVG_KEY, v))
+    pairs = ranked_metric_pairs(row, cols, nonzero_only=True) + extra
     if not pairs:
         return html.I("이 시점에 0이 아닌 특성값이 없습니다.")
     return dcc.Markdown(
-        ranked_hover_html(row["time"], row, cols),
+        ranked_hover_html(row["time"], row, cols, extra_pairs=extra or None),
         dangerously_allow_html=True,
     )
 
@@ -1269,6 +1289,7 @@ def _do_load(plmn: str, click_mode: str):
     metrics = metric_columns(df)
     doc = load_labels(plmn, rank=rank)
     tmin, tmax = data_time_bounds(df)
+    dm = m971_daily_mean_series(df)
     state.update(
         df=df,
         doc=doc,
@@ -1276,6 +1297,7 @@ def _do_load(plmn: str, click_mode: str):
         rank=rank,
         metrics=metrics,
         visible_metrics=list(metrics),
+        m971_daily_mean=dm,
         metric_rev=int(state.get("metric_rev") or 0) + 1,
         zoom_start=tmin,
         zoom_end=tmax,

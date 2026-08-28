@@ -168,10 +168,47 @@ def display_plmn(plmn: str) -> str:
     return f"{plmn} ({short})" if short else plmn
 
 
+M971_COL = "M971"
+M971_DAILY_AVG_KEY = "__m971_daily_avg__"
+M971_DAILY_AVG_COLOR = "#ff1a1a"
+
+
 def display_metric(metric: str) -> str:
     """M971 or M971 (COMB_ATTEMPT) when mapping exists."""
+    if metric == M971_DAILY_AVG_KEY:
+        base = display_metric(M971_COL)
+        return f"{base} · 시각별 평균 (전기간)"
     original = metric_original(metric)
     return f"{metric} ({original})" if original else metric
+
+
+def m971_tod_mean_series(df: pd.DataFrame) -> pd.Series | None:
+    """M971 mean at each KST clock time (00:05, 00:10, …) across the full series."""
+    if M971_COL not in df.columns or not len(df):
+        return None
+    kst = pd.to_datetime(df["time"], utc=True).dt.tz_convert(KST)
+    tod = kst.dt.hour * 60 + kst.dt.minute
+    profile = df.groupby(tod, sort=True)[M971_COL].mean()
+    return tod.map(profile)
+
+
+m971_daily_mean_series = m971_tod_mean_series
+
+
+def _window_row_indices(
+    df: pd.DataFrame,
+    start: pd.Timestamp | None,
+    end: pd.Timestamp | None,
+) -> np.ndarray:
+    """All row indices in the (padded) visible window — no min/max thinning."""
+    n = len(df)
+    if n == 0:
+        return np.array([], dtype=int)
+    detail_start, detail_end = detail_window(df, start, end)
+    pos = window_positions(df, detail_start, detail_end)
+    if pos is None:
+        return np.arange(n, dtype=int)
+    return pos
 
 
 def to_kst(ts) -> pd.Timestamp:
@@ -548,9 +585,7 @@ def ranked_metric_pairs(
 
 
 def format_metric_value(value: float) -> str:
-    if float(value).is_integer():
-        return f"{int(value):,}"
-    return f"{value:,.4g}"
+    return f"{round(float(value)):,}"
 
 
 # Highlighted in the "이 시점 특성값" panel (rank, name, and value).
@@ -574,9 +609,19 @@ def ranked_hover_text(
     return sep.join(lines)
 
 
-def ranked_hover_html(ts, row: pd.Series, cols: list[str], *, cols_per_row: int = 4) -> str:
+def ranked_hover_html(
+    ts,
+    row: pd.Series,
+    cols: list[str],
+    *,
+    cols_per_row: int = 4,
+    extra_pairs: list[tuple[str, float]] | None = None,
+) -> str:
     """Scrollable grid of metric values, largest first, left-to-right then wrap."""
     pairs = ranked_metric_pairs(row, cols, nonzero_only=True)
+    if extra_pairs:
+        pairs = pairs + list(extra_pairs)
+        pairs.sort(key=lambda x: x[1], reverse=True)
     items = []
     for i, (name, val) in enumerate(pairs, start=1):
         bg = "#f6f8fa" if ((i - 1) // cols_per_row) % 2 else "#ffffff"
@@ -1066,13 +1111,40 @@ def build_figure(
                 hovertemplate=(
                     f"<b>{metric_name}</b><br>"
                     "%{x|%Y년 %m월 %d일 %H:%M}<br>"
-                    "값=%{y}<extra></extra>"
+                    "값=%{y:,.0f}<extra></extra>"
                 ),
                 # Stable uid: embedding data_rev remounts every Scattergl on zoom
                 # and freezes the browser. datarevision alone refreshes series data.
                 uid=col,
             )
         )
+
+    # M971 reference: 전기간 시각별 평균 (매일 같은 일주기 곡선).
+    if M971_COL in cols and len(view):
+        tod_full = m971_tod_mean_series(df)
+        if tod_full is not None:
+            tod_vals = tod_full.loc[view.index].to_numpy(dtype="float64")
+            idx = _window_row_indices(view, start, end)
+            if len(idx):
+                ref_name = display_metric(M971_DAILY_AVG_KEY)
+                fig.add_trace(
+                    go.Scatter(
+                        x=to_plot_times(view["time"].to_numpy()[idx]),
+                        y=tod_vals[idx],
+                        mode="lines",
+                        name=ref_name,
+                        line=dict(
+                            width=2,
+                            color=M971_DAILY_AVG_COLOR,
+                        ),
+                        hovertemplate=(
+                            f"<b>{ref_name}</b><br>"
+                            "%{x|%Y년 %m월 %d일 %H:%M}<br>"
+                            "값=%{y:,.0f}<extra></extra>"
+                        ),
+                        uid=M971_DAILY_AVG_KEY,
+                    )
+                )
 
     if len(view) and cols:
         top = view[cols].max(axis=1)
@@ -1216,7 +1288,7 @@ def build_metric_figure(
             mode="lines",
             name=display_metric(metric),
             line=dict(width=1.5, color="steelblue"),
-            hovertemplate="%{x|%Y년 %m월 %d일 %H:%M}<br>%{y}<extra></extra>",
+            hovertemplate="%{x|%Y년 %m월 %d일 %H:%M}<br>%{y:,.0f}<extra></extra>",
         )
     )
     for item in doc.get("labels", []):
