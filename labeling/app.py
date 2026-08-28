@@ -103,6 +103,7 @@ state: dict = {
     "label_range_anchor": None,
     "highlight_id": None,
     "highlight_shape_idxs": None,
+    "label_rev": 0,
     "confirm_action": None,
     "value_cursor_pos": None,
     "hover_pos": None,
@@ -330,6 +331,10 @@ def _cancel_style(click_mode: str):
     return {"display": "none"}
 
 
+def _bump_label_rev() -> None:
+    state["label_rev"] = int(state.get("label_rev") or 0) + 1
+
+
 def _build_graph(click_mode: str):
     if state["df"] is None or state["doc"] is None:
         return _empty_figure()
@@ -370,11 +375,12 @@ def _build_graph(click_mode: str):
     # metric_rev on filter changes forces Scattergl to drop removed series —
     # otherwise Plotly.react can leave ghost WebGL traces after 전체 해제.
     metric_rev = int(state.get("metric_rev") or 0)
+    label_rev = int(state.get("label_rev") or 0)
     fig.update_layout(
         datarevision=(
-            f"{fig.layout.datarevision}:{state['fig_gen']}:m{metric_rev}"
+            f"{fig.layout.datarevision}:{state['fig_gen']}:m{metric_rev}:l{label_rev}"
         ),
-        uirevision=f"{state.get('plmn') or 'labeling'}:m{metric_rev}",
+        uirevision=f"{state.get('plmn') or 'labeling'}:m{metric_rev}:l{label_rev}",
         # Match dcc.Graph style height so select/redraw never shrinks the plot.
         # autosize stays True so width keeps filling the host.
         height=420,
@@ -572,6 +578,8 @@ def _place_label_click(ts, click_mode: str):
         lid = after[0]["id"] if after else None
         state["highlight_id"] = lid
         opts = _label_options()
+        _bump_label_rev()
+        _arm_place_click_guard()
         return (
             _build_graph(click_mode),
             opts,
@@ -591,6 +599,7 @@ def _place_label_click(ts, click_mode: str):
     anchor = state["label_range_anchor"]
     if anchor is None:
         state["label_range_anchor"] = _snap_to_data_time(ts)
+        _arm_place_click_guard()
         return (
             _build_graph(click_mode),
             no_update,
@@ -635,15 +644,19 @@ def _place_label_click(ts, click_mode: str):
     state["highlight_id"] = lid
     opts = _label_options()
     when = f"{format_kst(a)} → {format_kst(b)}"
+    _bump_label_rev()
+    state["_range_label_done"] = int(time.time() * 1000)
+    state["_keep_highlight_id"] = True
+    _arm_place_click_guard()
     return (
-        _build_graph(click_mode),
+        no_update,
         opts,
         lid,
         html.Span(
-            f"✔ [구간] anomaly 추가됨 ({lid}) {when} — Save Labels로 저장",
+            f"✔ [구간] anomaly 추가됨 ({lid}) {when} — Save Labels로 저장 · 이동(Y자동)",
             style={"color": "green"},
         ),
-        _cancel_style(click_mode),
+        {"display": "none"},
         no_update,
         no_update,
     )
@@ -1106,6 +1119,15 @@ def _arm_select_guard(seconds: float = 2.0) -> None:
     until = time.monotonic() + seconds
     state["select_guard_until"] = until
     state["zoom_guard_until"] = until
+
+
+def _arm_place_click_guard(seconds: float = 0.45) -> None:
+    """Drop the trailing clickData echo after shape-click placement."""
+    state["place_click_guard_until"] = time.monotonic() + seconds
+
+
+def _place_click_guarded() -> bool:
+    return time.monotonic() < float(state.get("place_click_guard_until") or 0)
 
 
 def _make_axis_cmd(
@@ -1648,6 +1670,7 @@ app.layout = html.Div(
         dcc.Store(id="axis-cmd"),
         dcc.Store(id="axis-cmd-ack"),
         dcc.Store(id="rebuild-trigger"),
+        dcc.Store(id="range-label-done"),
     ],
     style={"fontFamily": "sans-serif", "padding": "12px", "maxWidth": "100%"},
 )
@@ -1663,6 +1686,7 @@ app.layout = html.Div(
     Output("dd-plmn", "value"),
     Output("metric-filter", "options"),
     Output("metric-filter", "value"),
+    Output("range-label-done", "data"),
     Input("dd-plmn", "value"),
     Input("btn-prev", "n_clicks"),
     Input("btn-next", "n_clicks"),
@@ -1724,14 +1748,27 @@ def _main(
         view_range,
     )
     if result is None:
-        return (no_update,) * 9
+        return (no_update,) * 10
     out = list(result) if len(result) == 9 else list(result) + [no_update, no_update]
     # Keep filter order in sync with the current on-screen window whenever the
     # figure is rebuilt (zoom / pan / PLMN load already set options explicitly).
     if out[0] is not no_update and state.get("df") is not None and out[7] is no_update:
         m_opts, _ = _metric_filter_ui()
         out[7] = m_opts
+    out.append(state.pop("_range_label_done", no_update))
     return tuple(out)
+
+
+@app.callback(
+    Output("click-mode", "value", allow_duplicate=True),
+    Output("rebuild-trigger", "data", allow_duplicate=True),
+    Input("range-label-done", "data"),
+    prevent_initial_call=True,
+)
+def _finish_range_label(seq):
+    if not seq:
+        return no_update, no_update
+    return "pan", {"seq": seq, "t": time.time()}
 
 
 @app.callback(
@@ -1971,7 +2008,8 @@ def _main_body(
         state["label_range_anchor"] = None
         if click_mode != "inspect":
             state["value_cursor_pos"] = None
-        if selected_label:
+        keep_highlight = state.pop("_keep_highlight_id", False)
+        if selected_label and not keep_highlight:
             state["highlight_id"] = selected_label
         if click_mode == "zoom":
             status = "그래프에서 좌우로 드래그해 시간축을 확대하세요."
@@ -2072,6 +2110,7 @@ def _main_body(
             remove_label(state["doc"], selected_label)
             if state.get("highlight_id") == selected_label:
                 state["highlight_id"] = None
+            _bump_label_rev()
             opts = _label_options()
             return (
                 _build_graph(click_mode),
@@ -2255,12 +2294,14 @@ def _main_body(
         ):
             return (no_update,) * 7
         # shape-click + clickData often fire for one gesture — drop the second.
-        if click_mode in ("label_range", "label_point", "edit_range", "inspect") and now - last_at < 0.35:
+        if click_mode in ("edit_range", "inspect", "label_point") and now - last_at < 0.35:
             return (no_update,) * 7
         state["_last_click"] = (ts, now)
 
         # Range/point placement: prefer this path (works on empty plot area).
         if click_mode in ("label_range", "label_point"):
+            if _place_click_guarded():
+                return (no_update,) * 7
             placed = _place_label_click(ts, click_mode)
             return placed if placed is not None else (no_update,) * 7
 
@@ -2306,7 +2347,7 @@ def _main_body(
             and now - last_at < 0.35
         ):
             return (no_update,) * 7
-        if click_mode in ("label_range", "label_point", "inspect") and now - last_at < 0.35:
+        if click_mode in ("edit_range", "inspect", "label_point") and now - last_at < 0.35:
             return (no_update,) * 7
         state["_last_click"] = (ts, now)
 
@@ -2329,6 +2370,8 @@ def _main_body(
         # label_range / label_point: shape-click handles empty-area taps;
         # clickData still places when the click lands on a trace.
         if click_mode in ("label_range", "label_point"):
+            if _place_click_guarded():
+                return (no_update,) * 7
             placed = _place_label_click(ts, click_mode)
             return placed if placed is not None else (no_update,) * 7
 
@@ -2641,6 +2684,17 @@ app.clientside_callback(
 app.clientside_callback(
     """
     function(mode) {
+        window.__currentClickMode = mode;
+        if (mode !== 'label_range') {
+            var host0 = document.getElementById('graph');
+            var gd0 = host0 && host0.querySelector('.js-plotly-plot');
+            if (gd0 && window.__clearPendingRangePreview) {
+                window.__clearPendingRangePreview(gd0);
+            }
+            if (gd0 && window.__scrubStalePendingRangeFill) {
+                window.__scrubStalePendingRangeFill(gd0, true);
+            }
+        }
         window.__valueInspectMode = mode === 'inspect';
         window.__editRangeMode = mode === 'edit_range';
         window.__labelPlaceMode = (mode === 'label_range' || mode === 'label_point');
@@ -3270,7 +3324,6 @@ app.clientside_callback(
                 if (drag.__pendingRangePreviewBound) return;
                 drag.__pendingRangePreviewBound = true;
                 var raf = null;
-                var lastX1 = null;
 
                 function plotXToMs(xVal) {
                     if (xVal == null) return NaN;
@@ -3316,6 +3369,9 @@ app.clientside_callback(
                 }
 
                 drag.addEventListener('pointermove', function(ev) {
+                    if (window.__currentClickMode !== 'label_range') {
+                        return;
+                    }
                     var meta = (gd.layout && gd.layout.meta) || {};
                     var idx = meta.pending_fill_index;
                     var start = meta.pending_range_start;
@@ -3331,14 +3387,14 @@ app.clientside_callback(
                     var patch = {};
                     if (curMs > startMs) {
                         var x1 = formatPlotNaive(curMs);
-                        if (x1 === lastX1) return;
-                        lastX1 = x1;
+                        if (x1 === drag.__pendingRangeLastX1) return;
+                        drag.__pendingRangeLastX1 = x1;
                         patch['shapes[' + idx + '].x0'] = start;
                         patch['shapes[' + idx + '].x1'] = x1;
                         patch['shapes[' + idx + '].fillcolor'] = 'rgba(200, 16, 46, 0.38)';
                     } else {
-                        if (lastX1 === null) return;
-                        lastX1 = null;
+                        if (drag.__pendingRangeLastX1 == null) return;
+                        drag.__pendingRangeLastX1 = null;
                         patch['shapes[' + idx + '].x1'] = start;
                         patch['shapes[' + idx + '].fillcolor'] = 'rgba(0,0,0,0)';
                     }
@@ -3348,17 +3404,64 @@ app.clientside_callback(
                     });
                 });
                 drag.addEventListener('pointerleave', function() {
+                    if (window.__currentClickMode !== 'label_range') {
+                        return;
+                    }
                     var meta = (gd.layout && gd.layout.meta) || {};
                     var idx = meta.pending_fill_index;
                     var start = meta.pending_range_start;
                     if (idx == null || start == null || !window.Plotly) return;
-                    lastX1 = null;
+                    drag.__pendingRangeLastX1 = null;
                     window.Plotly.relayout(gd, {
                         ['shapes[' + idx + '].x1']: start,
                         ['shapes[' + idx + '].fillcolor']: 'rgba(0,0,0,0)'
                     });
                 });
             };
+
+            if (!window.__clearPendingRangePreview) {
+                window.__clearPendingRangePreview = function(gd) {
+                    if (!gd || !window.Plotly) return;
+                    var meta = (gd.layout && gd.layout.meta) || {};
+                    var idx = meta.pending_fill_index;
+                    var start = meta.pending_range_start;
+                    if (idx == null || start == null) return;
+                    var drag = gd.querySelector('.nsewdrag');
+                    if (drag) drag.__pendingRangeLastX1 = null;
+                    window.Plotly.relayout(gd, {
+                        ['shapes[' + idx + '].x1']: start,
+                        ['shapes[' + idx + '].fillcolor']: 'rgba(0,0,0,0)'
+                    });
+                };
+            }
+
+            if (!window.__scrubStalePendingRangeFill) {
+                window.__scrubStalePendingRangeFill = function(gd, force) {
+                    if (!gd || !gd.layout || !window.Plotly) return;
+                    var meta = (gd.layout && gd.layout.meta) || {};
+                    if (!force && (meta.pending_fill_index != null
+                        || meta.pending_range_start != null)) {
+                        return;
+                    }
+                    var shapes = gd.layout.shapes;
+                    if (!shapes || !shapes.length) return;
+                    var patch = {};
+                    for (var i = 0; i < shapes.length; i++) {
+                        var s = shapes[i];
+                        if (!s) continue;
+                        if (s.name === 'pending_range_fill') {
+                            patch['shapes[' + i + '].fillcolor'] = 'rgba(0,0,0,0)';
+                            if (s.x0 != null) patch['shapes[' + i + '].x1'] = s.x0;
+                        } else if (s.name === 'pending_range_anchor') {
+                            patch['shapes[' + i + '].line.color'] = 'rgba(0,0,0,0)';
+                            patch['shapes[' + i + '].line.width'] = 0;
+                        }
+                    }
+                    if (Object.keys(patch).length) {
+                        window.Plotly.relayout(gd, patch);
+                    }
+                };
+            }
 
             // Empty-area time tooltip + royalblue dotted spike (match Plotly spikes).
             // Match Plotly hoverlabel look + %{x|%Y년 %m월 %d일 %H:%M} + 5-min snap.
@@ -3625,6 +3728,10 @@ app.clientside_callback(
             }
             if (window.__installPlaceTimeTip) {
                 window.__installPlaceTimeTip(gd);
+            }
+            if (window.__scrubStalePendingRangeFill) {
+                var forceScrub = window.__currentClickMode !== 'label_range';
+                window.__scrubStalePendingRangeFill(gd, forceScrub);
             }
             var drag = gd.querySelector('.nsewdrag');
             if (drag && !window.__editRangeMode) {

@@ -195,20 +195,23 @@ def m971_tod_mean_series(df: pd.DataFrame) -> pd.Series | None:
 m971_daily_mean_series = m971_tod_mean_series
 
 
-def _window_row_indices(
+def window_plot_indices(
+    values: np.ndarray,
     df: pd.DataFrame,
     start: pd.Timestamp | None,
     end: pd.Timestamp | None,
+    max_points: int,
 ) -> np.ndarray:
-    """All row indices in the (padded) visible window — no min/max thinning."""
+    """Dataset ends + high-res visible window — same sampling as plot_series_window."""
     n = len(df)
     if n == 0:
         return np.array([], dtype=int)
     detail_start, detail_end = detail_window(df, start, end)
     pos = window_positions(df, detail_start, detail_end)
+    ends = np.array([0, n - 1], dtype=int)
     if pos is None:
-        return np.arange(n, dtype=int)
-    return pos
+        return minmax_indices(values, max_points)
+    return np.union1d(ends, pos[minmax_indices(values[pos], max_points)])
 
 
 def to_kst(ts) -> pd.Timestamp:
@@ -824,20 +827,16 @@ def plot_series_window(
     """
     if not len(df):
         return {col: ([], []) for col in cols}
-    detail_start, detail_end = detail_window(df, start, end, pad_ratio=pad_ratio)
-    pos = window_positions(df, detail_start, detail_end)
     times = to_plot_times(df["time"])
-    n = len(df)
-    ends = np.array([0, n - 1], dtype=int) if n else np.array([], dtype=int)
     out: dict[str, tuple[Any, Any]] = {}
     for col in cols:
         values = df[col].to_numpy()
         if include_context:
+            detail_start, detail_end = detail_window(df, start, end, pad_ratio=pad_ratio)
+            pos = window_positions(df, detail_start, detail_end)
             idx = window_indices(values, pos, max_points)
-        elif pos is None:
-            idx = minmax_indices(values, max_points)
         else:
-            idx = np.union1d(ends, pos[minmax_indices(values[pos], max_points)])
+            idx = window_plot_indices(values, df, start, end, max_points)
         out[col] = (times[idx], values[idx])
     return out
 
@@ -1120,16 +1119,19 @@ def build_figure(
         )
 
     # M971 reference: 전기간 시각별 평균 (매일 같은 일주기 곡선).
+    # Same window_plot_indices as metric traces so pan/zoom does not slide the
+    # line as a detached blob before the deferred rebuild.
     if M971_COL in cols and len(view):
         tod_full = m971_tod_mean_series(df)
         if tod_full is not None:
             tod_vals = tod_full.loc[view.index].to_numpy(dtype="float64")
-            idx = _window_row_indices(view, start, end)
+            times = to_plot_times(view["time"])
+            idx = window_plot_indices(tod_vals, view, start, end, max_points)
             if len(idx):
                 ref_name = display_metric(M971_DAILY_AVG_KEY)
                 fig.add_trace(
                     go.Scatter(
-                        x=to_plot_times(view["time"].to_numpy()[idx]),
+                        x=times[idx],
                         y=tod_vals[idx],
                         mode="lines",
                         name=ref_name,
