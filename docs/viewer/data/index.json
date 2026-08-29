@@ -1,6 +1,6 @@
 {
   "catalog": "labeled",
-  "build": "1787878212",
+  "build": "1788007872",
   "top_n": null,
   "plmns": [
     {
@@ -9,8 +9,17 @@
       "rank": 1,
       "n_labels": 25,
       "start_kst": "2026년 04월 30일 00:00",
-      "end_kst": "2026년 08월 27일 23:55",
+      "end_kst": "2026년 08월 28일 23:55",
       "file": "P0480.json"
+    },
+    {
+      "plmn": "P0714",
+      "display": "P0714",
+      "rank": 2,
+      "n_labels": 36,
+      "start_kst": "2026년 04월 30일 00:00",
+      "end_kst": "2026년 08월 28일 23:55",
+      "file": "P0714.json"
     }
   ]
 }
