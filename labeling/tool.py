@@ -936,7 +936,7 @@ def add_label_indicator(
         line = TAG_LINE.get(tag, "#c9a227")
         line_w = 2
 
-    def _edge(x) -> None:
+    def _edge(x, which: str, label_id: str) -> None:
         fig.add_shape(
             type="line",
             xref="x",
@@ -948,9 +948,11 @@ def add_label_indicator(
             line=dict(color=line, width=line_w),
             layer="above",
             editable=False,
+            name=f"label_edge_{which}:{label_id}" if label_id else None,
         )
 
     if is_range:
+        lid = str(item.get("id") or "")
         fig.add_shape(
             type="rect",
             xref="x",
@@ -963,11 +965,13 @@ def add_label_indicator(
             line=dict(width=0),
             layer="above",
             editable=False,
+            name=f"label_fill:{lid}" if lid else None,
         )
-        _edge(s)
-        _edge(e)
+        _edge(s, "start", lid)
+        _edge(e, "end", lid)
     else:
-        _edge(s)
+        lid = str(item.get("id") or "")
+        _edge(s, "start", lid)
     return is_range
 
 
@@ -1112,7 +1116,7 @@ def pending_range_fill_shape(start_ts, end_ts=None) -> dict[str, Any]:
         y1=1,
         fillcolor=TAG_COLORS["anomaly"] if show else "rgba(0,0,0,0)",
         line=dict(width=0),
-        layer="below",
+        layer="above",
         editable=False,
         name=PENDING_RANGE_FILL_NAME,
     )

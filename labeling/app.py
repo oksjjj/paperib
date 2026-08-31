@@ -108,6 +108,7 @@ state: dict = {
     "highlight_id": None,
     "highlight_shape_idxs": None,
     "label_rev": 0,
+    "place_rev": 0,
     "confirm_action": None,
     "value_cursor_pos": None,
     "hover_pos": None,
@@ -359,6 +360,88 @@ def _bump_label_rev() -> None:
     state["label_rev"] = int(state.get("label_rev") or 0) + 1
 
 
+def _bump_place_rev() -> None:
+    """Bump when range-placement overlays change (Plotly uirevision)."""
+    state["place_rev"] = int(state.get("place_rev") or 0) + 1
+
+
+def _shape_name(shape) -> str | None:
+    if shape is None:
+        return None
+    if isinstance(shape, dict):
+        raw = shape.get("name")
+        return str(raw) if raw else None
+    if getattr(shape, "name", None):
+        return str(shape.name)
+    if hasattr(shape, "to_plotly_json"):
+        raw = (shape.to_plotly_json() or {}).get("name")
+        return str(raw) if raw else None
+    return None
+
+
+def _shape_json(shape) -> dict:
+    if isinstance(shape, dict):
+        return shape
+    if hasattr(shape, "to_plotly_json"):
+        return shape.to_plotly_json() or {}
+    return {}
+
+
+def _edit_label_shape_meta(
+    fig, highlight_id: str, doc: dict | None = None
+) -> dict[str, int]:
+    """Shape indices for live edge drag (fill + edges + highlight lines)."""
+    hid = str(highlight_id)
+    out: dict[str, int] = {}
+    shapes = fig.layout.shapes or ()
+    for i, shape in enumerate(shapes):
+        name = _shape_name(shape)
+        if name == f"label_fill:{hid}":
+            out["fill"] = i
+        elif name == f"label_edge_start:{hid}":
+            out["edge_start"] = i
+        elif name == f"label_edge_end:{hid}":
+            out["edge_end"] = i
+        elif name == LABEL_HIGHLIGHT_START:
+            out["hi_start"] = i
+        elif name == LABEL_HIGHLIGHT_END:
+            out["hi_end"] = i
+
+    if out.get("fill") is not None and out.get("edge_start") is not None:
+        return out
+
+    item = None
+    if doc:
+        item = next(
+            (x for x in doc.get("labels", []) if str(x.get("id")) == hid),
+            None,
+        )
+    if item is None:
+        return out
+
+    s = str(to_plot_time(pd.to_datetime(item["start"], utc=True)))
+    e = str(to_plot_time(pd.to_datetime(item["end"], utc=True)))
+    is_range = item.get("kind") == "range" or s != e
+    for i, shape in enumerate(shapes):
+        j = _shape_json(shape)
+        stype = j.get("type")
+        if is_range and stype == "rect" and out.get("fill") is None:
+            if str(j.get("x0")) == s and str(j.get("x1")) == e:
+                out["fill"] = i
+        elif stype == "line":
+            x = str(j.get("x0"))
+            if x == s and i != out.get("hi_start") and out.get("edge_start") is None:
+                out["edge_start"] = i
+            elif (
+                is_range
+                and x == e
+                and i != out.get("hi_end")
+                and out.get("edge_end") is None
+            ):
+                out["edge_end"] = i
+    return out
+
+
 def _build_graph(click_mode: str):
     if state["df"] is None or state["doc"] is None:
         return _empty_figure()
@@ -400,18 +483,21 @@ def _build_graph(click_mode: str):
     # otherwise Plotly.react can leave ghost WebGL traces after 전체 해제.
     metric_rev = int(state.get("metric_rev") or 0)
     label_rev = int(state.get("label_rev") or 0)
+    place_rev = int(state.get("place_rev") or 0)
     fig.update_layout(
         datarevision=(
-            f"{fig.layout.datarevision}:{state['fig_gen']}:m{metric_rev}:l{label_rev}"
+            f"{fig.layout.datarevision}:{state['fig_gen']}"
+            f":m{metric_rev}:l{label_rev}:p{place_rev}"
         ),
-        uirevision=f"{state.get('plmn') or 'labeling'}:m{metric_rev}:l{label_rev}",
+        uirevision=(
+            f"{state.get('plmn') or 'labeling'}"
+            f":m{metric_rev}:l{label_rev}:p{place_rev}"
+        ),
         # Match dcc.Graph style height so select/redraw never shrinks the plot.
         # autosize stays True so width keeps filling the host.
         height=420,
         autosize=True,
     )
-    # Label fills must never be draggable as a whole — only edge lines in edit mode.
-    freeze_shape_editing(fig)
 
     fig.update_layout(
         dragmode=(
@@ -567,6 +653,12 @@ def _build_graph(click_mode: str):
                 {"name": LABEL_HIGHLIGHT_END, "index": int(idxs["end"])}
             )
         meta["edit_edges"] = edges_meta
+    if click_mode == "edit_range" and state.get("highlight_id"):
+        hid = str(state["highlight_id"])
+        meta["edit_label_id"] = hid
+        shape_idxs = _edit_label_shape_meta(fig, hid, state.get("doc"))
+        if shape_idxs:
+            meta["edit_label_shapes"] = shape_idxs
     fig.update_layout(meta=meta)
 
     if state.get("value_cursor_pos") is not None:
@@ -577,6 +669,7 @@ def _build_graph(click_mode: str):
         meta["value_cursor_pos"] = int(state["value_cursor_pos"])
         fig.update_layout(meta=meta)
 
+    freeze_shape_editing(fig)
     return fig
 
 
@@ -593,6 +686,7 @@ def _snap_to_data_time(ts):
 def _cancel_pending_range(click_mode: str):
     """Clear in-progress range placement (Esc / 시작점 취소)."""
     state["label_range_anchor"] = None
+    _bump_place_rev()
     return (
         _build_graph(click_mode),
         no_update,
@@ -642,7 +736,7 @@ def _place_label_click(ts, click_mode: str):
     anchor = state["label_range_anchor"]
     if anchor is None:
         state["label_range_anchor"] = _snap_to_data_time(ts)
-        _arm_place_click_guard()
+        _bump_place_rev()
         return (
             _build_graph(click_mode),
             no_update,
@@ -673,6 +767,7 @@ def _place_label_click(ts, click_mode: str):
 
     a, b = anchor, ts
     state["label_range_anchor"] = None
+    _bump_place_rev()
     before = {x["id"] for x in state["doc"].get("labels", [])}
     add_label(
         state["doc"],
@@ -692,7 +787,7 @@ def _place_label_click(ts, click_mode: str):
     state["_keep_highlight_id"] = True
     _arm_place_click_guard()
     return (
-        no_update,
+        _build_graph(click_mode),
         opts,
         lid,
         html.Span(
@@ -762,6 +857,7 @@ def _apply_label_edge_from_relayout(relayout) -> str | None:
         end_ts = start_ts
 
     update_label(state["doc"], label_id, start=start_ts, end=end_ts)
+    _bump_label_rev()
     item = _label_by_id(label_id)
     when = f"{format_kst(item['start'])} → {format_kst(item['end'])}"
     return f"구간 조절: {when} — Save Labels로 저장"
@@ -795,6 +891,8 @@ def _apply_label_edge_from_drag(payload) -> str | None:
         return None
 
     update_label(state["doc"], label_id, start=start_ts, end=end_ts)
+    _bump_label_rev()
+    _bump_place_rev()
     item = _label_by_id(label_id)
     when = f"{format_kst(item['start'])} → {format_kst(item['end'])}"
     return f"구간 조절: {when} — Save Labels로 저장"
@@ -1169,8 +1267,8 @@ def _arm_select_guard(seconds: float = 2.0) -> None:
     state["zoom_guard_until"] = until
 
 
-def _arm_place_click_guard(seconds: float = 0.45) -> None:
-    """Drop the trailing clickData echo after shape-click placement."""
+def _arm_place_click_guard(seconds: float = 0.3) -> None:
+    """Drop the trailing clickData echo after placement completes."""
     state["place_click_guard_until"] = time.monotonic() + seconds
 
 
@@ -2055,6 +2153,7 @@ def _main_body(
     # ----- click mode -----
     if prop == "click-mode.value":
         state["label_range_anchor"] = None
+        state.pop("place_click_guard_until", None)
         if click_mode != "inspect":
             state["value_cursor_pos"] = None
         keep_highlight = state.pop("_keep_highlight_id", False)
@@ -2336,18 +2435,26 @@ def _main_body(
             return (no_update,) * 7
         last_ts, last_at = state.get("_last_click", (None, 0.0))
         now = time.monotonic()
+        range_end_pending = (
+            click_mode == "label_range"
+            and state.get("label_range_anchor") is not None
+        )
+        # Drop echo of the same sample (shape-click + clickData).
         if (
             last_ts is not None
             and abs((ts - last_ts).total_seconds()) < 0.1
             and now - last_at < 0.35
         ):
             return (no_update,) * 7
-        # shape-click + clickData often fire for one gesture — drop the second.
-        if click_mode in ("edit_range", "inspect", "label_point") and now - last_at < 0.35:
+        if (
+            not range_end_pending
+            and click_mode in ("edit_range", "inspect", "label_point")
+            and now - last_at < 0.35
+        ):
             return (no_update,) * 7
         state["_last_click"] = (ts, now)
 
-        # Range/point placement: prefer this path (works on empty plot area).
+        # Range/point placement.
         if click_mode in ("label_range", "label_point"):
             if _place_click_guarded():
                 return (no_update,) * 7
@@ -2389,14 +2496,21 @@ def _main_body(
         ts = parse_time(x)
         last_ts, last_at = state.get("_last_click", (None, 0.0))
         now = time.monotonic()
-        # Ignore true double-fires of the same sample; allow a quick 2nd click elsewhere.
+        range_end_pending = (
+            click_mode == "label_range"
+            and state.get("label_range_anchor") is not None
+        )
         if (
             last_ts is not None
             and abs((ts - last_ts).total_seconds()) < 0.1
             and now - last_at < 0.35
         ):
             return (no_update,) * 7
-        if click_mode in ("edit_range", "inspect", "label_point") and now - last_at < 0.35:
+        if (
+            not range_end_pending
+            and click_mode in ("edit_range", "inspect", "label_point")
+            and now - last_at < 0.35
+        ):
             return (no_update,) * 7
         state["_last_click"] = (ts, now)
 
@@ -2416,8 +2530,7 @@ def _main_body(
                 no_update,
             )
 
-        # label_range / label_point: shape-click handles empty-area taps;
-        # clickData still places when the click lands on a trace.
+        # label_range / label_point: clickData on traces (exact Plotly x).
         if click_mode in ("label_range", "label_point"):
             if _place_click_guarded():
                 return (no_update,) * 7
@@ -2871,18 +2984,26 @@ app.clientside_callback(
             style.id = 'edit-range-pointer-style';
             document.head.appendChild(style);
         }
-        document.getElementById('edit-range-pointer-style').textContent =
-            // Label fills/lines must not steal clicks — selection uses clickData x.
-            '#graph .shapelayer path,'
-            + '#graph .shapelayer rect{'
-            + 'pointer-events:none !important;}'
-            + (mode === 'edit_range'
-                ? (
-                    '#graph .nsewdrag{cursor:default !important;}'
-                    + '#graph .nsewdrag.edge-hit{cursor:ew-resize !important;}'
-                    + '#graph .outline-controllers{display:none !important;}'
-                  )
-                : '');
+        if (!window.__syncEditRangePointerStyle) {
+            window.__syncEditRangePointerStyle = function() {
+                var style = document.getElementById('edit-range-pointer-style');
+                if (!style) return;
+                var base = (
+                    '#graph .shapelayer path,'
+                    + '#graph .shapelayer rect{'
+                    + 'pointer-events:none !important;}'
+                );
+                if (window.__editRangeMode) {
+                    style.textContent = base
+                        + '#graph .nsewdrag{cursor:default !important;}'
+                        + '#graph .nsewdrag.edge-hit{cursor:ew-resize !important;}'
+                        + '#graph .outline-controllers{display:none !important;}';
+                } else {
+                    style.textContent = base;
+                }
+            };
+        }
+        window.__syncEditRangePointerStyle();
 
         setTimeout(function() {
             var host = document.getElementById('graph');
@@ -2892,7 +3013,7 @@ app.clientside_callback(
                 window.Plotly.relayout(gd, {dragmode: window.__desiredDragmode});
             }
             if (gd && window.__installCustomEdgeEdit) {
-                window.__installCustomEdgeEdit(gd);
+                window.__installCustomEdgeEdit();
             }
             if (gd && mode !== 'edit_range') {
                 var drag = gd.querySelector('.nsewdrag');
@@ -2921,9 +3042,134 @@ app.clientside_callback(
             var style = document.createElement('style');
             style.id = 'edit-range-pointer-style';
             document.head.appendChild(style);
-            style.textContent =
-                '#graph .shapelayer path,#graph .shapelayer rect{'
-                + 'pointer-events:none !important;}';
+        }
+        if (!window.__syncEditRangePointerStyle) {
+            window.__syncEditRangePointerStyle = function() {
+                var style = document.getElementById('edit-range-pointer-style');
+                if (!style) return;
+                var base = (
+                    '#graph .shapelayer path,'
+                    + '#graph .shapelayer rect{'
+                    + 'pointer-events:none !important;}'
+                );
+                if (window.__editRangeMode) {
+                    style.textContent = base
+                        + '#graph .nsewdrag{cursor:default !important;}'
+                        + '#graph .nsewdrag.edge-hit{cursor:ew-resize !important;}'
+                        + '#graph .outline-controllers{display:none !important;}';
+                } else {
+                    style.textContent = base;
+                }
+            };
+        }
+        window.__syncEditRangePointerStyle();
+
+        if (!window.__plotPlaceUtils) {
+            window.__plotPlaceUtils = function(gd) {
+                function plotLayer() {
+                    return gd.querySelector('.nsewdrag')
+                        || gd.querySelector('.xy')
+                        || gd;
+                }
+
+                function plotAreaRect() {
+                    var layer = plotLayer();
+                    if (!layer) return null;
+                    var bb = layer.getBoundingClientRect();
+                    return {
+                        left: bb.left, top: bb.top,
+                        right: bb.right, bottom: bb.bottom,
+                        width: bb.width, height: bb.height
+                    };
+                }
+
+                function clientXToPlotX(clientX) {
+                    var xa = gd._fullLayout && gd._fullLayout.xaxis;
+                    if (!xa) return null;
+                    var layer = plotLayer();
+                    if (!layer) return null;
+                    var bb = layer.getBoundingClientRect();
+                    var px = Math.max(0, Math.min(bb.width, clientX - bb.left));
+                    try {
+                        if (typeof xa.p2d === 'function') return xa.p2d(px);
+                        if (typeof xa.p2c === 'function' && typeof xa.c2d === 'function') {
+                            return xa.c2d(xa.p2c(px));
+                        }
+                    } catch (err) {}
+                    return null;
+                }
+
+                function plotXToMs(xVal) {
+                    if (xVal == null) return NaN;
+                    if (typeof xVal === 'number' && isFinite(xVal)) return xVal;
+                    if (xVal instanceof Date) {
+                        return Date.UTC(
+                            xVal.getUTCFullYear(), xVal.getUTCMonth(), xVal.getUTCDate(),
+                            xVal.getUTCHours(), xVal.getUTCMinutes(), xVal.getUTCSeconds()
+                        );
+                    }
+                    var s = String(xVal).replace('T', ' ');
+                    var y = +s.slice(0, 4), mo = +s.slice(5, 7), d = +s.slice(8, 10);
+                    var h = +s.slice(11, 13), mi = +s.slice(14, 16), sec = +s.slice(17, 19) || 0;
+                    if (!(y > 0) || !(mo > 0)) return NaN;
+                    return Date.UTC(y, mo - 1, d, h, mi, sec);
+                }
+
+                function formatPlotNaive(ms) {
+                    var d = new Date(ms);
+                    function pad(n) { return (n < 10 ? '0' : '') + n; }
+                    return d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1) + '-'
+                        + pad(d.getUTCDate()) + ' ' + pad(d.getUTCHours()) + ':'
+                        + pad(d.getUTCMinutes()) + ':' + pad(d.getUTCSeconds());
+                }
+
+                function nearestSampleMs(ms, samples) {
+                    if (!samples || !samples.length || !isFinite(ms)) return null;
+                    var lo = 0;
+                    var hi = samples.length - 1;
+                    if (ms <= samples[0]) return samples[0];
+                    if (ms >= samples[hi]) return samples[hi];
+                    while (lo < hi) {
+                        var mid = (lo + hi) >> 1;
+                        if (samples[mid] < ms) lo = mid + 1;
+                        else hi = mid;
+                    }
+                    var a = samples[Math.max(0, lo - 1)];
+                    var b = samples[Math.min(samples.length - 1, lo)];
+                    return (Math.abs(ms - a) <= Math.abs(ms - b)) ? a : b;
+                }
+
+                function snapClientX(clientX) {
+                    var xVal = clientXToPlotX(clientX);
+                    if (xVal == null) return null;
+                    var meta = (gd.layout && gd.layout.meta) || {};
+                    var samples = meta.sample_ms;
+                    var ms = plotXToMs(xVal);
+                    if (!isFinite(ms)) return String(xVal);
+                    var snapped = (samples && samples.length)
+                        ? nearestSampleMs(ms, samples) : null;
+                    if (!isFinite(snapped)) {
+                        var step = 5 * 60 * 1000;
+                        snapped = Math.round(ms / step) * step;
+                    }
+                    return isFinite(snapped) ? formatPlotNaive(snapped) : String(xVal);
+                }
+
+                function inPlotArea(clientX, clientY) {
+                    var r = plotAreaRect();
+                    if (!r) return false;
+                    return clientX >= r.left && clientX <= r.right
+                        && clientY >= r.top && clientY <= r.bottom;
+                }
+
+                return {
+                    clientXToPlotX: clientXToPlotX,
+                    snapClientX: snapClientX,
+                    plotXToMs: plotXToMs,
+                    formatPlotNaive: formatPlotNaive,
+                    inPlotArea: inPlotArea
+                };
+            };
         }
 
         if (!window.__readGraphView) {
@@ -2947,18 +3193,23 @@ app.clientside_callback(
 
         // Custom edge edit: ↔ cursor + horizontal drag only on crimson edges.
         if (!window.__installCustomEdgeEdit) {
-            window.__installCustomEdgeEdit = function(gd) {
-                if (!gd || gd.__customEdgeEdit) return;
-                gd.__customEdgeEdit = true;
-                var HIT_PX = 12;
+            window.__installCustomEdgeEdit = function() {
+                var host = document.getElementById('graph');
+                if (!host || host.__customEdgeEditBound) return;
+                host.__customEdgeEditBound = true;
+                var HIT_PX = 14;
                 var dragState = null;
 
-                function dragEl() {
-                    return gd.querySelector('.nsewdrag');
+                function activeGd() {
+                    return host.querySelector('.js-plotly-plot');
                 }
 
-                function setEdgeHit(on) {
-                    var el = dragEl();
+                function dragEl(gd) {
+                    return gd && gd.querySelector('.nsewdrag');
+                }
+
+                function setEdgeHit(gd, on) {
+                    var el = dragEl(gd);
                     if (!el) return;
                     el.classList.toggle('edge-hit', !!on);
                 }
@@ -2986,86 +3237,6 @@ app.clientside_callback(
                     return tip;
                 }
 
-                function formatTipTime(xVal) {
-                    var ms = toMs(xVal);
-                    if (!isFinite(ms)) return '';
-                    var d = new Date(ms);
-                    function pad(n) { return (n < 10 ? '0' : '') + n; }
-                    // sample_ms / plot axis use KST wall encoded as UTC components.
-                    return d.getUTCFullYear() + '년 ' + pad(d.getUTCMonth() + 1) + '월 '
-                        + pad(d.getUTCDate()) + '일 ' + pad(d.getUTCHours()) + ':'
-                        + pad(d.getUTCMinutes());
-                }
-
-                function showTip(ev, xVal) {
-                    var tip = ensureTip();
-                    var text = formatTipTime(xVal);
-                    if (!text) {
-                        tip.style.display = 'none';
-                        return;
-                    }
-                    tip.textContent = text;
-                    tip.style.display = 'block';
-                    var left = ev.clientX + 14;
-                    var top = ev.clientY - 32;
-                    var w = tip.offsetWidth || 160;
-                    if (left + w > window.innerWidth - 8) {
-                        left = ev.clientX - w - 14;
-                    }
-                    if (top < 8) top = ev.clientY + 18;
-                    tip.style.left = left + 'px';
-                    tip.style.top = top + 'px';
-                }
-
-                function hideTip() {
-                    var tip = document.getElementById('edge-drag-tip');
-                    if (tip) tip.style.display = 'none';
-                }
-
-                function toAxisPx(xa, xVal) {
-                    try {
-                        var px = xa.d2p(xVal);
-                        if (px == null || isNaN(px)) px = xa.d2p(new Date(xVal));
-                        return px;
-                    } catch (err) {
-                        try { return xa.d2p(new Date(xVal)); } catch (err2) { return NaN; }
-                    }
-                }
-
-                function edgeHit(clientX, clientY) {
-                    if (!window.__editRangeMode) return null;
-                    var fl = gd._fullLayout;
-                    var xa = fl && fl.xaxis;
-                    var meta = (gd.layout && gd.layout.meta) || {};
-                    var edges = meta.edit_edges || [];
-                    if (!xa || !edges.length) return null;
-                    var el = dragEl();
-                    if (!el) return null;
-                    var r = el.getBoundingClientRect();
-                    if (clientX < r.left || clientX > r.right ||
-                        clientY < r.top || clientY > r.bottom) {
-                        return null;
-                    }
-                    var xPx = clientX - r.left;
-                    var shapes = gd.layout.shapes || [];
-                    var best = null;
-                    var bestDist = HIT_PX + 1;
-                    for (var i = 0; i < edges.length; i++) {
-                        var info = edges[i];
-                        var shape = shapes[info.index];
-                        if (!shape) continue;
-                        var xVal = shape.x0 != null ? shape.x0 : shape.x1;
-                        var edgePx = toAxisPx(xa, xVal);
-                        if (edgePx == null || isNaN(edgePx)) continue;
-                        var dist = Math.abs(edgePx - xPx);
-                        if (dist < bestDist) {
-                            bestDist = dist;
-                            best = info;
-                        }
-                    }
-                    return bestDist <= HIT_PX ? best : null;
-                }
-
                 function formatPlotNaive(ms) {
                     var d = new Date(ms);
                     function pad(n) { return (n < 10 ? '0' : '') + n; }
@@ -3090,7 +3261,7 @@ app.clientside_callback(
                     return (Math.abs(ms - a) <= Math.abs(ms - b)) ? a : b;
                 }
 
-                function toMs(xVal) {
+                function toMs(gd, xVal) {
                     if (xVal == null) return NaN;
                     if (typeof xVal === 'number' && isFinite(xVal)) return xVal;
                     var samples = ((gd.layout && gd.layout.meta) || {}).sample_ms;
@@ -3127,94 +3298,311 @@ app.clientside_callback(
                     return Date.UTC(y, mo - 1, d, h || 0, mi || 0, sec);
                 }
 
-                function snapToSample(xVal) {
+                function formatTipTime(gd, xVal) {
+                    var ms = toMs(gd, xVal);
+                    if (!isFinite(ms)) return '';
+                    var d = new Date(ms);
+                    function pad(n) { return (n < 10 ? '0' : '') + n; }
+                    return d.getUTCFullYear() + '년 ' + pad(d.getUTCMonth() + 1) + '월 '
+                        + pad(d.getUTCDate()) + '일 ' + pad(d.getUTCHours()) + ':'
+                        + pad(d.getUTCMinutes());
+                }
+
+                function showTip(ev, gd, xVal) {
+                    var tip = ensureTip();
+                    var text = formatTipTime(gd, xVal);
+                    if (!text) {
+                        tip.style.display = 'none';
+                        return;
+                    }
+                    tip.textContent = text;
+                    tip.style.display = 'block';
+                    var left = ev.clientX + 14;
+                    var top = ev.clientY - 32;
+                    var w = tip.offsetWidth || 160;
+                    if (left + w > window.innerWidth - 8) {
+                        left = ev.clientX - w - 14;
+                    }
+                    if (top < 8) top = ev.clientY + 18;
+                    tip.style.left = left + 'px';
+                    tip.style.top = top + 'px';
+                }
+
+                function hideTip() {
+                    var tip = document.getElementById('edge-drag-tip');
+                    if (tip) tip.style.display = 'none';
+                }
+
+                function toAxisPx(xa, xVal) {
+                    try {
+                        var px = xa.d2p(xVal);
+                        if (px == null || isNaN(px)) px = xa.d2p(new Date(xVal));
+                        return px;
+                    } catch (err) {
+                        try { return xa.d2p(new Date(xVal)); } catch (err2) { return NaN; }
+                    }
+                }
+
+                function collectEditEdges(gd) {
+                    var meta = (gd.layout && gd.layout.meta) || {};
+                    var edges = meta.edit_edges || [];
+                    if (edges.length) return edges;
+                    var shapes = gd.layout.shapes || [];
+                    var out = [];
+                    for (var i = 0; i < shapes.length; i++) {
+                        var s = shapes[i];
+                        if (!s || !s.name) continue;
+                        if (s.name === 'label_highlight_start'
+                            || s.name === 'label_highlight_end') {
+                            out.push({name: s.name, index: i});
+                        }
+                    }
+                    return out;
+                }
+
+                function edgeHit(gd, clientX, clientY) {
+                    if (!window.__editRangeMode) return null;
+                    var fl = gd._fullLayout;
+                    var xa = fl && fl.xaxis;
+                    var edges = collectEditEdges(gd);
+                    if (!xa || !edges.length) return null;
+                    var el = dragEl(gd);
+                    if (!el) return null;
+                    var r = el.getBoundingClientRect();
+                    if (clientX < r.left || clientX > r.right ||
+                        clientY < r.top || clientY > r.bottom) {
+                        return null;
+                    }
+                    var xPx = clientX - r.left;
+                    var shapes = gd.layout.shapes || [];
+                    var best = null;
+                    var bestDist = HIT_PX + 1;
+                    for (var i = 0; i < edges.length; i++) {
+                        var info = edges[i];
+                        var shape = shapes[info.index];
+                        if (!shape) continue;
+                        var xVal = shape.x0 != null ? shape.x0 : shape.x1;
+                        var edgePx = toAxisPx(xa, xVal);
+                        if (edgePx == null || isNaN(edgePx)) continue;
+                        var dist = Math.abs(edgePx - xPx);
+                        if (dist < bestDist) {
+                            bestDist = dist;
+                            best = info;
+                        }
+                    }
+                    return bestDist <= HIT_PX ? best : null;
+                }
+
+                function snapToSample(gd, xVal) {
                     var meta = (gd.layout && gd.layout.meta) || {};
                     var samples = meta.sample_ms;
                     if (!samples || !samples.length) return xVal;
-                    var ms = toMs(xVal);
+                    var ms = toMs(gd, xVal);
                     if (!isFinite(ms)) return xVal;
                     var snapped = nearestSampleMs(ms, samples);
                     return snapped == null ? xVal : formatPlotNaive(snapped);
                 }
 
-                function xFromClientX(clientX) {
+                function xFromClientX(gd, clientX) {
                     var xa = gd._fullLayout.xaxis;
-                    var el = dragEl();
+                    var el = dragEl(gd);
+                    if (!el) return null;
                     var r = el.getBoundingClientRect();
                     var xPx = Math.max(0, Math.min(r.width, clientX - r.left));
                     return xa.p2d(xPx);
                 }
 
+                function sameX(a, b) {
+                    return a != null && b != null && String(a) === String(b);
+                }
+
+                function isLabelFillRect(s) {
+                    if (!s || s.type !== 'rect') return false;
+                    var fc = String(s.fillcolor || '');
+                    return fc.indexOf('220') >= 0 && fc.indexOf('60') >= 0;
+                }
+
+                function resolveLabelShapeIndices(gd) {
+                    var meta = (gd.layout && gd.layout.meta) || {};
+                    var idxs = meta.edit_label_shapes;
+                    if (idxs && idxs.fill != null) return idxs;
+
+                    var shapes = gd.layout.shapes || [];
+                    var hiStart = null;
+                    var hiEnd = null;
+                    var fillIdx = null;
+                    var edgeStart = null;
+                    var edgeEnd = null;
+                    var i;
+                    for (i = 0; i < shapes.length; i++) {
+                        var nm = shapes[i].name;
+                        if (nm === 'label_highlight_start') hiStart = i;
+                        if (nm === 'label_highlight_end') hiEnd = i;
+                    }
+                    for (i = 0; i < shapes.length; i++) {
+                        if (isLabelFillRect(shapes[i])) {
+                            fillIdx = i;
+                            break;
+                        }
+                    }
+                    if (fillIdx != null) {
+                        var fill = shapes[fillIdx];
+                        var fx0 = fill.x0;
+                        var fx1 = fill.x1;
+                        for (i = 0; i < shapes.length; i++) {
+                            var ln = shapes[i];
+                            if (!ln || ln.type !== 'line') continue;
+                            var lx = ln.x0;
+                            if (sameX(lx, fx0) && i !== hiStart && edgeStart == null) {
+                                edgeStart = i;
+                            }
+                            if (sameX(lx, fx1) && i !== hiEnd && edgeEnd == null) {
+                                edgeEnd = i;
+                            }
+                        }
+                    }
+                    return {
+                        fill: fillIdx,
+                        edge_start: edgeStart,
+                        edge_end: edgeEnd,
+                        hi_start: hiStart,
+                        hi_end: hiEnd
+                    };
+                }
+
+                function formatXForServer(gd, xVal) {
+                    if (xVal == null) return null;
+                    if (typeof xVal === 'string') return xVal;
+                    var ms = toMs(gd, xVal);
+                    if (isFinite(ms)) return formatPlotNaive(ms);
+                    return String(xVal);
+                }
+
+                function buildEdgeDragPatch(gd, dragName, hiIdx, xVal, idxs) {
+                    idxs = idxs || resolveLabelShapeIndices(gd);
+                    var patch = {};
+                    var hi = hiIdx != null ? hiIdx : (
+                        dragName === 'label_highlight_start' ? idxs.hi_start : idxs.hi_end
+                    );
+                    if (hi != null) {
+                        patch['shapes[' + hi + '].x0'] = xVal;
+                        patch['shapes[' + hi + '].x1'] = xVal;
+                        patch['shapes[' + hi + '].y0'] = 0;
+                        patch['shapes[' + hi + '].y1'] = 1;
+                    }
+                    if (dragName === 'label_highlight_start') {
+                        if (idxs.fill != null) {
+                            patch['shapes[' + idxs.fill + '].x0'] = xVal;
+                        }
+                        if (idxs.edge_start != null) {
+                            patch['shapes[' + idxs.edge_start + '].x0'] = xVal;
+                            patch['shapes[' + idxs.edge_start + '].x1'] = xVal;
+                        }
+                    } else if (dragName === 'label_highlight_end') {
+                        if (idxs.fill != null) {
+                            patch['shapes[' + idxs.fill + '].x1'] = xVal;
+                        }
+                        if (idxs.edge_end != null) {
+                            patch['shapes[' + idxs.edge_end + '].x0'] = xVal;
+                            patch['shapes[' + idxs.edge_end + '].x1'] = xVal;
+                        }
+                    }
+                    return patch;
+                }
+
                 function onMove(ev) {
+                    var gd = activeGd();
+                    if (!gd) return;
                     if (dragState) {
                         ev.preventDefault();
                         ev.stopPropagation();
-                        var xVal = snapToSample(xFromClientX(ev.clientX));
+                        var xVal = snapToSample(gd, xFromClientX(gd, ev.clientX));
                         if (dragState.lastX === xVal) {
-                            setEdgeHit(true);
-                            showTip(ev, xVal);
+                            setEdgeHit(gd, true);
+                            showTip(ev, gd, xVal);
                             return;
                         }
                         dragState.lastX = xVal;
-                        var idx = dragState.index;
-                        var patch = {};
-                        patch['shapes[' + idx + '].x0'] = xVal;
-                        patch['shapes[' + idx + '].x1'] = xVal;
-                        patch['shapes[' + idx + '].y0'] = 0;
-                        patch['shapes[' + idx + '].y1'] = 1;
+                        var patch = buildEdgeDragPatch(
+                            gd, dragState.name, dragState.index, xVal, dragState.shapeIdxs
+                        );
                         if (window.Plotly) window.Plotly.relayout(gd, patch);
-                        setEdgeHit(true);
-                        showTip(ev, xVal);
+                        setEdgeHit(gd, true);
+                        showTip(ev, gd, xVal);
                         return;
                     }
                     if (!window.__editRangeMode) {
-                        setEdgeHit(false);
+                        setEdgeHit(gd, false);
                         hideTip();
                         return;
                     }
-                    setEdgeHit(!!edgeHit(ev.clientX, ev.clientY));
+                    setEdgeHit(gd, !!edgeHit(gd, ev.clientX, ev.clientY));
                 }
 
                 function onDown(ev) {
                     if (!window.__editRangeMode || ev.button !== 0) return;
-                    var hit = edgeHit(ev.clientX, ev.clientY);
+                    var gd = activeGd();
+                    if (!gd) return;
+                    var hit = edgeHit(gd, ev.clientX, ev.clientY);
                     if (!hit) return;
                     ev.preventDefault();
                     ev.stopPropagation();
+                    if (host.setPointerCapture && ev.pointerId != null) {
+                        try { host.setPointerCapture(ev.pointerId); } catch (err) {}
+                    }
                     window.__edgeDragging = true;
-                    var x0 = snapToSample(xFromClientX(ev.clientX));
-                    dragState = {index: hit.index, name: hit.name, lastX: x0};
-                    setEdgeHit(true);
-                    showTip(ev, x0);
+                    var x0 = snapToSample(gd, xFromClientX(gd, ev.clientX));
+                    dragState = {
+                        index: hit.index,
+                        name: hit.name,
+                        lastX: x0,
+                        gd: gd,
+                        shapeIdxs: resolveLabelShapeIndices(gd)
+                    };
+                    setEdgeHit(gd, true);
+                    showTip(ev, gd, x0);
                 }
 
                 function onUp(ev) {
                     if (!dragState) return;
+                    var gd = dragState.gd || activeGd();
                     var name = dragState.name;
-                    var idx = dragState.index;
+                    var lastX = dragState.lastX;
                     dragState = null;
                     window.__edgeDragging = false;
-                    // Edge drag ends with a click; don't treat it as fill select.
                     window.__skipNextShapeClick = true;
+                    if (host.releasePointerCapture && ev.pointerId != null) {
+                        try { host.releasePointerCapture(ev.pointerId); } catch (err) {}
+                    }
                     hideTip();
-                    var shapes = (gd.layout && gd.layout.shapes) || [];
-                    var shape = shapes[idx];
-                    var xVal = shape ? (shape.x0 != null ? shape.x0 : shape.x1) : null;
-                    setEdgeHit(!!edgeHit(ev.clientX, ev.clientY));
+                    if (!gd) return;
+                    setEdgeHit(gd, !!edgeHit(gd, ev.clientX, ev.clientY));
+                    var xVal = formatXForServer(gd, lastX);
                     if (xVal == null) return;
-                    xVal = snapToSample(xVal);
+                    if (!window.dash_clientside || !window.dash_clientside.set_props) return;
                     window.dash_clientside.set_props('edge-drag-event', {
                         data: {
                             name: name,
-                            x: String(xVal),
+                            x: xVal,
                             sequence: Date.now()
                         }
                     });
                 }
 
-                gd.addEventListener('mousemove', onMove, true);
-                gd.addEventListener('mousedown', onDown, true);
+                function onWindowMove(ev) {
+                    if (dragState) onMove(ev);
+                }
+
+                host.addEventListener('pointermove', onMove, true);
+                host.addEventListener('pointerdown', onDown, true);
+                host.addEventListener('pointerup', onUp, true);
+                host.addEventListener('pointercancel', onUp, true);
+                host.addEventListener('mousemove', onMove, true);
+                host.addEventListener('mousedown', onDown, true);
+                window.addEventListener('pointermove', onWindowMove, true);
+                window.addEventListener('mousemove', onWindowMove, true);
                 window.addEventListener('mouseup', onUp, true);
+                window.addEventListener('pointerup', onUp, true);
             };
         }
 
@@ -3289,161 +3677,95 @@ app.clientside_callback(
             };
         }
 
-        // Click anywhere in the plot → time (snap on server). Used for range/point
-        // placement and anomaly divider select — not only on series traces.
-        if (!window.__installAnomalyShapeClick) {
-            window.__installAnomalyShapeClick = function(gd) {
-                if (!gd) return;
-                if (gd.__anomalyZoomBound) return;
-                gd.__anomalyZoomBound = true;
-                var ptr = null;
+        // Empty-area clicks → snapped time. Bound on #graph host so figure
+        // redraws never drop listeners.
+        if (!window.__installPlotClickHost) {
+            window.__installPlotClickHost = function() {
+                var host = document.getElementById('graph');
+                if (!host || host.__plotClickHostBound) return;
+                host.__plotClickHostBound = true;
+                var lastEmit = {x: null, t: 0};
 
-                function formatPlotX(val) {
-                    if (val == null || !isFinite(+new Date(val)) && typeof val !== 'string') {
-                        if (typeof val === 'number' && isFinite(val)) {
-                            var d = new Date(val);
-                            var pad = function(n) { return (n < 10 ? '0' : '') + n; };
-                            return d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1) + '-'
-                                + pad(d.getUTCDate()) + ' ' + pad(d.getUTCHours()) + ':'
-                                + pad(d.getUTCMinutes()) + ':' + pad(d.getUTCSeconds());
-                        }
-                        return null;
-                    }
-                    if (typeof val === 'string') return val;
-                    var dt = (val instanceof Date) ? val : new Date(val);
-                    if (isNaN(dt.getTime())) return null;
-                    var p = function(n) { return (n < 10 ? '0' : '') + n; };
-                    return dt.getUTCFullYear() + '-' + p(dt.getUTCMonth() + 1) + '-'
-                        + p(dt.getUTCDate()) + ' ' + p(dt.getUTCHours()) + ':'
-                        + p(dt.getUTCMinutes()) + ':' + p(dt.getUTCSeconds());
-                }
-
-                function clientXToPlotX(clientX) {
-                    var full = gd._fullLayout;
-                    var xa = full && full.xaxis;
-                    if (!xa) return null;
-                    var layer = gd.querySelector('.nsewdrag') || gd.querySelector('.plotly');
-                    if (!layer) return null;
-                    var bb = layer.getBoundingClientRect();
-                    var px = clientX - bb.left;
-                    if (px < 0 || px > bb.width) return null;
-                    try {
-                        if (typeof xa.p2d === 'function') return formatPlotX(xa.p2d(px));
-                        if (typeof xa.p2c === 'function' && typeof xa.c2d === 'function') {
-                            return formatPlotX(xa.c2d(xa.p2c(px)));
-                        }
-                    } catch (err) {}
-                    return null;
-                }
-
-                function emitPlotX(ev) {
-                    // After edge drag, the trailing click must not re-select.
+                host.addEventListener('click', function(ev) {
+                    if (ev.button !== 0) return;
                     if (window.__skipNextShapeClick) {
                         window.__skipNextShapeClick = false;
                         return;
                     }
                     if (window.__edgeDragging) return;
-                    if (ptr && Math.hypot(ev.clientX - ptr.x, ev.clientY - ptr.y) > 10) return;
-                    var layer = gd.querySelector('.nsewdrag') || gd;
-                    var bb = layer.getBoundingClientRect();
-                    // Any Y inside the plot area counts (vertical time column / 5-min tick).
-                    if (ev.clientY < bb.top || ev.clientY > bb.bottom) return;
-                    if (ev.clientX < bb.left || ev.clientX > bb.right) return;
-                    var xVal = clientXToPlotX(ev.clientX);
-                    if (xVal == null) return;
-                    if (!window.dash_clientside || !window.dash_clientside.set_props) return;
-                    // edit_range: select pink fill / empty area at this time.
-                    // label_range / label_point: place. Other modes: select+zoom.
-                    window.dash_clientside.set_props('shape-click-event', {
-                        data: {x: xVal, sequence: Date.now()}
-                    });
-                }
-
-                gd.addEventListener('pointerdown', function(ev) {
-                    ptr = {x: ev.clientX, y: ev.clientY};
-                }, true);
-                // Capture on the whole plot so empty space (not only traces) works.
-                gd.addEventListener('click', emitPlotX, true);
-            };
-
-            window.__installPendingRangePreview = function(gd) {
-                if (!gd) return;
-                var drag = gd.querySelector('.nsewdrag');
-                if (!drag) return;
-                if (drag.__pendingRangePreviewBound) return;
-                drag.__pendingRangePreviewBound = true;
-                var raf = null;
-
-                function plotXToMs(xVal) {
-                    if (xVal == null) return NaN;
-                    if (typeof xVal === 'number' && isFinite(xVal)) return xVal;
-                    if (typeof window.toMs === 'function') {
-                        // not global; use local copy of plot encoding
-                    }
-                    if (xVal instanceof Date) {
-                        return Date.UTC(
-                            xVal.getUTCFullYear(), xVal.getUTCMonth(), xVal.getUTCDate(),
-                            xVal.getUTCHours(), xVal.getUTCMinutes(), xVal.getUTCSeconds()
-                        );
-                    }
-                    var s = String(xVal).replace('T', ' ');
-                    var y = +s.slice(0, 4), mo = +s.slice(5, 7), d = +s.slice(8, 10);
-                    var h = +s.slice(11, 13), mi = +s.slice(14, 16), sec = +s.slice(17, 19) || 0;
-                    if (!(y > 0) || !(mo > 0)) return NaN;
-                    return Date.UTC(y, mo - 1, d, h, mi, sec);
-                }
-
-                function clientXToPlotX(clientX) {
-                    var full = gd._fullLayout;
-                    var xa = full && full.xaxis;
-                    if (!xa) return null;
-                    var bb = drag.getBoundingClientRect();
-                    var px = clientX - bb.left;
-                    if (px < 0 || px > bb.width) return null;
-                    try {
-                        if (typeof xa.p2d === 'function') return xa.p2d(px);
-                        if (typeof xa.p2c === 'function' && typeof xa.c2d === 'function') {
-                            return xa.c2d(xa.p2c(px));
+                    var mode = window.__currentClickMode;
+                    // Trace hits: Plotly clickData has the exact x (label modes).
+                    if (mode === 'label_range' || mode === 'label_point') {
+                        var t = ev.target;
+                        if (t && t.closest && t.closest(
+                            '.scatterlayer, .point, .points, .lines'
+                        )) {
+                            return;
                         }
-                    } catch (err) {}
-                    return null;
-                }
+                    }
+                    var gd = host.querySelector('.js-plotly-plot');
+                    if (!gd || !gd._fullLayout || !window.__plotPlaceUtils) return;
+                    var plot = window.__plotPlaceUtils(gd);
+                    if (!plot.inPlotArea(ev.clientX, ev.clientY)) return;
+                    var xVal = plot.snapClientX(ev.clientX);
+                    if (xVal == null) return;
+                    var now = Date.now();
+                    if (lastEmit.x === xVal && now - lastEmit.t < 80) return;
+                    lastEmit = {x: xVal, t: now};
+                    if (!window.dash_clientside || !window.dash_clientside.set_props) return;
+                    window.dash_clientside.set_props('shape-click-event', {
+                        data: {x: xVal, sequence: now}
+                    });
+                }, true);
+            };
+        }
 
-                function formatPlotNaive(ms) {
-                    var d = new Date(ms);
-                    function pad(n) { return (n < 10 ? '0' : '') + n; }
-                    return d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1) + '-'
-                        + pad(d.getUTCDate()) + ' ' + pad(d.getUTCHours()) + ':'
-                        + pad(d.getUTCMinutes()) + ':' + pad(d.getUTCSeconds());
-                }
+        if (!window.__installPendingRangePreview) {
+            window.__installPendingRangePreview = function() {
+                var host = document.getElementById('graph');
+                if (!host || host.__pendingRangePreviewBound) return;
+                host.__pendingRangePreviewBound = true;
+                var raf = null;
+                var lastX1 = null;
 
-                drag.addEventListener('pointermove', function(ev) {
-                    if (window.__currentClickMode !== 'label_range') {
-                        return;
+                function pendingFillIndex(gd) {
+                    var shapes = (gd.layout && gd.layout.shapes) || [];
+                    for (var i = 0; i < shapes.length; i++) {
+                        if (shapes[i] && shapes[i].name === 'pending_range_fill') {
+                            return i;
+                        }
                     }
                     var meta = (gd.layout && gd.layout.meta) || {};
-                    var idx = meta.pending_fill_index;
+                    return meta.pending_fill_index;
+                }
+
+                host.addEventListener('pointermove', function(ev) {
+                    if (window.__currentClickMode !== 'label_range') return;
+                    var gd = host.querySelector('.js-plotly-plot');
+                    if (!gd || !window.Plotly || !window.__plotPlaceUtils) return;
+                    var meta = (gd.layout && gd.layout.meta) || {};
                     var start = meta.pending_range_start;
-                    if (idx == null || start == null || !window.Plotly) {
-                        return;
-                    }
-                    var xVal = clientXToPlotX(ev.clientX);
+                    var idx = pendingFillIndex(gd);
+                    if (idx == null || start == null) return;
+                    var plot = window.__plotPlaceUtils(gd);
+                    if (!plot.inPlotArea(ev.clientX, ev.clientY)) return;
+                    var xVal = plot.snapClientX(ev.clientX);
                     if (xVal == null) return;
-                    var startMs = plotXToMs(start);
-                    var curMs = plotXToMs(xVal);
+                    var startMs = plot.plotXToMs(start);
+                    var curMs = plot.plotXToMs(xVal);
                     if (!isFinite(startMs) || !isFinite(curMs)) return;
 
                     var patch = {};
                     if (curMs > startMs) {
-                        var x1 = formatPlotNaive(curMs);
-                        if (x1 === drag.__pendingRangeLastX1) return;
-                        drag.__pendingRangeLastX1 = x1;
+                        var x1 = plot.formatPlotNaive(curMs);
+                        if (x1 === lastX1) return;
+                        lastX1 = x1;
                         patch['shapes[' + idx + '].x0'] = start;
                         patch['shapes[' + idx + '].x1'] = x1;
-                        patch['shapes[' + idx + '].fillcolor'] = 'rgba(200, 16, 46, 0.38)';
+                        patch['shapes[' + idx + '].fillcolor'] = 'rgba(220, 20, 60, 0.42)';
                     } else {
-                        if (drag.__pendingRangeLastX1 == null) return;
-                        drag.__pendingRangeLastX1 = null;
+                        if (lastX1 == null) return;
+                        lastX1 = null;
                         patch['shapes[' + idx + '].x1'] = start;
                         patch['shapes[' + idx + '].fillcolor'] = 'rgba(0,0,0,0)';
                     }
@@ -3451,32 +3773,24 @@ app.clientside_callback(
                     raf = requestAnimationFrame(function() {
                         window.Plotly.relayout(gd, patch);
                     });
-                });
-                drag.addEventListener('pointerleave', function() {
-                    if (window.__currentClickMode !== 'label_range') {
-                        return;
-                    }
-                    var meta = (gd.layout && gd.layout.meta) || {};
-                    var idx = meta.pending_fill_index;
-                    var start = meta.pending_range_start;
-                    if (idx == null || start == null || !window.Plotly) return;
-                    drag.__pendingRangeLastX1 = null;
-                    window.Plotly.relayout(gd, {
-                        ['shapes[' + idx + '].x1']: start,
-                        ['shapes[' + idx + '].fillcolor']: 'rgba(0,0,0,0)'
-                    });
-                });
+                }, true);
             };
 
             if (!window.__clearPendingRangePreview) {
                 window.__clearPendingRangePreview = function(gd) {
                     if (!gd || !window.Plotly) return;
                     var meta = (gd.layout && gd.layout.meta) || {};
-                    var idx = meta.pending_fill_index;
                     var start = meta.pending_range_start;
+                    var idx = null;
+                    var shapes = gd.layout.shapes || [];
+                    for (var i = 0; i < shapes.length; i++) {
+                        if (shapes[i] && shapes[i].name === 'pending_range_fill') {
+                            idx = i;
+                            break;
+                        }
+                    }
+                    if (idx == null) idx = meta.pending_fill_index;
                     if (idx == null || start == null) return;
-                    var drag = gd.querySelector('.nsewdrag');
-                    if (drag) drag.__pendingRangeLastX1 = null;
                     window.Plotly.relayout(gd, {
                         ['shapes[' + idx + '].x1']: start,
                         ['shapes[' + idx + '].fillcolor']: 'rgba(0,0,0,0)'
@@ -3487,6 +3801,10 @@ app.clientside_callback(
             if (!window.__scrubStalePendingRangeFill) {
                 window.__scrubStalePendingRangeFill = function(gd, force) {
                     if (!gd || !gd.layout || !window.Plotly) return;
+                    // Never scrub while the user is placing a 2-click range.
+                    if (!force && window.__currentClickMode === 'label_range') {
+                        return;
+                    }
                     var meta = (gd.layout && gd.layout.meta) || {};
                     if (!force && (meta.pending_fill_index != null
                         || meta.pending_range_start != null)) {
@@ -3757,8 +4075,57 @@ app.clientside_callback(
             var gd = host && host.querySelector('.js-plotly-plot');
             window.__ignoreDataXClampUntil = Date.now() + 1500;
             if (!gd || !window.Plotly) return;
-            // Pin height to the Dash container; keep autosize so width fills
-            // the host (autosize:false freezes Plotly's narrow default width).
+
+            function afterGraphReady() {
+                window.__clampPanToData(gd);
+                window.__installPlotClickHost();
+                window.__installCustomEdgeEdit();
+                if (window.__installPendingRangePreview) {
+                    window.__installPendingRangePreview();
+                }
+                if (window.__installPlaceTimeTip) {
+                    window.__installPlaceTimeTip(gd);
+                }
+                if (window.__scrubStalePendingRangeFill) {
+                    var forceScrub = window.__currentClickMode !== 'label_range';
+                    window.__scrubStalePendingRangeFill(gd, forceScrub);
+                }
+                var drag = gd.querySelector('.nsewdrag');
+                if (drag && !window.__editRangeMode) {
+                    drag.classList.remove('edge-hit');
+                }
+                if (window.__desiredDragmode !== undefined) {
+                    var cur = gd._fullLayout && gd._fullLayout.dragmode;
+                    if (cur !== window.__desiredDragmode) {
+                        window.Plotly.relayout(gd, {dragmode: window.__desiredDragmode});
+                    }
+                }
+                window.__inspectInFlight = false;
+                clearTimeout(window.__inspectInFlightWatchdog);
+                if (window.__valueInspectMode && (window.__inspectPendingStep || 0) !== 0) {
+                    if (!window.__inspectFlushTimer && window.__flushInspectKeys) {
+                        window.__inspectFlushTimer = setTimeout(window.__flushInspectKeys, 0);
+                    }
+                }
+            }
+
+            // Force full layout sync so edge-drag relayout patches never stick
+            // after the server sends the updated label shapes.
+            if (figure && figure.data && figure.layout && !window.__edgeDragging) {
+                var cfg = gd.config || {responsive: true, displayModeBar: true};
+                var hostH = host.clientHeight || 420;
+                var wantH = Math.max(hostH > 40 ? hostH : 420, 260);
+                var layout = Object.assign({}, figure.layout, {
+                    autosize: true,
+                    height: wantH
+                });
+                window.Plotly.react(gd, figure.data, layout, cfg).then(function() {
+                    try { window.Plotly.Plots.resize(gd); } catch (err) {}
+                    afterGraphReady();
+                });
+                return;
+            }
+
             var hostH = host.clientHeight || 420;
             var wantH = Math.max(hostH > 40 ? hostH : 420, 260);
             var curH = (gd.layout && gd.layout.height) || 0;
@@ -3768,39 +4135,8 @@ app.clientside_callback(
             }
             window.Plotly.relayout(gd, patch).then(function() {
                 try { window.Plotly.Plots.resize(gd); } catch (err) {}
+                afterGraphReady();
             });
-            window.__clampPanToData(gd);
-            window.__installCustomEdgeEdit(gd);
-            window.__installAnomalyShapeClick(gd);
-            if (window.__installPendingRangePreview) {
-                window.__installPendingRangePreview(gd);
-            }
-            if (window.__installPlaceTimeTip) {
-                window.__installPlaceTimeTip(gd);
-            }
-            if (window.__scrubStalePendingRangeFill) {
-                var forceScrub = window.__currentClickMode !== 'label_range';
-                window.__scrubStalePendingRangeFill(gd, forceScrub);
-            }
-            var drag = gd.querySelector('.nsewdrag');
-            if (drag && !window.__editRangeMode) {
-                drag.classList.remove('edge-hit');
-            }
-            // Re-apply mode dragmode after figure updates (uirevision keeps stale zoom/pan).
-            if (window.__desiredDragmode !== undefined) {
-                var cur = gd._fullLayout && gd._fullLayout.dragmode;
-                if (cur !== window.__desiredDragmode) {
-                    window.Plotly.relayout(gd, {dragmode: window.__desiredDragmode});
-                }
-            }
-            // Unlock inspect key coalescing after the server figure lands.
-            window.__inspectInFlight = false;
-            clearTimeout(window.__inspectInFlightWatchdog);
-            if (window.__valueInspectMode && (window.__inspectPendingStep || 0) !== 0) {
-                if (!window.__inspectFlushTimer && window.__flushInspectKeys) {
-                    window.__inspectFlushTimer = setTimeout(window.__flushInspectKeys, 0);
-                }
-            }
         }, 80);
         return window.dash_clientside.no_update;
     }
