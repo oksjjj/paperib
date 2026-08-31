@@ -168,9 +168,70 @@ def display_plmn(plmn: str) -> str:
     return f"{plmn} ({short})" if short else plmn
 
 
+M658_COL = "M658"
+M696_COL = "M696"
 M971_COL = "M971"
+S_RATE_KEY = "S_RATE"
+A_RATE_KEY = "A_RATE"
 M971_DAILY_AVG_KEY = "__m971_daily_avg__"
 M971_DAILY_AVG_COLOR = "#ff1a1a"
+S_RATE_COLOR = "#00BFFF"
+A_RATE_COLOR = "#00FF00"
+REF_LINE_WIDTH = 2
+REF_LINE_DASH = "3px,2px"
+REF_LINE = dict(width=REF_LINE_WIDTH, dash=REF_LINE_DASH)
+RATE_METRICS = frozenset({S_RATE_KEY, A_RATE_KEY})
+RATE_Y_RANGE = (0.0, 1.0)
+
+
+def is_rate_metric(metric: str) -> bool:
+    return metric in RATE_METRICS
+
+
+def rate_metrics_available(
+    df: pd.DataFrame | None = None,
+    metrics: list[str] | None = None,
+) -> list[str]:
+    """S_RATE / A_RATE keys that exist in the dataset metric list."""
+    cols: set[str] = set(metrics or [])
+    if df is not None:
+        cols.update(metric_columns(df))
+    return [key for key in (S_RATE_KEY, A_RATE_KEY) if key in cols]
+
+
+def overlay_metrics_available(
+    df: pd.DataFrame | None = None,
+    metrics: list[str] | None = None,
+) -> list[str]:
+    """Synthetic toggles in the metric filter (rates + M971 time-of-day mean)."""
+    out = list(rate_metrics_available(df, metrics))
+    cols: set[str] = set(metrics or [])
+    if df is not None:
+        cols.update(metric_columns(df))
+    if M971_COL in cols:
+        out.append(M971_DAILY_AVG_KEY)
+    return out
+
+
+def is_synthetic_overlay(metric: str) -> bool:
+    return metric == M971_DAILY_AVG_KEY
+
+
+def metric_division_rate(numerator: pd.Series, denominator: pd.Series) -> pd.Series:
+    num = numerator.astype("float64")
+    den = denominator.astype("float64")
+    with np.errstate(divide="ignore", invalid="ignore"):
+        out = num / den
+    return out.replace([np.inf, -np.inf], np.nan)
+
+
+def add_rate_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Append S_RATE (M658/M971) and A_RATE (M696/M971) when inputs exist."""
+    if M658_COL in df.columns and M971_COL in df.columns:
+        df[S_RATE_KEY] = metric_division_rate(df[M658_COL], df[M971_COL])
+    if M696_COL in df.columns and M971_COL in df.columns:
+        df[A_RATE_KEY] = metric_division_rate(df[M696_COL], df[M971_COL])
+    return df
 
 
 def display_metric(metric: str) -> str:
@@ -178,6 +239,10 @@ def display_metric(metric: str) -> str:
     if metric == M971_DAILY_AVG_KEY:
         base = display_metric(M971_COL)
         return f"{base} · 시각별 평균 (전기간)"
+    if metric == S_RATE_KEY:
+        return "S_RATE (M658/M971)"
+    if metric == A_RATE_KEY:
+        return "A_RATE (M696/M971)"
     original = metric_original(metric)
     return f"{metric} ({original})" if original else metric
 
@@ -371,7 +436,7 @@ def load_plmn(
         try:
             cached = pd.read_pickle(cache_path)
             if cached.attrs.get("signature") == signature:
-                return cached
+                return add_rate_columns(cached)
         except Exception:
             pass
 
@@ -387,6 +452,7 @@ def load_plmn(
     df = pd.concat(parts, ignore_index=True)
     df = df.sort_values("time").reset_index(drop=True)
     df["time"] = pd.to_datetime(df["time"], utc=True)
+    df = add_rate_columns(df)
     df.attrs["signature"] = signature
 
     if use_cache:
@@ -587,7 +653,9 @@ def ranked_metric_pairs(
     return pairs
 
 
-def format_metric_value(value: float) -> str:
+def format_metric_value(value: float, *, metric: str | None = None) -> str:
+    if metric and is_rate_metric(metric):
+        return f"{float(value):.3f}"
     return f"{round(float(value)):,}"
 
 
@@ -606,7 +674,10 @@ def ranked_hover_text(
     pairs = ranked_metric_pairs(row, cols, nonzero_only=True)
     total = len(pairs)
     shown = pairs if top_n is None else pairs[:top_n]
-    lines = [f"{display_metric(name)}={format_metric_value(val)}" for name, val in shown]
+    lines = [
+        f"{display_metric(name)}={format_metric_value(val, metric=name)}"
+        for name, val in shown
+    ]
     if top_n is not None and total > top_n:
         lines.append(f"... +{total - top_n} more (아래 패널 스크롤)")
     return sep.join(lines)
@@ -651,7 +722,7 @@ def ranked_hover_html(
                 rank_color="#888" if color == "inherit" else color,
                 i=i,
                 label=display_metric(name),
-                val=format_metric_value(val),
+                val=format_metric_value(val, metric=name),
             )
         )
     return (
@@ -1069,29 +1140,30 @@ def build_figure(
     # `metrics=[]` must stay empty — do not treat it as falsy fallback to all cols.
     cols = metric_columns(df) if metrics is None else list(metrics)
     if max_metrics is not None and max_metrics >= 0:
-        cols = cols[:max_metrics]
+        plot_cols = [c for c in cols if not is_synthetic_overlay(c)]
+        cols = plot_cols[:max_metrics] + [c for c in cols if is_synthetic_overlay(c)]
+    plot_cols = [c for c in cols if not is_synthetic_overlay(c)]
+    show_m971_ref = M971_DAILY_AVG_KEY in cols
+    primary_cols = [c for c in plot_cols if not is_rate_metric(c)]
+    rate_cols = [c for c in plot_cols if is_rate_metric(c)]
     color_source = list(color_metrics) if color_metrics else list(cols)
 
     if not len(view):
         series = {}
     elif filter_data:
-        series = plot_series(view, cols, max_points)
+        series = plot_series(view, plot_cols, max_points)
     else:
         # Visible (+pad) only — avoids stale coarse context on newly panned edges.
         series = plot_series_window(
-            view, cols, start, end, max_points, include_context=False
+            view, plot_cols, start, end, max_points, include_context=False
         )
 
-    # Force WebGL traces to replace on every pan/zoom (Scattergl can keep old buffers).
-    data_rev = str(doc.get("plmn") or "labeling")
-    if start is not None and end is not None:
-        data_rev = (
-            f"{data_rev}:{pd.to_datetime(start, utc=True).value}:"
-            f"{pd.to_datetime(end, utc=True).value}"
-        )
+    rate_colors = {S_RATE_KEY: S_RATE_COLOR, A_RATE_KEY: A_RATE_COLOR}
+    rate_hover = "값=%{y:.3f}<extra></extra>"
+    count_hover = "값=%{y:,.0f}<extra></extra>"
 
     fig = go.Figure()
-    for i, col in enumerate(cols):
+    for i, col in enumerate(primary_cols):
         x, y = series.get(col, ([], []))
         metric_name = display_metric(col)
         try:
@@ -1110,18 +1182,49 @@ def build_figure(
                 hovertemplate=(
                     f"<b>{metric_name}</b><br>"
                     "%{x|%Y년 %m월 %d일 %H:%M}<br>"
-                    "값=%{y:,.0f}<extra></extra>"
+                    f"{count_hover}"
                 ),
-                # Stable uid: embedding data_rev remounts every Scattergl on zoom
-                # and freezes the browser. datarevision alone refreshes series data.
                 uid=col,
             )
+        )
+
+    for col in rate_cols:
+        x, y = series.get(col, ([], []))
+        metric_name = display_metric(col)
+        fig.add_trace(
+            go.Scatter(
+                x=x,
+                y=y,
+                mode="lines",
+                name=metric_name,
+                opacity=0.9,
+                yaxis="y2",
+                line=dict(
+                    color=rate_colors.get(col, "#888"),
+                    width=REF_LINE_WIDTH,
+                    dash=REF_LINE_DASH,
+                ),
+                hovertemplate=(
+                    f"<b>{metric_name}</b><br>"
+                    "%{x|%Y년 %m월 %d일 %H:%M}<br>"
+                    f"{rate_hover}"
+                ),
+                uid=col,
+            )
+        )
+
+    # Force WebGL traces to replace on every pan/zoom (Scattergl can keep old buffers).
+    data_rev = str(doc.get("plmn") or "labeling")
+    if start is not None and end is not None:
+        data_rev = (
+            f"{data_rev}:{pd.to_datetime(start, utc=True).value}:"
+            f"{pd.to_datetime(end, utc=True).value}"
         )
 
     # M971 reference: 전기간 시각별 평균 (매일 같은 일주기 곡선).
     # Same window_plot_indices as metric traces so pan/zoom does not slide the
     # line as a detached blob before the deferred rebuild.
-    if M971_COL in cols and len(view):
+    if show_m971_ref and len(view):
         tod_full = m971_tod_mean_series(df)
         if tod_full is not None:
             tod_vals = tod_full.loc[view.index].to_numpy(dtype="float64")
@@ -1136,8 +1239,9 @@ def build_figure(
                         mode="lines",
                         name=ref_name,
                         line=dict(
-                            width=2,
                             color=M971_DAILY_AVG_COLOR,
+                            width=REF_LINE_WIDTH,
+                            dash=REF_LINE_DASH,
                         ),
                         hovertemplate=(
                             f"<b>{ref_name}</b><br>"
@@ -1148,8 +1252,8 @@ def build_figure(
                     )
                 )
 
-    if len(view) and cols:
-        top = view[cols].max(axis=1)
+    if len(view) and primary_cols:
+        top = view[primary_cols].max(axis=1)
         if filter_data:
             idx = minmax_indices(top.to_numpy(), max_points)
         else:
@@ -1171,13 +1275,13 @@ def build_figure(
         if hover_values:
             # Precomputing per-point text is the slow path; opt-in only.
             rows = view.index.to_numpy()[idx]
-            anchor["text"] = [ranked_hover_text(view.loc[i], cols) for i in rows]
+            anchor["text"] = [ranked_hover_text(view.loc[i], plot_cols) for i in rows]
             anchor["hovertemplate"] = "%{x|%Y년 %m월 %d일 %H:%M}<br>%{text}<extra></extra>"
         else:
             anchor["hoverinfo"] = "skip"
         fig.add_trace(go.Scattergl(**anchor))
 
-    y_ref = view[cols].max(axis=1) if len(view) and cols else None
+    y_ref = view[primary_cols].max(axis=1) if len(view) and primary_cols else None
 
     if show_labels:
         hi = str(highlight_id) if highlight_id is not None else None
@@ -1210,6 +1314,7 @@ def build_figure(
 
     # Stable uirevision: changing it every zoom remounts all WebGL traces and
     # freezes the browser. datarevision + uid still refresh series data.
+    layout_margin = dict(l=40, r=55 if rate_cols else 20, t=60, b=40)
     fig.update_layout(
         title=title or f"{display_plmn(str(doc.get('plmn')))} anomaly labeling",
         # Fixed height matches dcc.Graph (420px). Keep autosize=True so width
@@ -1219,7 +1324,7 @@ def build_figure(
         hovermode="closest",
         dragmode="zoom",
         showlegend=False,
-        margin=dict(l=40, r=20, t=60, b=40),
+        margin=layout_margin,
         xaxis_title="시간 (KST)",
         yaxis_title="value",
         uirevision=str(doc.get("plmn") or "labeling"),
@@ -1241,6 +1346,17 @@ def build_figure(
         fig.update_layout(autosize=True)
     # Box/drag zoom: horizontal only (time axis). Vertical scale via Y buttons.
     fig.update_yaxes(fixedrange=True)
+    if rate_cols:
+        fig.update_layout(
+            yaxis2=dict(
+                title="rate",
+                overlaying="y",
+                side="right",
+                range=list(RATE_Y_RANGE),
+                fixedrange=True,
+                showgrid=False,
+            ),
+        )
     # X axis always bounded by this dataset's start/end (not wall-clock "now").
     tmin, tmax = data_time_bounds(view if len(view) else df)
     x0 = pd.to_datetime(start, utc=True) if start is not None else tmin

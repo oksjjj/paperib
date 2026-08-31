@@ -49,6 +49,10 @@ from tool import (  # noqa: E402
     load_plmn,
     metric_columns,
     m971_daily_mean_series,
+    is_rate_metric,
+    is_synthetic_overlay,
+    overlay_metrics_available,
+    rate_metrics_available,
     M971_COL,
     M971_DAILY_AVG_KEY,
     parse_time,
@@ -149,13 +153,18 @@ def _label_options():
 
 
 def _plot_metrics() -> list[str]:
-    """Metrics currently drawn on the graph (stable column order)."""
-    all_m = state.get("metrics") or []
+    """Metrics currently drawn on the graph (stable column order + overlays)."""
+    all_m = list(state.get("metrics") or [])
+    overlays = overlay_metrics_available(state.get("df"), all_m)
     visible = state.get("visible_metrics")
     if visible is None:
-        return list(all_m)
+        return all_m + [o for o in overlays if o not in all_m]
     selected = set(visible)
-    return [m for m in all_m if m in selected]
+    out = [m for m in all_m if m in selected]
+    for key in overlays:
+        if key in selected and key not in out:
+            out.append(key)
+    return out
 
 
 def _metrics_by_view_sum() -> list[str]:
@@ -193,7 +202,10 @@ def _metrics_by_view_sum() -> list[str]:
         return bool((col.notna() & (col != 0)).any())
 
     active = [m for m in metrics if has_nonzero(m)]
-    return sorted(active, key=sort_key, reverse=True)
+    ranked = sorted(active, key=sort_key, reverse=True)
+    pinned = overlay_metrics_available(df, metrics)
+    rest = [m for m in ranked if m not in pinned]
+    return pinned + rest
 
 
 def _metric_filter_ui() -> tuple[list[dict], list[str]]:
@@ -203,6 +215,18 @@ def _metric_filter_ui() -> tuple[list[dict], list[str]]:
     selected = set(state.get("visible_metrics") or [])
     vals = [m for m in ranked if m in selected]
     return opts, vals
+
+
+def _visible_from_filter_selection(selected) -> list[str]:
+    """Map checklist values to drawn metrics (raw columns + overlay toggles)."""
+    all_m = list(state.get("metrics") or [])
+    selected_set = set(selected or [])
+    overlays = overlay_metrics_available(state.get("df"), all_m)
+    out = [m for m in all_m if m in selected_set]
+    for key in overlays:
+        if key in selected_set and key not in out:
+            out.append(key)
+    return out
 
 
 def _label_by_id(label_id):
@@ -421,6 +445,25 @@ def _build_graph(click_mode: str):
             autorange=False,
             range=list(y_bounds),
             uirevision=f"y:{state.get('y_gen', 0)}",
+        )
+
+    if any(is_rate_metric(m) for m in _plot_metrics()):
+        fig.update_layout(
+            yaxis2=dict(
+                title="rate",
+                overlaying="y",
+                side="right",
+                range=[0, 1],
+                fixedrange=True,
+                showgrid=False,
+                uirevision=f"y2:{state.get('y_gen', 0)}",
+            ),
+            margin=dict(
+                l=fig.layout.margin.l or 40,
+                r=55,
+                t=fig.layout.margin.t or 60,
+                b=fig.layout.margin.b or 40,
+            ),
         )
 
     if state["label_range_anchor"] is not None:
@@ -764,7 +807,11 @@ def _clamp_zoom(start_ts, end_ts):
 
 def _visible_y_bounds() -> tuple[float, float] | None:
     df = state["df"]
-    metrics = _plot_metrics()
+    metrics = [
+        m
+        for m in _plot_metrics()
+        if not is_rate_metric(m) and not is_synthetic_overlay(m)
+    ]
     if df is None or not len(df) or not metrics:
         return None
     start_ts = state["zoom_start"]
@@ -777,7 +824,7 @@ def _visible_y_bounds() -> tuple[float, float] | None:
     series = view[metrics]
     ymin = float(series.min(numeric_only=True).min())
     ymax = float(series.max(numeric_only=True).max())
-    if M971_COL in metrics:
+    if M971_DAILY_AVG_KEY in _plot_metrics():
         dm = state.get("m971_daily_mean")
         if dm is not None:
             dmv = dm.loc[view.index]
@@ -849,11 +896,12 @@ def _select_value_pos(pos: int):
 
 def _hover_panel_at_row(row: pd.Series):
     """Bottom '이 시점 특성값' panel — visible metrics with non-zero values only."""
-    cols = _plot_metrics()
-    if not cols:
+    visible = _plot_metrics()
+    cols = [c for c in visible if not is_synthetic_overlay(c)]
+    if not cols and M971_DAILY_AVG_KEY not in visible:
         return html.I("표시 중인 metric이 없습니다. 위에서 metric을 선택하세요.")
     extra: list[tuple[str, float]] = []
-    if M971_COL in cols:
+    if M971_DAILY_AVG_KEY in visible:
         dm = state.get("m971_daily_mean")
         if dm is not None:
             try:
@@ -1309,6 +1357,7 @@ def _do_load(plmn: str, click_mode: str):
     rank = int(rank_df.loc[rank_df["PLMN"] == plmn, "rank"].iloc[0])
     df = load_plmn(plmn)
     metrics = metric_columns(df)
+    overlays = overlay_metrics_available(df, metrics)
     doc = load_labels(plmn, rank=rank)
     tmin, tmax = data_time_bounds(df)
     dm = m971_daily_mean_series(df)
@@ -1318,7 +1367,7 @@ def _do_load(plmn: str, click_mode: str):
         plmn=plmn,
         rank=rank,
         metrics=metrics,
-        visible_metrics=list(metrics),
+        visible_metrics=list(metrics) + [o for o in overlays if o not in metrics],
         m971_daily_mean=dm,
         metric_rev=int(state.get("metric_rev") or 0) + 1,
         zoom_start=tmin,
@@ -2431,17 +2480,17 @@ def _metric_filter_changed(selected, _n_all, _n_none, click_mode):
             "metric 전체 해제 (Y축 유지)",
             _refresh_hover_panel(),
         )
-    selected_set = set(selected or [])
-    new_vis = [m for m in all_m if m in selected_set]
+    new_vis = _visible_from_filter_selection(selected)
     if new_vis == list(state.get("visible_metrics") or []):
         return no_update, no_update, no_update, no_update
     state["visible_metrics"] = new_vis
     _bump_metric_rev()
     _reset_y()
+    ranked = _metrics_by_view_sum()
     return (
         _build_graph(click_mode),
         no_update,
-        f"표시 metric {len(new_vis)}/{len(all_m)}",
+        f"표시 metric {len(new_vis)}/{len(ranked)}",
         _refresh_hover_panel(),
     )
 

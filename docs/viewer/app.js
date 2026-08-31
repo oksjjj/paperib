@@ -40,8 +40,18 @@
     "#c97a55",
   ];
   const M971_COL = "M971";
+  const M971_TOD_KEY = "__m971_daily_avg__";
   const M971_TOD_LABEL = "M971 · 시각별 평균 (전기간)";
   const M971_TOD_COLOR = "#ff1a1a";
+  const S_RATE_KEY = "S_RATE";
+  const A_RATE_KEY = "A_RATE";
+  const S_RATE_COLOR = "#00BFFF";
+  const A_RATE_COLOR = "#00FF00";
+  const RATE_METRICS = new Set([S_RATE_KEY, A_RATE_KEY]);
+  const RATE_COLORS = { [S_RATE_KEY]: S_RATE_COLOR, [A_RATE_KEY]: A_RATE_COLOR };
+  const REF_LINE_WIDTH = 2;
+  const REF_LINE_DASH = "3px,2px";
+  const REF_LINE = { width: REF_LINE_WIDTH, dash: REF_LINE_DASH };
   const graphEl = document.getElementById("graph");
   const selectEl = document.getElementById("plmn-select");
   const listEl = document.getElementById("label-list");
@@ -203,7 +213,11 @@
       return { name, sum, hasNonzero };
     });
     scored.sort((a, b) => b.sum - a.sum || a.name.localeCompare(b.name));
-    return scored.filter((x) => x.hasNonzero).map((x) => x.name);
+    const pinned = overlayMetricNames();
+    const rest = scored
+      .filter((x) => x.hasNonzero && !pinned.includes(x.name))
+      .map((x) => x.name);
+    return [...pinned, ...rest];
   }
 
   function renderMetricFilter() {
@@ -223,7 +237,7 @@
         onVisibleMetricsChanged({ keepY: false });
       });
       lab.appendChild(input);
-      lab.appendChild(document.createTextNode(name));
+      lab.appendChild(document.createTextNode(displayMetricName(name)));
       metricListEl.appendChild(lab);
     }
   }
@@ -262,8 +276,60 @@
     onVisibleMetricsChanged({ keepY: true });
   }
 
-  function formatMetricValue(v) {
+  function isRateMetric(name) {
+    return RATE_METRICS.has(name);
+  }
+
+  function rateMetricNames() {
+    if (!payload?.metrics) return [];
+    return [S_RATE_KEY, A_RATE_KEY].filter((k) => k in payload.metrics);
+  }
+
+  function overlayMetricNames() {
+    const out = rateMetricNames();
+    if (
+      payload?.metrics?.[M971_COL] &&
+      Array.isArray(payload.m971_tod_ref) &&
+      payload.m971_tod_ref.length === payload.t?.length
+    ) {
+      out.push(M971_TOD_KEY);
+    }
+    return out;
+  }
+
+  function displayMetricName(name) {
+    if (name === S_RATE_KEY) return "S_RATE (M658/M971)";
+    if (name === A_RATE_KEY) return "A_RATE (M696/M971)";
+    if (name === M971_TOD_KEY) return M971_TOD_LABEL;
+    return name;
+  }
+
+  function ensureRateMetrics(data) {
+    if (!data?.metrics?.[M971_COL]) return;
+    const m971 = data.metrics[M971_COL];
+    if (!data.metrics[S_RATE_KEY] && data.metrics.M658) {
+      const m658 = data.metrics.M658;
+      data.metrics[S_RATE_KEY] = m658.map((n, i) => {
+        const d = m971[i];
+        if (d == null || !isFinite(d) || d === 0) return null;
+        const v = n / d;
+        return isFinite(v) ? v : null;
+      });
+    }
+    if (!data.metrics[A_RATE_KEY] && data.metrics.M696) {
+      const m696 = data.metrics.M696;
+      data.metrics[A_RATE_KEY] = m696.map((n, i) => {
+        const d = m971[i];
+        if (d == null || !isFinite(d) || d === 0) return null;
+        const v = n / d;
+        return isFinite(v) ? v : null;
+      });
+    }
+  }
+
+  function formatMetricValue(v, name) {
     if (v == null || !isFinite(v)) return "—";
+    if (name && isRateMetric(name)) return Number(v).toFixed(3);
     return Math.round(v).toLocaleString("en-US");
   }
 
@@ -340,7 +406,7 @@
 
   function m971TodRefEnabled(data) {
     return (
-      visibleMetrics.has(M971_COL) &&
+      visibleMetrics.has(M971_TOD_KEY) &&
       data?.metrics?.[M971_COL] &&
       Array.isArray(data.m971_tod_ref) &&
       data.m971_tod_ref.length === data.t?.length
@@ -390,7 +456,7 @@
     const cells = pairs
       .map((p, i) => {
         const bg = Math.floor(i / 4) % 2 ? "#f6f8fa" : "#ffffff";
-        const shown = isFinite(p.val) ? formatMetricValue(p.val) : "—";
+        const shown = isFinite(p.val) ? formatMetricValue(p.val, p.name) : "—";
         return (
           `<div class="hover-cell" style="background:${bg}">` +
           `<span class="rank">${i + 1}</span>` +
@@ -611,7 +677,7 @@
     }
     let ymax = -Infinity;
     for (const name of allMetricNames()) {
-      if (!visibleMetrics.has(name)) continue;
+      if (!visibleMetrics.has(name) || isRateMetric(name)) continue;
       const series = payload.metrics[name];
       const v = series?.[best];
       if (v != null && isFinite(v) && v > ymax) ymax = v;
@@ -685,6 +751,7 @@
       if (isFinite(x0ms) && ms < x0ms) continue;
       if (isFinite(x1ms) && ms > x1ms) continue;
       for (const name of names) {
+        if (isRateMetric(name)) continue;
         const v = data.metrics[name]?.[i];
         if (v == null || !isFinite(v)) continue;
         if (v < ymin) ymin = v;
@@ -796,26 +863,48 @@
   function buildFigure(data, highlightId) {
     // Keep color order stable across toggles (full metric list order).
     const colorOrder = allMetricNames();
-    const traces = colorOrder
-      .filter((name) => visibleMetrics.has(name))
-      .map((name) => {
-        const colorIdx = Math.max(0, colorOrder.indexOf(name));
-        const color = SERIES_COLORWAY[colorIdx % SERIES_COLORWAY.length];
-        return {
-          type: "scattergl",
-          mode: "lines",
-          name,
-          x: data.t,
-          y: data.metrics[name],
-          opacity: 0.72,
-          line: { width: 1, color },
-          hovertemplate:
-            "<b>%{fullData.name}</b><br>" +
-            "%{x|%Y년 %m월 %d일 %H:%M}<br>" +
-            "값=%{y:,.0f}<extra></extra>",
-          uid: name,
-        };
+    const primaryNames = colorOrder.filter(
+      (name) => visibleMetrics.has(name) && !isRateMetric(name),
+    );
+    const rateNames = colorOrder.filter(
+      (name) => visibleMetrics.has(name) && isRateMetric(name),
+    );
+    const traces = primaryNames.map((name) => {
+      const colorIdx = Math.max(0, colorOrder.indexOf(name));
+      const color = SERIES_COLORWAY[colorIdx % SERIES_COLORWAY.length];
+      return {
+        type: "scattergl",
+        mode: "lines",
+        name,
+        x: data.t,
+        y: data.metrics[name],
+        opacity: 0.72,
+        line: { width: 1, color },
+        hovertemplate:
+          "<b>%{fullData.name}</b><br>" +
+          "%{x|%Y년 %m월 %d일 %H:%M}<br>" +
+          "값=%{y:,.0f}<extra></extra>",
+        uid: name,
+      };
+    });
+
+    for (const name of rateNames) {
+      traces.push({
+        type: "scatter",
+        mode: "lines",
+        name,
+        x: data.t,
+        y: data.metrics[name],
+        opacity: 0.9,
+        yaxis: "y2",
+        line: { ...REF_LINE, color: RATE_COLORS[name] || "#888" },
+        hovertemplate:
+          "<b>%{fullData.name}</b><br>" +
+          "%{x|%Y년 %m월 %d일 %H:%M}<br>" +
+          "값=%{y:.3f}<extra></extra>",
+        uid: name,
       });
+    }
 
     if (m971TodRefEnabled(data)) {
       traces.push({
@@ -824,7 +913,7 @@
         name: M971_TOD_LABEL,
         x: data.t,
         y: data.m971_tod_ref,
-        line: { width: 2, color: M971_TOD_COLOR },
+        line: { ...REF_LINE, color: M971_TOD_COLOR },
         hovertemplate:
           `<b>${M971_TOD_LABEL}</b><br>` +
           "%{x|%Y년 %m월 %d일 %H:%M}<br>" +
@@ -875,7 +964,7 @@
     if (yr) yaxis.range = yr;
 
     const layout = {
-      margin: { l: 52, r: 20, t: 36, b: 48 },
+      margin: { l: 52, r: rateNames.length ? 55 : 20, t: 36, b: 48 },
       height: graphHeightPx(),
       autosize: true,
       showlegend: false,
@@ -898,6 +987,18 @@
       },
       xaxis,
       yaxis,
+      ...(rateNames.length
+        ? {
+            yaxis2: {
+              title: "rate",
+              overlaying: "y",
+              side: "right",
+              range: [0, 1],
+              fixedrange: true,
+              showgrid: false,
+            },
+          }
+        : {}),
       shapes: (() => {
         const out = anomaliesEnabled()
           ? shapesForLabels(data.labels, highlightId)
@@ -1786,8 +1887,9 @@
     const res = await fetch(`${dataBase}/${plmn}.json`, { cache: "no-store" });
     if (!res.ok) throw new Error(`failed to load ${plmn}`);
     payload = await res.json();
+    ensureRateMetrics(payload);
     ensureM971TodRef(payload);
-    visibleMetrics = new Set(allMetricNames());
+    visibleMetrics = new Set([...allMetricNames(), ...overlayMetricNames()]);
     hoverIndex = defaultHoverIndex();
     if (interactionMode === "inspect") inspectIndex = hoverIndex;
     renderMetricFilter();

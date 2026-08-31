@@ -43,9 +43,12 @@ os.chdir(ROOT)
 
 from tool import (  # noqa: E402
     LABEL_DIR,
+    A_RATE_KEY,
     M971_COL,
+    S_RATE_KEY,
     data_time_bounds,
     format_kst,
+    is_rate_metric,
     label_line,
     load_labels,
     load_or_build_ranking,
@@ -199,7 +202,10 @@ def export_one(
     rank = int(row["rank"].iloc[0]) if len(row) else None
     doc = load_labels(plmn, rank=rank)
     label_items = list(doc.get("labels") or [])
-    cols = metric_columns(df)[:max_metrics]
+    cols = [c for c in metric_columns(df) if not is_rate_metric(c)][:max_metrics]
+    for rate in (S_RATE_KEY, A_RATE_KEY):
+        if rate in df.columns and rate not in cols:
+            cols.append(rate)
     if not cols:
         raise RuntimeError(f"no metrics for {plmn}")
 
