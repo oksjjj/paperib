@@ -12,7 +12,7 @@
     python labeling/preprocess.py
     python labeling/app.py
 
-전처리는 labeling/labels/*_labels.json을 수정하지 않습니다.
+전처리는 data/labels/*_labels.json을 수정하지 않습니다.
 """
 
 from __future__ import annotations

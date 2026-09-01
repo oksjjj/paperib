@@ -1,0 +1,304 @@
+{
+  "plmn": "P0480",
+  "rank": 1,
+  "labels": [
+    {
+      "id": "28d3ab4c",
+      "kind": "range",
+      "tag": "anomaly",
+      "start": "2026-05-01T13:05:00+00:00",
+      "end": "2026-05-01T13:45:00+00:00",
+      "metrics": [
+        "ALL"
+      ],
+      "updated_at": null
+    },
+    {
+      "id": "b1bf2cf9",
+      "kind": "range",
+      "tag": "anomaly",
+      "start": "2026-05-04T15:25:00+00:00",
+      "end": "2026-05-04T23:00:00+00:00",
+      "metrics": [
+        "ALL"
+      ],
+      "updated_at": null
+    },
+    {
+      "id": "7670ff3b",
+      "kind": "range",
+      "tag": "anomaly",
+      "start": "2026-05-06T14:00:00+00:00",
+      "end": "2026-05-06T14:55:00+00:00",
+      "metrics": [
+        "ALL"
+      ],
+      "updated_at": null
+    },
+    {
+      "id": "430e772a",
+      "kind": "range",
+      "tag": "anomaly",
+      "start": "2026-05-11T11:50:00+00:00",
+      "end": "2026-05-11T12:35:00+00:00",
+      "metrics": [
+        "ALL"
+      ],
+      "updated_at": null
+    },
+    {
+      "id": "3cf9f074",
+      "kind": "range",
+      "tag": "anomaly",
+      "start": "2026-05-19T17:35:00+00:00",
+      "end": "2026-05-19T17:55:00+00:00",
+      "metrics": [
+        "ALL"
+      ],
+      "updated_at": null
+    },
+    {
+      "id": "a0595dae",
+      "kind": "point",
+      "tag": "anomaly",
+      "start": "2026-05-25T12:20:00+00:00",
+      "end": "2026-05-25T12:20:00+00:00",
+      "metrics": [
+        "ALL"
+      ],
+      "updated_at": null
+    },
+    {
+      "id": "8b88626a",
+      "kind": "range",
+      "tag": "anomaly",
+      "start": "2026-06-01T17:05:00+00:00",
+      "end": "2026-06-01T17:35:00+00:00",
+      "metrics": [
+        "ALL"
+      ],
+      "updated_at": null
+    },
+    {
+      "id": "090cff1f",
+      "kind": "range",
+      "tag": "anomaly",
+      "start": "2026-06-08T16:40:00+00:00",
+      "end": "2026-06-08T18:20:00+00:00",
+      "metrics": [
+        "ALL"
+      ],
+      "updated_at": null
+    },
+    {
+      "id": "2972acdc",
+      "kind": "range",
+      "tag": "anomaly",
+      "start": "2026-06-11T13:05:00+00:00",
+      "end": "2026-06-11T13:55:00+00:00",
+      "metrics": [
+        "ALL"
+      ],
+      "updated_at": null
+    },
+    {
+      "id": "b385a10d",
+      "kind": "range",
+      "tag": "anomaly",
+      "start": "2026-06-14T13:10:00+00:00",
+      "end": "2026-06-14T13:35:00+00:00",
+      "metrics": [
+        "ALL"
+      ],
+      "updated_at": null
+    },
+    {
+      "id": "235ae6db",
+      "kind": "range",
+      "tag": "anomaly",
+      "start": "2026-06-28T17:40:00+00:00",
+      "end": "2026-06-28T18:20:00+00:00",
+      "metrics": [
+        "ALL"
+      ],
+      "updated_at": null
+    },
+    {
+      "id": "3a1fb077",
+      "kind": "range",
+      "tag": "anomaly",
+      "start": "2026-06-30T05:05:00+00:00",
+      "end": "2026-06-30T05:15:00+00:00",
+      "metrics": [
+        "ALL"
+      ],
+      "updated_at": null
+    },
+    {
+      "id": "96997f32",
+      "kind": "range",
+      "tag": "anomaly",
+      "start": "2026-06-30T05:35:00+00:00",
+      "end": "2026-06-30T06:05:00+00:00",
+      "metrics": [
+        "ALL"
+      ],
+      "updated_at": null
+    },
+    {
+      "id": "d66a7545",
+      "kind": "range",
+      "tag": "anomaly",
+      "start": "2026-06-30T07:45:00+00:00",
+      "end": "2026-06-30T11:35:00+00:00",
+      "metrics": [
+        "ALL"
+      ],
+      "updated_at": null
+    },
+    {
+      "id": "16b3a56f",
+      "kind": "range",
+      "tag": "anomaly",
+      "start": "2026-06-30T13:10:00+00:00",
+      "end": "2026-06-30T15:10:00+00:00",
+      "metrics": [
+        "ALL"
+      ],
+      "updated_at": null
+    },
+    {
+      "id": "d5c70c1c",
+      "kind": "range",
+      "tag": "anomaly",
+      "start": "2026-07-03T02:35:00+00:00",
+      "end": "2026-07-03T02:50:00+00:00",
+      "metrics": [
+        "ALL"
+      ],
+      "updated_at": null
+    },
+    {
+      "id": "0f2d418c",
+      "kind": "range",
+      "tag": "anomaly",
+      "start": "2026-07-03T14:10:00+00:00",
+      "end": "2026-07-03T14:40:00+00:00",
+      "metrics": [
+        "ALL"
+      ],
+      "updated_at": null
+    },
+    {
+      "id": "91804caf",
+      "kind": "range",
+      "tag": "anomaly",
+      "start": "2026-07-22T16:00:00+00:00",
+      "end": "2026-07-22T16:30:00+00:00",
+      "metrics": [
+        "ALL"
+      ],
+      "updated_at": null
+    },
+    {
+      "id": "133b7cf1",
+      "kind": "range",
+      "tag": "anomaly",
+      "start": "2026-07-24T07:55:00+00:00",
+      "end": "2026-07-24T09:05:00+00:00",
+      "metrics": [
+        "ALL"
+      ],
+      "updated_at": null
+    },
+    {
+      "id": "5218e0b6",
+      "kind": "range",
+      "tag": "anomaly",
+      "start": "2026-07-29T15:00:00+00:00",
+      "end": "2026-07-29T15:35:00+00:00",
+      "metrics": [
+        "ALL"
+      ],
+      "updated_at": null
+    },
+    {
+      "id": "34e708d0",
+      "kind": "range",
+      "tag": "anomaly",
+      "start": "2026-08-02T13:10:00+00:00",
+      "end": "2026-08-02T13:55:00+00:00",
+      "metrics": [
+        "ALL"
+      ],
+      "updated_at": null
+    },
+    {
+      "id": "68b55070",
+      "kind": "point",
+      "tag": "anomaly",
+      "start": "2026-08-07T07:25:00+00:00",
+      "end": "2026-08-07T07:25:00+00:00",
+      "metrics": [
+        "ALL"
+      ],
+      "updated_at": null
+    },
+    {
+      "id": "e8f72d81",
+      "kind": "range",
+      "tag": "anomaly",
+      "start": "2026-08-18T17:25:00+00:00",
+      "end": "2026-08-18T17:40:00+00:00",
+      "metrics": [
+        "ALL"
+      ],
+      "updated_at": null
+    },
+    {
+      "id": "ace96c92",
+      "kind": "range",
+      "tag": "anomaly",
+      "start": "2026-08-25T13:00:00+00:00",
+      "end": "2026-08-25T13:10:00+00:00",
+      "metrics": [
+        "ALL"
+      ],
+      "updated_at": null
+    },
+    {
+      "id": "57a293dd",
+      "kind": "range",
+      "tag": "anomaly",
+      "start": "2026-08-26T22:35:00+00:00",
+      "end": "2026-08-27T00:10:00+00:00",
+      "metrics": [
+        "ALL"
+      ],
+      "updated_at": null
+    },
+    {
+      "id": "3e89f054",
+      "kind": "range",
+      "tag": "anomaly",
+      "start": "2026-08-27T21:30:00+00:00",
+      "end": "2026-08-28T00:30:00+00:00",
+      "metrics": [
+        "ALL"
+      ],
+      "updated_at": null
+    },
+    {
+      "id": "05dacd13",
+      "kind": "range",
+      "tag": "anomaly",
+      "start": "2026-08-28T15:05:00+00:00",
+      "end": "2026-08-28T15:40:00+00:00",
+      "metrics": [
+        "ALL"
+      ],
+      "updated_at": null
+    }
+  ],
+  "updated_at": "2026-09-01T03:38:47.761414+00:00"
+}

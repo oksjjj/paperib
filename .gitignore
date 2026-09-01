@@ -1,10 +1,15 @@
 .venv/
-# Raw data (masked CSV, mapping) — local only (keep folder placeholder)
+# data/ — raw CSV/mapping local; labels tracked under data/labels/
 /data/*
 !/data/.gitkeep
 !/data/README.md
-masked_*.csv
-*_mapping.txt
+!/data/labels/
+/data/masked_*.csv
+/data/*_mapping.txt
+
+/data/labels/*
+!/data/labels/.gitkeep
+!/data/labels/*_labels.json
 
 graph/
 analysis/
@@ -12,7 +17,5 @@ results/
 cache/
 labeling/__pycache__/
 labeling/cache/
-# Source labels stay local; public subsets are docs/viewer/data* (via export_viewer.py).
-labeling/labels/*_labels.json
 
 .DS_Store

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Rebuild labeling caches after data/*.csv changes.
 
-Single pass over data/*.csv → private artifacts under labeling/ (gitignored):
+Single pass over data/*.csv → artifacts under labeling/ (cache) and data/labels/:
   - labeling/cache/{PLMN}.pkl
-  - labeling/labels/plmn_rank.csv
+  - data/labels/plmn_rank.csv
   - labeling/cache/plmn_rank.signature
 
 Future data/*.csv rows are expected to cover only PLMNs listed in

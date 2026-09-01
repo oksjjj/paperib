@@ -3,11 +3,12 @@
 
 Catalogs (selected with ``--catalog``):
 
-- **labeled** (default): PLMNs with non-empty ``labeling/labels/*_labels.json``
+- **labeled** (default): PLMNs with non-empty ``data/labels/*_labels.json``
   → ``docs/viewer/data/`` · high resolution (≤ ~20 operators recommended)
 - **top100**: every PLMN in repo-root ``top100.txt``
   → ``docs/viewer/data-top100/`` · downsampled (default 5k points)
-- **both**: run labeled + top100 (use before ``git push`` for the full web UI)
+- **both**: run top100 + labeled (use before ``git push`` for the full web UI).
+  Labeled catalog is skipped when no labels exist; top100 still exports.
 
 Usage:
     python labeling/export_viewer.py                      # both (labeled + top100)
@@ -20,8 +21,8 @@ Git / Pages:
     python labeling/export_viewer.py --catalog both
     git add docs/viewer/ && git commit && git push
 
-Source ``labeling/labels/*.json`` can stay gitignored; labels are embedded in
-labeled JSON when present. Top-100 JSON has no anomaly UI on the web tab.
+Source ``data/labels/*_labels.json`` is the canonical store (git-tracked).
+Labels are also embedded in labeled viewer JSON for Pages.
 """
 
 from __future__ import annotations
@@ -269,7 +270,12 @@ def export_catalog(
     top_n: int | None = None,
 ) -> None:
     if not plmns:
-        raise SystemExit(f"No PLMNs to export for catalog={catalog!r}.")
+        print(
+            f"skip catalog={catalog!r}: no PLMNs to export "
+            f"(top100 → --catalog top100 or both).",
+            flush=True,
+        )
+        return
 
     os.makedirs(out_dir, exist_ok=True)
     _purge_stale_exports(plmns, out_dir)
@@ -389,18 +395,20 @@ def main() -> None:
         return plmns
 
     catalogs: list[tuple[str, str, list[str], int, int | None]] = []
-    if args.catalog in ("labeled", "both"):
-        catalogs.append(("labeled", LABELED_OUT_DIR, labeled_plmns(), labeled_max, args.top_n))
+    # top100 first so a missing labeled set never blocks the default 100 operators.
     if args.catalog in ("top100", "both"):
+        top100 = _top100_plmns()
         catalogs.append(
             (
                 "top100",
                 TOP100_OUT_DIR,
-                _top100_plmns(),
+                top100,
                 int(args.top100_max_points),
-                len(_top100_plmns()),
+                len(top100),
             )
         )
+    if args.catalog in ("labeled", "both"):
+        catalogs.append(("labeled", LABELED_OUT_DIR, labeled_plmns(), labeled_max, args.top_n))
 
     for catalog, out_dir, plmns, max_points, top_n in catalogs:
         export_catalog(

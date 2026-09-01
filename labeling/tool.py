@@ -30,8 +30,7 @@ DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 ANALYSIS_RANK_PATH = os.path.join(
     os.path.dirname(__file__), "..", "analysis", "plmn_m971_sum_sorted.csv"
 )
-# Private artifacts stay under labeling/ (gitignored)
-LABEL_DIR = os.path.join(os.path.dirname(__file__), "labels")
+LABEL_DIR = os.path.join(DATA_DIR, "labels")
 RANK_CACHE_PATH = os.path.join(LABEL_DIR, "plmn_rank.csv")
 CACHE_DIR = os.path.join(os.path.dirname(__file__), "cache")
 RANK_SIGNATURE_PATH = os.path.join(CACHE_DIR, "plmn_rank.signature")
