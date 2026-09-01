@@ -81,9 +81,8 @@ LABEL_HIGHLIGHT_END = "label_highlight_end"
 VALUE_CURSOR_NAME = "value_cursor"
 
 
-MAPPING_DIR = os.path.join(os.path.dirname(__file__), "..", "mapping")
-PLMN_MAPPING_PATH = os.path.join(MAPPING_DIR, "plmn_mapping.txt")
-METRIC_MAPPING_PATH = os.path.join(MAPPING_DIR, "metric_mapping.txt")
+PLMN_MAPPING_PATH = os.path.join(DATA_DIR, "plmn_mapping.txt")
+METRIC_MAPPING_PATH = os.path.join(DATA_DIR, "metric_mapping.txt")
 
 _PLMN_ORIGINAL: dict[str, str] | None = None
 _METRIC_ORIGINAL: dict[str, str] | None = None
@@ -94,7 +93,7 @@ def set_mapping_enabled(enabled: bool) -> None:
     """Enable/disable mapping lookups (PLMN/metric original names).
 
     When disabled, display helpers keep masked IDs only — safe for shared/git
-    notebooks even if mapping/ exists locally.
+    notebooks even if mapping files exist locally under data/.
     """
     global _MAPPING_ENABLED
     _MAPPING_ENABLED = bool(enabled)
@@ -105,7 +104,7 @@ def mapping_enabled() -> bool:
 
 
 def _load_mapping_tables() -> None:
-    """Lazy-load mapping files if present under mapping/."""
+    """Lazy-load mapping files if present under data/."""
     global _PLMN_ORIGINAL, _METRIC_ORIGINAL
     if _PLMN_ORIGINAL is not None and _METRIC_ORIGINAL is not None:
         return
@@ -129,7 +128,7 @@ def _load_mapping_tables() -> None:
 
 
 def reload_mappings() -> None:
-    """Force re-read mapping files (e.g. after replacing mapping/)."""
+    """Force re-read mapping files (e.g. after replacing data/*_mapping.txt)."""
     global _PLMN_ORIGINAL, _METRIC_ORIGINAL
     _PLMN_ORIGINAL = None
     _METRIC_ORIGINAL = None

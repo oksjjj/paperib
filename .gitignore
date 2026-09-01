@@ -1,16 +1,10 @@
 .venv/
-# Raw masked CSV — local only (keep folder placeholder)
+# Raw data (masked CSV, mapping) — local only (keep folder placeholder)
 /data/*
 !/data/.gitkeep
 !/data/README.md
 masked_*.csv
-
-# PLMN/metric mapping — local only (keep folder placeholder)
-/mapping/*
-!/mapping/.gitkeep
-!/mapping/README.md
-plmn_mapping.txt
-metric_mapping.txt
+*_mapping.txt
 
 graph/
 analysis/
