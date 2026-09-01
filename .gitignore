@@ -1,7 +1,17 @@
 .venv/
-# Raw PLMN CSV/parquet at repo root only (not docs/viewer/data).
-/data/
-mapping/
+# Raw masked CSV — local only (keep folder placeholder)
+/data/*
+!/data/.gitkeep
+!/data/README.md
+masked_*.csv
+
+# PLMN/metric mapping — local only (keep folder placeholder)
+/mapping/*
+!/mapping/.gitkeep
+!/mapping/README.md
+plmn_mapping.txt
+metric_mapping.txt
+
 graph/
 analysis/
 results/
@@ -10,8 +20,5 @@ labeling/__pycache__/
 labeling/cache/
 # Source labels stay local; public subsets are docs/viewer/data* (via export_viewer.py).
 labeling/labels/*_labels.json
-
-metric_mapping.txt
-plmn_mapping.txt
 
 .DS_Store
