@@ -46,7 +46,7 @@
   const S_RATE_KEY = "S_RATE";
   const A_RATE_KEY = "A_RATE";
   const S_RATE_COLOR = "#00BFFF";
-  const A_RATE_COLOR = "#00FF00";
+  const A_RATE_COLOR = "#e8590c";
   const RATE_METRICS = new Set([S_RATE_KEY, A_RATE_KEY]);
   const RATE_COLORS = { [S_RATE_KEY]: S_RATE_COLOR, [A_RATE_KEY]: A_RATE_COLOR };
   const REF_LINE_WIDTH = 2;

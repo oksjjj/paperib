@@ -1,0 +1,362 @@
+{
+  "plmn": "P0480",
+  "source": "omnianomaly",
+  "updated_at": "2026-09-04T04:36:55.854331+00:00",
+  "threshold": -1016.075439453125,
+  "threshold_method": "pot",
+  "window_length": 100,
+  "n_scores": 36469,
+  "n_pred_points": 23,
+  "n_pred_segments": 23,
+  "feature_columns": [
+    "M971",
+    "M658",
+    "M696",
+    "M855",
+    "M162",
+    "M037",
+    "M430",
+    "M185",
+    "M965",
+    "M874",
+    "M843",
+    "M494",
+    "M972",
+    "M779",
+    "M474",
+    "M265",
+    "M164",
+    "M899",
+    "M348",
+    "M204",
+    "M520",
+    "M392",
+    "M318",
+    "M736",
+    "M516",
+    "M336",
+    "M786",
+    "M378",
+    "M529",
+    "M104",
+    "M688",
+    "M991",
+    "M767",
+    "M609",
+    "M719",
+    "M904",
+    "M452",
+    "M362",
+    "M490",
+    "M841",
+    "M419",
+    "M618",
+    "M475",
+    "M238",
+    "M029",
+    "M610"
+  ],
+  "metrics": {
+    "best_valid_loss": -104.13019852580948,
+    "train_time": 0.1498462656682188,
+    "valid_time": 11.79279590334211,
+    "stopped_epoch": 11,
+    "stopped_step": 3520,
+    "early_stopped": 0,
+    "best_checkpoint": "model/P0480/paperib/best_model.pt",
+    "tensorboard_dir": "log/P0480/paperib/tensorboard/P0480/20260904_131844",
+    "train_history_json": "log/P0480/paperib/P0480_20260904_131843_train_history.json",
+    "train_history_csv": "log/P0480/paperib/P0480_20260904_131843_train_history.csv",
+    "pred_total_time": 0.08062831524315231,
+    "pot-threshold": -1016.075439453125,
+    "pot-level": 0.005,
+    "pot-q": 0.0001,
+    "pot-f1": 0.0,
+    "pot-precision": 0.0,
+    "pot-recall": 0.0,
+    "pot-TP": 0,
+    "pot-TN": 10739,
+    "pot-FP": 17,
+    "pot-FN": 116,
+    "pot-latency": 0.0,
+    "point_adjustment": 1
+  },
+  "labels": [
+    {
+      "id": "oa_021821",
+      "kind": "point",
+      "tag": "model",
+      "start": "2026-07-14T09:40:00+00:00",
+      "end": "2026-07-14T09:40:00+00:00",
+      "metrics": [
+        "ALL"
+      ],
+      "score": -1024.6314697265625,
+      "source": "omnianomaly"
+    },
+    {
+      "id": "oa_021851",
+      "kind": "point",
+      "tag": "model",
+      "start": "2026-07-14T12:10:00+00:00",
+      "end": "2026-07-14T12:10:00+00:00",
+      "metrics": [
+        "ALL"
+      ],
+      "score": -1810.6290283203125,
+      "source": "omnianomaly"
+    },
+    {
+      "id": "oa_022651",
+      "kind": "point",
+      "tag": "model",
+      "start": "2026-07-17T06:50:00+00:00",
+      "end": "2026-07-17T06:50:00+00:00",
+      "metrics": [
+        "ALL"
+      ],
+      "score": -1467.548828125,
+      "source": "omnianomaly"
+    },
+    {
+      "id": "oa_025550",
+      "kind": "point",
+      "tag": "model",
+      "start": "2026-07-27T08:25:00+00:00",
+      "end": "2026-07-27T08:25:00+00:00",
+      "metrics": [
+        "ALL"
+      ],
+      "score": -1035.855224609375,
+      "source": "omnianomaly"
+    },
+    {
+      "id": "oa_029243",
+      "kind": "point",
+      "tag": "model",
+      "start": "2026-08-09T04:35:00+00:00",
+      "end": "2026-08-09T04:35:00+00:00",
+      "metrics": [
+        "ALL"
+      ],
+      "score": -1989.14892578125,
+      "source": "omnianomaly"
+    },
+    {
+      "id": "oa_029514",
+      "kind": "point",
+      "tag": "model",
+      "start": "2026-08-10T03:10:00+00:00",
+      "end": "2026-08-10T03:10:00+00:00",
+      "metrics": [
+        "ALL"
+      ],
+      "score": -1162.9161376953125,
+      "source": "omnianomaly"
+    },
+    {
+      "id": "oa_029518",
+      "kind": "point",
+      "tag": "model",
+      "start": "2026-08-10T03:30:00+00:00",
+      "end": "2026-08-10T03:30:00+00:00",
+      "metrics": [
+        "ALL"
+      ],
+      "score": -1194.387451171875,
+      "source": "omnianomaly"
+    },
+    {
+      "id": "oa_030470",
+      "kind": "point",
+      "tag": "model",
+      "start": "2026-08-13T10:50:00+00:00",
+      "end": "2026-08-13T10:50:00+00:00",
+      "metrics": [
+        "ALL"
+      ],
+      "score": -1181.46484375,
+      "source": "omnianomaly"
+    },
+    {
+      "id": "oa_030486",
+      "kind": "point",
+      "tag": "model",
+      "start": "2026-08-13T12:10:00+00:00",
+      "end": "2026-08-13T12:10:00+00:00",
+      "metrics": [
+        "ALL"
+      ],
+      "score": -1548.4627685546875,
+      "source": "omnianomaly"
+    },
+    {
+      "id": "oa_030914",
+      "kind": "point",
+      "tag": "model",
+      "start": "2026-08-14T23:50:00+00:00",
+      "end": "2026-08-14T23:50:00+00:00",
+      "metrics": [
+        "ALL"
+      ],
+      "score": -2105.940185546875,
+      "source": "omnianomaly"
+    },
+    {
+      "id": "oa_031689",
+      "kind": "point",
+      "tag": "model",
+      "start": "2026-08-17T16:25:00+00:00",
+      "end": "2026-08-17T16:25:00+00:00",
+      "metrics": [
+        "ALL"
+      ],
+      "score": -1371.6431884765625,
+      "source": "omnianomaly"
+    },
+    {
+      "id": "oa_031694",
+      "kind": "point",
+      "tag": "model",
+      "start": "2026-08-17T16:50:00+00:00",
+      "end": "2026-08-17T16:50:00+00:00",
+      "metrics": [
+        "ALL"
+      ],
+      "score": -2171.021484375,
+      "source": "omnianomaly"
+    },
+    {
+      "id": "oa_032087",
+      "kind": "point",
+      "tag": "model",
+      "start": "2026-08-19T01:35:00+00:00",
+      "end": "2026-08-19T01:35:00+00:00",
+      "metrics": [
+        "ALL"
+      ],
+      "score": -3186.845947265625,
+      "source": "omnianomaly"
+    },
+    {
+      "id": "oa_033598",
+      "kind": "point",
+      "tag": "model",
+      "start": "2026-08-24T07:30:00+00:00",
+      "end": "2026-08-24T07:30:00+00:00",
+      "metrics": [
+        "ALL"
+      ],
+      "score": -1870.6292724609375,
+      "source": "omnianomaly"
+    },
+    {
+      "id": "oa_033810",
+      "kind": "point",
+      "tag": "model",
+      "start": "2026-08-25T01:10:00+00:00",
+      "end": "2026-08-25T01:10:00+00:00",
+      "metrics": [
+        "ALL"
+      ],
+      "score": -1479.631103515625,
+      "source": "omnianomaly"
+    },
+    {
+      "id": "oa_034197",
+      "kind": "point",
+      "tag": "model",
+      "start": "2026-08-26T09:25:00+00:00",
+      "end": "2026-08-26T09:25:00+00:00",
+      "metrics": [
+        "ALL"
+      ],
+      "score": -2505.5068359375,
+      "source": "omnianomaly"
+    },
+    {
+      "id": "oa_034684",
+      "kind": "point",
+      "tag": "model",
+      "start": "2026-08-28T02:00:00+00:00",
+      "end": "2026-08-28T02:00:00+00:00",
+      "metrics": [
+        "ALL"
+      ],
+      "score": -1725.8111572265625,
+      "source": "omnianomaly"
+    },
+    {
+      "id": "oa_034730",
+      "kind": "point",
+      "tag": "model",
+      "start": "2026-08-28T05:50:00+00:00",
+      "end": "2026-08-28T05:50:00+00:00",
+      "metrics": [
+        "ALL"
+      ],
+      "score": -1163.09375,
+      "source": "omnianomaly"
+    },
+    {
+      "id": "oa_034975",
+      "kind": "point",
+      "tag": "model",
+      "start": "2026-08-29T02:15:00+00:00",
+      "end": "2026-08-29T02:15:00+00:00",
+      "metrics": [
+        "ALL"
+      ],
+      "score": -1872.099365234375,
+      "source": "omnianomaly"
+    },
+    {
+      "id": "oa_035072",
+      "kind": "point",
+      "tag": "model",
+      "start": "2026-08-29T10:20:00+00:00",
+      "end": "2026-08-29T10:20:00+00:00",
+      "metrics": [
+        "ALL"
+      ],
+      "score": -1633.0830078125,
+      "source": "omnianomaly"
+    },
+    {
+      "id": "oa_035133",
+      "kind": "point",
+      "tag": "model",
+      "start": "2026-08-29T15:25:00+00:00",
+      "end": "2026-08-29T15:25:00+00:00",
+      "metrics": [
+        "ALL"
+      ],
+      "score": -2425.306884765625,
+      "source": "omnianomaly"
+    },
+    {
+      "id": "oa_036135",
+      "kind": "point",
+      "tag": "model",
+      "start": "2026-09-02T02:55:00+00:00",
+      "end": "2026-09-02T02:55:00+00:00",
+      "metrics": [
+        "ALL"
+      ],
+      "score": -3343.210205078125,
+      "source": "omnianomaly"
+    },
+    {
+      "id": "oa_036177",
+      "kind": "point",
+      "tag": "model",
+      "start": "2026-09-02T06:25:00+00:00",
+      "end": "2026-09-02T06:25:00+00:00",
+      "metrics": [
+        "ALL"
+      ],
+      "score": -3746.71630859375,
+      "source": "omnianomaly"
+    }
+  ]
+}

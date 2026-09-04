@@ -22,6 +22,7 @@ import sys
 import time
 import webbrowser
 from threading import Timer
+from typing import Any
 
 import pandas as pd
 from dash import Dash, Input, Output, State, callback_context, dcc, html, no_update
@@ -47,6 +48,7 @@ from tool import (  # noqa: E402
     load_labels,
     load_or_build_ranking,
     load_plmn,
+    load_predictions,
     metric_columns,
     m971_daily_mean_series,
     is_rate_metric,
@@ -114,6 +116,8 @@ state: dict = {
     "hover_pos": None,
     "_last_click": (None, 0.0),
     "show_anomalies": True,
+    "show_model_preds": True,
+    "predictions": None,
 }
 
 
@@ -463,6 +467,8 @@ def _build_graph(click_mode: str):
         max_points=MAX_POINTS,
         show_labels=bool(state.get("show_anomalies", True)),
         highlight_id=state.get("highlight_id"),
+        predictions=state.get("predictions"),
+        show_predictions=bool(state.get("show_model_preds", True)),
     )
     # Extra revision bump so Dash/Plotly never keep a previous WebGL buffer /
     # axis range after 줌인·이동 buttons.
@@ -511,45 +517,55 @@ def _build_graph(click_mode: str):
         )
     )
     # Always lock y for mouse drag: zoom/pan are time-axis only. Vertical scale
-    # is controlled with Y+ / Y- / Y 자동.
+    # is controlled with Y+ / Y- / Y 자동 (bottom metrics panel). Top rate panel
+    # always auto-fits the visible x-window.
     y_locked = True
     # Traces carry the full series with only the x range narrowed, so plotly's own
     # autorange would size y against data outside the window.
     y_bounds = _effective_y_bounds()
+    rate_bounds = _visible_rate_y_bounds()
     state["y_rendered"] = y_bounds
+    state["rate_y_rendered"] = rate_bounds
     # Per-axis uirevision makes Plotly accept server-driven y changes (e.g. Y 자동).
     # y_gen only — baking float bounds into uirevision remounts axes on every zoom.
-    if y_bounds is None:
+    # Row 1 = rates (auto). Row 2 = count metrics (Y+/Y- target = yaxis2).
+    if rate_bounds is None:
         fig.update_yaxes(
-            fixedrange=y_locked,
+            title_text="rate",
             autorange=True,
-            uirevision=f"y:{state.get('y_gen', 0)}",
+            fixedrange=True,
+            uirevision=f"y1:{state.get('y_gen', 0)}",
+            row=1,
+            col=1,
         )
     else:
         fig.update_yaxes(
+            title_text="rate",
+            range=list(rate_bounds),
+            autorange=False,
+            fixedrange=True,
+            uirevision=f"y1:{state.get('y_gen', 0)}",
+            row=1,
+            col=1,
+        )
+    if y_bounds is None:
+        fig.update_yaxes(
+            title_text="value",
+            fixedrange=y_locked,
+            autorange=True,
+            uirevision=f"y:{state.get('y_gen', 0)}",
+            row=2,
+            col=1,
+        )
+    else:
+        fig.update_yaxes(
+            title_text="value",
             fixedrange=y_locked,
             autorange=False,
             range=list(y_bounds),
             uirevision=f"y:{state.get('y_gen', 0)}",
-        )
-
-    if any(is_rate_metric(m) for m in _plot_metrics()):
-        fig.update_layout(
-            yaxis2=dict(
-                title="rate",
-                overlaying="y",
-                side="right",
-                range=[0, 1],
-                fixedrange=True,
-                showgrid=False,
-                uirevision=f"y2:{state.get('y_gen', 0)}",
-            ),
-            margin=dict(
-                l=fig.layout.margin.l or 40,
-                r=55,
-                t=fig.layout.margin.t or 60,
-                b=fig.layout.margin.b or 40,
-            ),
+            row=2,
+            col=1,
         )
 
     if state["label_range_anchor"] is not None:
@@ -938,6 +954,31 @@ def _visible_y_bounds() -> tuple[float, float] | None:
     return base, ymax + (ymax - base) * 0.05
 
 
+def _visible_rate_y_bounds() -> tuple[float, float] | None:
+    """Y range for the top SUCCESS/COMB rate panel (visible x-window)."""
+    df = state["df"]
+    metrics = [m for m in _plot_metrics() if is_rate_metric(m)]
+    if df is None or not len(df) or not metrics:
+        return None
+    start_ts = state["zoom_start"]
+    end_ts = state["zoom_end"]
+    view = df
+    if start_ts is not None and end_ts is not None:
+        mask = (df["time"] >= start_ts) & (df["time"] <= end_ts)
+        if mask.any():
+            view = df.loc[mask]
+    series = view[metrics]
+    ymin = float(series.min(numeric_only=True).min())
+    ymax = float(series.max(numeric_only=True).max())
+    if not (ymin == ymin and ymax == ymax):  # NaN check
+        return None
+    base = min(0.0, ymin)
+    if ymax <= base:
+        return base, base + 0.01
+    pad = (ymax - base) * 0.08
+    return base, ymax + pad
+
+
 def _effective_y_bounds() -> tuple[float, float] | None:
     """Range to draw: the visible-window fit while auto, else the pinned range."""
     if state.get("y_auto") or state.get("y_min") is None or state.get("y_max") is None:
@@ -1323,6 +1364,27 @@ def _make_axis_cmd(
     }
 
 
+def _relayout_x_window(relayout) -> tuple[Any, Any] | str | None:
+    """Extract shared-x window from a Plotly relayout payload.
+
+    Dual-panel figures emit ``xaxis`` and/or ``xaxis2`` keys depending on which
+    subplot was dragged. Either is authoritative for the shared time window.
+    Returns ``(start, end)``, the string ``\"autorange\"``, or ``None``.
+    """
+    if not relayout:
+        return None
+    if relayout.get("xaxis.autorange") or relayout.get("xaxis2.autorange"):
+        return "autorange"
+    for prefix in ("xaxis", "xaxis2"):
+        k0, k1 = f"{prefix}.range[0]", f"{prefix}.range[1]"
+        if k0 in relayout and k1 in relayout:
+            return relayout[k0], relayout[k1]
+        key = f"{prefix}.range"
+        if key in relayout and isinstance(relayout[key], (list, tuple)) and len(relayout[key]) >= 2:
+            return relayout[key][0], relayout[key][1]
+    return None
+
+
 def _apply_axes_from_relayout(
     relayout, *, ignore_guard: bool = False, y_auto: bool = True
 ) -> bool:
@@ -1335,19 +1397,17 @@ def _apply_axes_from_relayout(
 
     start_ts = end_ts = None
     try:
-        if "xaxis.range[0]" in relayout and "xaxis.range[1]" in relayout:
-            start_ts = parse_time(relayout["xaxis.range[0]"])
-            end_ts = parse_time(relayout["xaxis.range[1]"])
-        elif "xaxis.range" in relayout:
-            start_ts = parse_time(relayout["xaxis.range"][0])
-            end_ts = parse_time(relayout["xaxis.range"][1])
-        elif relayout.get("xaxis.autorange"):
+        xwin = _relayout_x_window(relayout)
+        if xwin == "autorange":
             # Double-click zoom-out: keep server in sync with the browser full view.
             state["zoom_start"], state["zoom_end"] = data_time_bounds(state["df"])
             state["x_full_view"] = True
             if y_auto:
                 _reset_y()
             return True
+        if isinstance(xwin, tuple):
+            start_ts = parse_time(xwin[0])
+            end_ts = parse_time(xwin[1])
     except (ValueError, TypeError):
         return False
 
@@ -1381,7 +1441,7 @@ def _apply_axes_from_relayout(
             _clear_highlight_if_offscreen()
         return True
 
-    if relayout.get("yaxis.autorange"):
+    if relayout.get("yaxis.autorange") or relayout.get("yaxis2.autorange"):
         _reset_y()
         return True
     return False
@@ -1457,11 +1517,13 @@ def _do_load(plmn: str, click_mode: str):
     metrics = metric_columns(df)
     overlays = overlay_metrics_available(df, metrics)
     doc = load_labels(plmn, rank=rank)
+    preds = load_predictions(plmn, source="omnianomaly")
     tmin, tmax = data_time_bounds(df)
     dm = m971_daily_mean_series(df)
     state.update(
         df=df,
         doc=doc,
+        predictions=preds,
         plmn=plmn,
         rank=rank,
         metrics=metrics,
@@ -1661,10 +1723,12 @@ app.layout = html.Div(
                 dcc.RadioItems(
                     id="anomaly-overlay-mode",
                     options=[
-                        {"label": "anomaly 표시", "value": "show"},
-                        {"label": "anomaly 숨김", "value": "hide"},
+                        {"label": "사람+모델", "value": "both"},
+                        {"label": "사람만", "value": "human"},
+                        {"label": "모델만", "value": "model"},
+                        {"label": "숨김", "value": "hide"},
                     ],
-                    value="show",
+                    value="both",
                     inline=True,
                 ),
             ],
@@ -2078,7 +2142,8 @@ def _main_body(
 ):
     prop = callback_context.triggered[0]["prop_id"] if callback_context.triggered else ""
     click_mode = click_mode or "zoom"
-    state["show_anomalies"] = (anomaly_overlay_mode or "show") != "hide"
+    state["show_anomalies"] = (anomaly_overlay_mode or "both") in ("both", "human")
+    state["show_model_preds"] = (anomaly_overlay_mode or "both") in ("both", "model")
 
     # ----- load on startup / dropdown change / prev / next -----
     triggered_id = getattr(callback_context, "triggered_id", None)
@@ -2199,12 +2264,13 @@ def _main_body(
         )
 
     if prop == "anomaly-overlay-mode.value":
-        shown = "표시" if state.get("show_anomalies", True) else "숨김"
+        mode = anomaly_overlay_mode or "both"
+        n_model = len((state.get("predictions") or {}).get("labels") or [])
         return (
             _build_graph(click_mode),
             no_update,
             no_update,
-            f"anomaly 오버레이: {shown}",
+            f"오버레이: {mode} (모델 구간 {n_model}개)",
             _cancel_style(click_mode),
             no_update,
             no_update,
@@ -2705,11 +2771,7 @@ def _drag_axis_nav(relayout, click_mode):
     """On drag-zoom / drag-pan: optional Y 자동, then deferred high-res rebuild."""
     if not relayout or state["df"] is None:
         return no_update
-    has_x = (
-        ("xaxis.range[0]" in relayout and "xaxis.range[1]" in relayout)
-        or "xaxis.range" in relayout
-        or relayout.get("xaxis.autorange") is True
-    )
+    has_x = _relayout_x_window(relayout) is not None
     if not has_x:
         return no_update
     click_mode = click_mode or "zoom"
@@ -2780,13 +2842,16 @@ app.clientside_callback(
         if (hasX) {
             patch['xaxis.autorange'] = false;
             patch['xaxis.range'] = [cmd.x[0], cmd.x[1]];
+            // Dual-panel shared time axis: keep both subplot x ranges locked.
+            patch['xaxis2.autorange'] = false;
+            patch['xaxis2.range'] = [cmd.x[0], cmd.x[1]];
         }
         if (touchY) {
             if (hasY) {
-                patch['yaxis.autorange'] = false;
-                patch['yaxis.range'] = [cmd.y[0], cmd.y[1]];
+                patch['yaxis2.autorange'] = false;
+                patch['yaxis2.range'] = [cmd.y[0], cmd.y[1]];
             } else {
-                patch['yaxis.autorange'] = true;
+                patch['yaxis2.autorange'] = true;
             }
         }
         var apply = function() {
@@ -2811,7 +2876,7 @@ app.clientside_callback(
             window.__clampingDataX = true;
             // Keep layout height/domain stable when only Y changes.
             if (!hasX && hasY) {
-                patch['yaxis.fixedrange'] = true;
+                patch['yaxis2.fixedrange'] = true;
             }
             window.Plotly.relayout(gd, patch).finally(function() {
                 window.__clampingDataX = false;
@@ -3066,14 +3131,14 @@ app.clientside_callback(
 
         if (!window.__plotPlaceUtils) {
             window.__plotPlaceUtils = function(gd) {
-                function plotLayer() {
-                    return gd.querySelector('.nsewdrag')
+                function plotAreaRect() {
+                    if (window.__combinedPlotRect) {
+                        var dual = window.__combinedPlotRect(gd);
+                        if (dual) return dual;
+                    }
+                    var layer = gd.querySelector('.nsewdrag')
                         || gd.querySelector('.xy')
                         || gd;
-                }
-
-                function plotAreaRect() {
-                    var layer = plotLayer();
                     if (!layer) return null;
                     var bb = layer.getBoundingClientRect();
                     return {
@@ -3086,9 +3151,8 @@ app.clientside_callback(
                 function clientXToPlotX(clientX) {
                     var xa = gd._fullLayout && gd._fullLayout.xaxis;
                     if (!xa) return null;
-                    var layer = plotLayer();
-                    if (!layer) return null;
-                    var bb = layer.getBoundingClientRect();
+                    var bb = plotAreaRect();
+                    if (!bb) return null;
                     var px = Math.max(0, Math.min(bb.width, clientX - bb.left));
                     try {
                         if (typeof xa.p2d === 'function') return xa.p2d(px);
@@ -3180,16 +3244,207 @@ app.clientside_callback(
                 // The placeholder figure has its own default ranges; recording
                 // them would later be replayed onto the real data.
                 if (!gd || !gd._fullData || !gd._fullData.length) return null;
-                if (!layout || !layout.xaxis || !layout.xaxis.range) return null;
+                if (!layout) return null;
+                var xr = (layout.xaxis && layout.xaxis.range)
+                    || (layout.xaxis2 && layout.xaxis2.range);
+                if (!xr) return null;
                 var view = {
-                    x: [String(layout.xaxis.range[0]), String(layout.xaxis.range[1])]
+                    x: [String(xr[0]), String(xr[1])]
                 };
-                if (layout.yaxis && layout.yaxis.range) {
-                    view.y = [layout.yaxis.range[0], layout.yaxis.range[1]];
+                // Shared-x dual plot: bottom metrics axis is yaxis2.
+                var yAxis = layout.yaxis2 || layout.yaxis;
+                if (yAxis && yAxis.range) {
+                    view.y = [yAxis.range[0], yAxis.range[1]];
                 }
                 return view;
             };
         }
+
+        // Union of both subplot plot areas (top xy + bottom x2y2).
+        // Always redefine so hot reloads pick up the dual-panel fix.
+        window.__combinedPlotRect = function(gd) {
+            try {
+                if (!gd) return null;
+                var rects = [];
+                var fl = gd._fullLayout;
+                var plots = fl && fl._plots;
+                if (plots) {
+                    Object.keys(plots).forEach(function(key) {
+                        var el = plots[key] && plots[key].plot;
+                        if (!el || !el.getBoundingClientRect) return;
+                        var r = el.getBoundingClientRect();
+                        if (r.width > 2 && r.height > 2) rects.push(r);
+                    });
+                }
+                if (!rects.length) {
+                    var drags = gd.querySelectorAll('.nsewdrag');
+                    for (var i = 0; i < drags.length; i++) {
+                        var r2 = drags[i].getBoundingClientRect();
+                        if (r2.width > 2 && r2.height > 2) rects.push(r2);
+                    }
+                }
+                if (!rects.length) return null;
+                var left = rects[0].left;
+                var right = rects[0].right;
+                var topY = rects[0].top;
+                var bottomY = rects[0].bottom;
+                for (var j = 1; j < rects.length; j++) {
+                    left = Math.min(left, rects[j].left);
+                    right = Math.max(right, rects[j].right);
+                    topY = Math.min(topY, rects[j].top);
+                    bottomY = Math.max(bottomY, rects[j].bottom);
+                }
+                return {
+                    left: left,
+                    top: topY,
+                    right: right,
+                    bottom: bottomY,
+                    width: right - left,
+                    height: bottomY - topY
+                };
+            } catch (err) {
+                return null;
+            }
+        };
+
+        window.__installSharedPanelSync = function(gd) {
+                if (!gd || gd.__sharedPanelSyncV2) return;
+                gd.__sharedPanelSyncV2 = true;
+
+                function xPairFromEvent(ed) {
+                    if (!ed) return null;
+                    var a = ed['xaxis.range[0]'];
+                    var b = ed['xaxis.range[1]'];
+                    var from = 'x';
+                    if (a === undefined || b === undefined) {
+                        if (Array.isArray(ed['xaxis.range'])) {
+                            a = ed['xaxis.range'][0];
+                            b = ed['xaxis.range'][1];
+                            from = 'x';
+                        }
+                    }
+                    if (a === undefined || b === undefined) {
+                        a = ed['xaxis2.range[0]'];
+                        b = ed['xaxis2.range[1]'];
+                        from = 'x2';
+                        if (a === undefined || b === undefined) {
+                            if (Array.isArray(ed['xaxis2.range'])) {
+                                a = ed['xaxis2.range'][0];
+                                b = ed['xaxis2.range'][1];
+                                from = 'x2';
+                            }
+                        }
+                    }
+                    if (a === undefined || b === undefined) return null;
+                    return {a: a, b: b, from: from};
+                }
+
+                // Final sync only. Live plotly_relayouting + Plotly.relayout during
+                // box-zoom cancels the gesture and jumps to a bad range (flat lines).
+                gd.on('plotly_relayout', function(ed) {
+                    if (window.__syncingSharedX || window.__clampingDataX || !ed) return;
+                    if (ed['xaxis.autorange'] || ed['xaxis2.autorange']) return;
+                    var pair = xPairFromEvent(ed);
+                    if (!pair) return;
+                    var patch = {};
+                    if (pair.from === 'x') {
+                        patch['xaxis2.autorange'] = false;
+                        patch['xaxis2.range'] = [pair.a, pair.b];
+                    } else {
+                        patch['xaxis.autorange'] = false;
+                        patch['xaxis.range'] = [pair.a, pair.b];
+                    }
+                    window.__syncingSharedX = true;
+                    window.Plotly.relayout(gd, patch).finally(function() {
+                        window.__syncingSharedX = false;
+                    });
+                });
+
+                // Hide Plotly's per-subplot zoombox; we draw a dual-panel band.
+                if (!document.getElementById('dual-zoom-style')) {
+                    var st = document.createElement('style');
+                    st.id = 'dual-zoom-style';
+                    st.textContent = [
+                        '.js-plotly-plot .zoombox,',
+                        '.js-plotly-plot .zoombox-corners{',
+                        'opacity:0!important;',
+                        'pointer-events:none!important;',
+                        '}'
+                    ].join('');
+                    document.head.appendChild(st);
+                }
+
+                // Visual-only zoom band across both panels (does not touch axes).
+                var dragStart = null;
+                function ensureBand() {
+                    var band = document.getElementById('dual-zoom-band');
+                    if (!band) {
+                        band = document.createElement('div');
+                        band.id = 'dual-zoom-band';
+                        band.style.cssText = [
+                            'position:fixed',
+                            'z-index:99990',
+                            'pointer-events:none',
+                            'display:none',
+                            'background:rgba(65,105,225,0.16)',
+                            'border:1px solid rgba(65,105,225,0.6)',
+                            'box-sizing:border-box'
+                        ].join(';');
+                        document.body.appendChild(band);
+                    }
+                    return band;
+                }
+                function hideBand() {
+                    var band = document.getElementById('dual-zoom-band');
+                    if (band) band.style.display = 'none';
+                }
+                function onDown(ev) {
+                    if (ev.button !== 0) return;
+                    if (window.__editRangeMode || window.__labelPlaceMode
+                        || window.__valueInspectMode || window.__edgeDragging) {
+                        return;
+                    }
+                    if (window.__desiredDragmode !== 'zoom') return;
+                    var rect = window.__combinedPlotRect(gd);
+                    if (!rect) return;
+                    if (ev.clientX < rect.left || ev.clientX > rect.right
+                        || ev.clientY < rect.top || ev.clientY > rect.bottom) {
+                        return;
+                    }
+                    dragStart = {x: ev.clientX, rect: rect};
+                }
+                function onMove(ev) {
+                    if (!dragStart || !(ev.buttons & 1)) {
+                        if (!(ev.buttons & 1)) {
+                            dragStart = null;
+                            hideBand();
+                        }
+                        return;
+                    }
+                    if (window.__desiredDragmode !== 'zoom') {
+                        hideBand();
+                        return;
+                    }
+                    var rect = window.__combinedPlotRect(gd) || dragStart.rect;
+                    var x0 = Math.max(rect.left, Math.min(dragStart.x, ev.clientX));
+                    var x1 = Math.min(rect.right, Math.max(dragStart.x, ev.clientX));
+                    var band = ensureBand();
+                    band.style.left = x0 + 'px';
+                    band.style.top = rect.top + 'px';
+                    band.style.width = Math.max(0, x1 - x0) + 'px';
+                    band.style.height = Math.max(0, rect.height) + 'px';
+                    band.style.display = 'block';
+                }
+                function onUp() {
+                    dragStart = null;
+                    hideBand();
+                }
+                // Bubble phase so Plotly's own zoom gesture is not disturbed.
+                gd.addEventListener('mousedown', onDown, false);
+                window.addEventListener('mousemove', onMove, true);
+                window.addEventListener('mouseup', onUp, true);
+                window.addEventListener('blur', onUp, true);
+            };
 
         // Custom edge edit: ↔ cursor + horizontal drag only on crimson edges.
         if (!window.__installCustomEdgeEdit) {
@@ -3204,14 +3459,28 @@ app.clientside_callback(
                     return host.querySelector('.js-plotly-plot');
                 }
 
+                function dragEls(gd) {
+                    if (!gd) return [];
+                    return Array.prototype.slice.call(
+                        gd.querySelectorAll('.nsewdrag')
+                    );
+                }
+
                 function dragEl(gd) {
-                    return gd && gd.querySelector('.nsewdrag');
+                    var els = dragEls(gd);
+                    return els.length ? els[0] : null;
                 }
 
                 function setEdgeHit(gd, on) {
-                    var el = dragEl(gd);
-                    if (!el) return;
-                    el.classList.toggle('edge-hit', !!on);
+                    dragEls(gd).forEach(function(el) {
+                        el.classList.toggle('edge-hit', !!on);
+                    });
+                }
+
+                function plotHitRect(gd) {
+                    return window.__combinedPlotRect
+                        ? window.__combinedPlotRect(gd)
+                        : null;
                 }
 
                 function ensureTip() {
@@ -3366,9 +3635,12 @@ app.clientside_callback(
                     var xa = fl && fl.xaxis;
                     var edges = collectEditEdges(gd);
                     if (!xa || !edges.length) return null;
-                    var el = dragEl(gd);
-                    if (!el) return null;
-                    var r = el.getBoundingClientRect();
+                    var r = plotHitRect(gd);
+                    if (!r) {
+                        var el = dragEl(gd);
+                        if (!el) return null;
+                        r = el.getBoundingClientRect();
+                    }
                     if (clientX < r.left || clientX > r.right ||
                         clientY < r.top || clientY > r.bottom) {
                         return null;
@@ -3405,9 +3677,12 @@ app.clientside_callback(
 
                 function xFromClientX(gd, clientX) {
                     var xa = gd._fullLayout.xaxis;
-                    var el = dragEl(gd);
-                    if (!el) return null;
-                    var r = el.getBoundingClientRect();
+                    var r = plotHitRect(gd);
+                    if (!r) {
+                        var el = dragEl(gd);
+                        if (!el) return null;
+                        r = el.getBoundingClientRect();
+                    }
                     var xPx = Math.max(0, Math.min(r.width, clientX - r.left));
                     return xa.p2d(xPx);
                 }
@@ -3626,7 +3901,7 @@ app.clientside_callback(
                         return;
                     }
                     // Never expand a deliberate zoom back via autorange echoes.
-                    if (eventData['xaxis.autorange']) return;
+                    if (eventData['xaxis.autorange'] || eventData['xaxis2.autorange']) return;
                     var meta = (gd.layout && gd.layout.meta) || {};
                     var bounds = meta.data_x;
                     if (!bounds || bounds.length < 2) return;
@@ -3640,6 +3915,16 @@ app.clientside_callback(
                         if (Array.isArray(eventData['xaxis.range'])) {
                             x0 = eventData['xaxis.range'][0];
                             x1 = eventData['xaxis.range'][1];
+                        }
+                    }
+                    if (x0 === undefined || x1 === undefined) {
+                        x0 = eventData['xaxis2.range[0]'];
+                        x1 = eventData['xaxis2.range[1]'];
+                        if (x0 === undefined || x1 === undefined) {
+                            if (Array.isArray(eventData['xaxis2.range'])) {
+                                x0 = eventData['xaxis2.range'][0];
+                                x1 = eventData['xaxis2.range'][1];
+                            }
                         }
                     }
                     if (x0 === undefined || x1 === undefined) return;
@@ -3665,11 +3950,30 @@ app.clientside_callback(
                         }
                         if (na < tmin) na = tmin;
                     }
-                    if (Math.abs(na - a) < 0.5 && Math.abs(nb - b) < 0.5) return;
+                    if (Math.abs(na - a) < 0.5 && Math.abs(nb - b) < 0.5) {
+                        // In-bounds: shared-panel sync mirrors the other axis.
+                        return;
+                    }
+                    // Keep the same value type Plotly emitted (string/number).
+                    function shiftRaw(orig, delta) {
+                        var t = window.__ms(orig);
+                        if (!isFinite(t)) return orig;
+                        var next = t + delta;
+                        if (typeof orig === 'number') return next;
+                        var d = new Date(next);
+                        function pad(n) { return (n < 10 ? '0' : '') + n; }
+                        return d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1) + '-'
+                            + pad(d.getUTCDate()) + ' ' + pad(d.getUTCHours()) + ':'
+                            + pad(d.getUTCMinutes()) + ':' + pad(d.getUTCSeconds());
+                    }
+                    var out0 = shiftRaw(x0, na - a);
+                    var out1 = shiftRaw(x1, nb - b);
                     window.__clampingDataX = true;
                     window.Plotly.relayout(gd, {
-                        'xaxis.range[0]': new Date(na),
-                        'xaxis.range[1]': new Date(nb)
+                        'xaxis.autorange': false,
+                        'xaxis.range': [out0, out1],
+                        'xaxis2.autorange': false,
+                        'xaxis2.range': [out0, out1]
                     }).finally(function() {
                         window.__clampingDataX = false;
                     });
@@ -3913,12 +4217,18 @@ app.clientside_callback(
                 }
 
                 function showSpikeAtMs(ms, plotRect) {
-                    var xa = gd._fullLayout && gd._fullLayout.xaxis;
-                    if (!xa || !plotRect) return;
+                    var fl = gd._fullLayout;
+                    var xa = fl && fl.xaxis;
+                    if (!xa) return;
+                    // Prefer the combined top+bottom subplot area so the cursor
+                    // spans both rate and metric panels.
+                    var rect = (window.__combinedPlotRect && window.__combinedPlotRect(gd))
+                        || plotRect;
+                    if (!rect) return;
                     var px = toAxisPx(xa, formatPlotNaive(ms));
                     if (px == null || isNaN(px)) return;
-                    var left = plotRect.left + px;
-                    if (left < plotRect.left || left > plotRect.right) return;
+                    var left = rect.left + px;
+                    if (left < rect.left || left > rect.right) return;
                     if (lastSpikeX === left) {
                         var spike0 = ensureSpike();
                         if (spike0.style.display === 'block') return;
@@ -3926,8 +4236,8 @@ app.clientside_callback(
                     lastSpikeX = left;
                     var spike = ensureSpike();
                     spike.style.left = left + 'px';
-                    spike.style.top = plotRect.top + 'px';
-                    spike.style.height = Math.max(0, plotRect.height) + 'px';
+                    spike.style.top = rect.top + 'px';
+                    spike.style.height = Math.max(0, rect.height) + 'px';
                     spike.style.display = 'block';
                 }
 
@@ -3982,8 +4292,11 @@ app.clientside_callback(
                     var full = gd._fullLayout;
                     var xa = full && full.xaxis;
                     if (!xa) return null;
-                    var layer = gd.querySelector('.nsewdrag') || gd;
-                    var bb = layer.getBoundingClientRect();
+                    var bb = (window.__combinedPlotRect && window.__combinedPlotRect(gd));
+                    if (!bb) {
+                        var layer = gd.querySelector('.nsewdrag') || gd;
+                        bb = layer.getBoundingClientRect();
+                    }
                     var px = clientX - bb.left;
                     if (px < 0 || px > bb.width) return null;
                     try {
@@ -4016,10 +4329,19 @@ app.clientside_callback(
                         hideTip();
                         return;
                     }
-                    var layer = gd.querySelector('.nsewdrag') || gd;
-                    var bb = layer.getBoundingClientRect();
-                    if (ev.clientX < bb.left || ev.clientX > bb.right ||
-                        ev.clientY < bb.top || ev.clientY > bb.bottom) {
+                    var rect = window.__combinedPlotRect
+                        ? window.__combinedPlotRect(gd) : null;
+                    if (!rect) {
+                        var layer = gd.querySelector('.nsewdrag') || gd;
+                        var bb = layer.getBoundingClientRect();
+                        rect = {
+                            left: bb.left, top: bb.top,
+                            right: bb.right, bottom: bb.bottom,
+                            width: bb.width, height: bb.height
+                        };
+                    }
+                    if (ev.clientX < rect.left || ev.clientX > rect.right ||
+                        ev.clientY < rect.top || ev.clientY > rect.bottom) {
                         hideTip();
                         return;
                     }
@@ -4037,7 +4359,7 @@ app.clientside_callback(
                         return;
                     }
                     // Always one custom spike at the snapped time (Plotly spikes off).
-                    showSpikeAtMs(snapped, bb);
+                    showSpikeAtMs(snapped, rect);
                     // On a series, Plotly hoverlabel already shows the time.
                     if (onTrace && !window.__editRangeMode) {
                         return;
@@ -4078,6 +4400,7 @@ app.clientside_callback(
 
             function afterGraphReady() {
                 window.__clampPanToData(gd);
+                window.__installSharedPanelSync(gd);
                 window.__installPlotClickHost();
                 window.__installCustomEdgeEdit();
                 if (window.__installPendingRangePreview) {

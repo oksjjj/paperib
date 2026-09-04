@@ -1,9 +1,10 @@
 .venv/
-# data/ — raw CSV/mapping local; labels tracked under data/labels/
+# data/ — raw CSV/mapping local; labels + model predictions tracked
 /data/*
 !/data/.gitkeep
 !/data/README.md
 !/data/labels/
+!/data/predictions/
 /data/masked_*.csv
 /data/*_mapping.txt
 
@@ -11,11 +12,29 @@
 !/data/labels/.gitkeep
 !/data/labels/*_labels.json
 
+/data/predictions/*
+!/data/predictions/.gitkeep
+!/data/predictions/*_omnianomaly.json
+
 graph/
 analysis/
 results/
 cache/
 labeling/__pycache__/
 labeling/cache/
+
+# OmniAnomaly runtime artifacts (keep source)
+OmniAnomaly/.venv/
+OmniAnomaly/__pycache__/
+OmniAnomaly/**/__pycache__/
+OmniAnomaly/data/paperib/
+OmniAnomaly/data/SMD/
+OmniAnomaly/data/SMAP/
+OmniAnomaly/data/MSL/
+OmniAnomaly/data/raw/
+OmniAnomaly/model/
+OmniAnomaly/result/
+OmniAnomaly/log/*
+!OmniAnomaly/log/.gitkeep
 
 .DS_Store

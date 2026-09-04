@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 KST = ZoneInfo("Asia/Seoul")
 # Display: Korean date style in Asia/Seoul (e.g. 2026년 04월 30일 00:00)
@@ -31,6 +32,7 @@ ANALYSIS_RANK_PATH = os.path.join(
     os.path.dirname(__file__), "..", "analysis", "plmn_m971_sum_sorted.csv"
 )
 LABEL_DIR = os.path.join(DATA_DIR, "labels")
+PRED_DIR = os.path.join(DATA_DIR, "predictions")
 RANK_CACHE_PATH = os.path.join(LABEL_DIR, "plmn_rank.csv")
 CACHE_DIR = os.path.join(os.path.dirname(__file__), "cache")
 RANK_SIGNATURE_PATH = os.path.join(CACHE_DIR, "plmn_rank.signature")
@@ -40,11 +42,14 @@ TAG_COLORS = {
     "anomaly": "rgba(201, 162, 39, 0.28)",
     "normal": "rgba(20, 120, 50, 0.32)",
     "uncertain": "rgba(200, 110, 0, 0.36)",
+    # OmniAnomaly (and other model) predictions — distinct from human labels.
+    "model": "rgba(124, 58, 237, 0.22)",
 }
 TAG_LINE = {
     "anomaly": "#c9a227",
     "normal": "#147832",
     "uncertain": "#c86e00",
+    "model": "#7c3aed",
 }
 
 # Mid-tone hues: readable on white without the previous near-black density.
@@ -174,7 +179,7 @@ A_RATE_KEY = "A_RATE"
 M971_DAILY_AVG_KEY = "__m971_daily_avg__"
 M971_DAILY_AVG_COLOR = "#ff1a1a"
 S_RATE_COLOR = "#00BFFF"
-A_RATE_COLOR = "#00FF00"
+A_RATE_COLOR = "#e8590c"
 REF_LINE_WIDTH = 2
 REF_LINE_DASH = "3px,2px"
 REF_LINE = dict(width=REF_LINE_WIDTH, dash=REF_LINE_DASH)
@@ -238,9 +243,9 @@ def display_metric(metric: str) -> str:
         base = display_metric(M971_COL)
         return f"{base} · 시각별 평균 (전기간)"
     if metric == S_RATE_KEY:
-        return "S_RATE (M658/M971)"
+        return "SUCCESS rate (M658/M971)"
     if metric == A_RATE_KEY:
-        return "A_RATE (M696/M971)"
+        return "COMB rate (M696/M971)"
     original = metric_original(metric)
     return f"{metric} ({original})" if original else metric
 
@@ -525,6 +530,85 @@ def save_labels(doc: dict[str, Any]) -> str:
     return path
 
 
+def pred_path(plmn: str, source: str = "omnianomaly") -> str:
+    return os.path.join(PRED_DIR, f"{plmn}_{source}.json")
+
+
+def empty_pred_doc(plmn: str, source: str = "omnianomaly") -> dict[str, Any]:
+    return {
+        "plmn": plmn,
+        "source": source,
+        "updated_at": None,
+        "threshold": None,
+        "labels": [],
+    }
+
+
+def load_predictions(
+    plmn: str,
+    *,
+    source: str = "omnianomaly",
+) -> dict[str, Any]:
+    """Load model prediction overlay (separate from human label JSON)."""
+    path = pred_path(plmn, source=source)
+    if not os.path.isfile(path):
+        return empty_pred_doc(plmn, source=source)
+    with open(path, encoding="utf-8") as f:
+        doc = json.load(f)
+    doc.setdefault("plmn", plmn)
+    doc.setdefault("source", source)
+    doc.setdefault("labels", [])
+    return doc
+
+
+def add_model_indicator(fig: go.Figure, item: dict[str, Any]) -> bool:
+    """Draw a model-prediction overlay (purple, dashed) — read-only."""
+    s_utc = pd.to_datetime(item["start"], utc=True)
+    e_utc = pd.to_datetime(item["end"], utc=True)
+    s = to_plot_time(s_utc)
+    e = to_plot_time(e_utc)
+    is_range = item.get("kind") == "range" or s_utc != e_utc
+    fill = TAG_COLORS["model"]
+    line = TAG_LINE["model"]
+    lid = str(item.get("id") or "")
+
+    def _edge(x, which: str) -> None:
+        fig.add_shape(
+            type="line",
+            xref="x",
+            yref="paper",
+            x0=x,
+            x1=x,
+            y0=0,
+            y1=1,
+            line=dict(color=line, width=2, dash="dot"),
+            layer="above",
+            editable=False,
+            name=f"model_edge_{which}:{lid}" if lid else None,
+        )
+
+    if is_range:
+        fig.add_shape(
+            type="rect",
+            xref="x",
+            yref="paper",
+            x0=s,
+            x1=e,
+            y0=0,
+            y1=1,
+            fillcolor=fill,
+            line=dict(width=0),
+            layer="above",
+            editable=False,
+            name=f"model_fill:{lid}" if lid else None,
+        )
+        _edge(s, "start")
+        _edge(e, "end")
+    else:
+        _edge(s, "start")
+    return is_range
+
+
 def labels_to_frame(doc: dict[str, Any]) -> pd.DataFrame:
     rows = []
     for item in doc.get("labels", []):
@@ -573,8 +657,8 @@ def add_label(
     tag = tag.lower()
     if kind not in {"point", "range"}:
         raise ValueError("kind must be 'point' or 'range'")
-    if tag not in TAG_COLORS:
-        raise ValueError(f"tag must be one of {list(TAG_COLORS)}")
+    if tag not in TAG_COLORS or tag == "model":
+        raise ValueError(f"tag must be one of {[t for t in TAG_COLORS if t != 'model']}")
 
     start_ts = parse_time(start)
     end_ts = start_ts if kind == "point" else parse_time(end)
@@ -1136,8 +1220,10 @@ def build_figure(
     show_labels: bool = True,
     color_metrics: list[str] | None = None,
     highlight_id: str | None = None,
+    predictions: dict[str, Any] | None = None,
+    show_predictions: bool = False,
 ) -> go.Figure:
-    """Trend with label overlays. Zoom via xaxis range (keep full data for click/drag)."""
+    """Two-row trend: rates on top, count metrics below (shared time axis)."""
     view = _filter_df(df, start, end) if filter_data else df
     # `metrics=[]` must stay empty — do not treat it as falsy fallback to all cols.
     cols = metric_columns(df) if metrics is None else list(metrics)
@@ -1147,24 +1233,68 @@ def build_figure(
     plot_cols = [c for c in cols if not is_synthetic_overlay(c)]
     show_m971_ref = M971_DAILY_AVG_KEY in cols
     primary_cols = [c for c in plot_cols if not is_rate_metric(c)]
-    rate_cols = [c for c in plot_cols if is_rate_metric(c)]
+    # Top panel: SUCCESS (S_RATE) / COMB (A_RATE) when present in data.
+    # Keep filter selection so unchecked rates can still be hidden.
+    available_rates = rate_metrics_available(df)
+    if metrics is None:
+        rate_cols = available_rates
+    else:
+        selected = set(cols)
+        rate_cols = [c for c in available_rates if c in selected]
     color_source = list(color_metrics) if color_metrics else list(cols)
 
+    series_cols = list(dict.fromkeys([*primary_cols, *rate_cols]))
     if not len(view):
         series = {}
     elif filter_data:
-        series = plot_series(view, plot_cols, max_points)
+        series = plot_series(view, series_cols, max_points)
     else:
         # Visible (+pad) only — avoids stale coarse context on newly panned edges.
         series = plot_series_window(
-            view, plot_cols, start, end, max_points, include_context=False
+            view, series_cols, start, end, max_points, include_context=False
         )
 
     rate_colors = {S_RATE_KEY: S_RATE_COLOR, A_RATE_KEY: A_RATE_COLOR}
     rate_hover = "값=%{y:.3f}<extra></extra>"
     count_hover = "값=%{y:,.0f}<extra></extra>"
 
-    fig = go.Figure()
+    # Total height stays 420px: each row ≈ half of the previous single chart.
+    # Wider gutter so rate vs metric panels read as two separate charts.
+    fig = make_subplots(
+        rows=2,
+        cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.13,
+        row_heights=[0.5, 0.5],
+        subplot_titles=("SUCCESS / COMB rate", "Metric 값"),
+    )
+
+    for col in rate_cols:
+        x, y = series.get(col, ([], []))
+        metric_name = display_metric(col)
+        fig.add_trace(
+            go.Scatter(
+                x=x,
+                y=y,
+                mode="lines",
+                name=metric_name,
+                opacity=0.9,
+                line=dict(
+                    color=rate_colors.get(col, "#888"),
+                    width=REF_LINE_WIDTH,
+                    dash=REF_LINE_DASH,
+                ),
+                hovertemplate=(
+                    f"<b>{metric_name}</b><br>"
+                    "%{x|%Y년 %m월 %d일 %H:%M}<br>"
+                    f"{rate_hover}"
+                ),
+                uid=col,
+            ),
+            row=1,
+            col=1,
+        )
+
     for i, col in enumerate(primary_cols):
         x, y = series.get(col, ([], []))
         metric_name = display_metric(col)
@@ -1187,32 +1317,9 @@ def build_figure(
                     f"{count_hover}"
                 ),
                 uid=col,
-            )
-        )
-
-    for col in rate_cols:
-        x, y = series.get(col, ([], []))
-        metric_name = display_metric(col)
-        fig.add_trace(
-            go.Scatter(
-                x=x,
-                y=y,
-                mode="lines",
-                name=metric_name,
-                opacity=0.9,
-                yaxis="y2",
-                line=dict(
-                    color=rate_colors.get(col, "#888"),
-                    width=REF_LINE_WIDTH,
-                    dash=REF_LINE_DASH,
-                ),
-                hovertemplate=(
-                    f"<b>{metric_name}</b><br>"
-                    "%{x|%Y년 %m월 %d일 %H:%M}<br>"
-                    f"{rate_hover}"
-                ),
-                uid=col,
-            )
+            ),
+            row=2,
+            col=1,
         )
 
     # Force WebGL traces to replace on every pan/zoom (Scattergl can keep old buffers).
@@ -1251,7 +1358,9 @@ def build_figure(
                             "값=%{y:,.0f}<extra></extra>"
                         ),
                         uid=M971_DAILY_AVG_KEY,
-                    )
+                    ),
+                    row=2,
+                    col=1,
                 )
 
     if len(view) and primary_cols:
@@ -1281,7 +1390,7 @@ def build_figure(
             anchor["hovertemplate"] = "%{x|%Y년 %m월 %d일 %H:%M}<br>%{text}<extra></extra>"
         else:
             anchor["hoverinfo"] = "skip"
-        fig.add_trace(go.Scattergl(**anchor))
+        fig.add_trace(go.Scattergl(**anchor), row=2, col=1)
 
     y_ref = view[primary_cols].max(axis=1) if len(view) and primary_cols else None
 
@@ -1311,29 +1420,35 @@ def build_figure(
                         name=f"{item.get('tag', 'anomaly')}:{label_id}",
                         hoverinfo="skip",
                         showlegend=False,
-                    )
+                    ),
+                    row=2,
+                    col=1,
                 )
+
+    if show_predictions and predictions:
+        for item in predictions.get("labels") or []:
+            add_model_indicator(fig, item)
 
     # Stable uirevision: changing it every zoom remounts all WebGL traces and
     # freezes the browser. datarevision + uid still refresh series data.
-    layout_margin = dict(l=40, r=55 if rate_cols else 20, t=60, b=40)
     fig.update_layout(
         title=title or f"{display_plmn(str(doc.get('plmn')))} anomaly labeling",
         # Fixed height matches dcc.Graph (420px). Keep autosize=True so width
         # still fills the page; autosize=False freezes a narrow default width.
         height=420,
         autosize=True,
+        # Closest: only the series under the cursor. Empty plot area uses the
+        # custom time tip (no multi-series hover clutter).
         hovermode="closest",
         dragmode="zoom",
         showlegend=False,
-        margin=layout_margin,
-        xaxis_title="시간 (KST)",
-        yaxis_title="value",
+        margin=dict(l=52, r=24, t=60, b=40),
         uirevision=str(doc.get("plmn") or "labeling"),
         datarevision=data_rev,
         colorway=list(SERIES_COLORWAY),
-        plot_bgcolor="#f7f5f1",
-        paper_bgcolor="white",
+        # Gutter between panels; per-panel fills are drawn as shapes below.
+        plot_bgcolor="#ddd8cf",
+        paper_bgcolor="#f3f1ec",
         hoverlabel=dict(
             bgcolor="white",
             font_size=11,
@@ -1347,25 +1462,45 @@ def build_figure(
     else:
         fig.update_layout(autosize=True)
     # Box/drag zoom: horizontal only (time axis). Vertical scale via Y buttons.
-    fig.update_yaxes(fixedrange=True)
-    if rate_cols:
-        fig.update_layout(
-            yaxis2=dict(
-                title="rate",
-                overlaying="y",
-                side="right",
-                range=list(RATE_Y_RANGE),
-                fixedrange=True,
-                showgrid=False,
-            ),
-        )
+    # Row 1 = rates (0–1). Row 2 = count metrics (Y+/Y- target).
+    fig.update_yaxes(
+        title_text="rate",
+        autorange=True,
+        fixedrange=True,
+        showgrid=True,
+        showline=True,
+        mirror=True,
+        linewidth=1.5,
+        linecolor="#5f8499",
+        gridcolor="rgba(95,132,153,0.28)",
+        zeroline=False,
+        title_font=dict(size=11, color="#3d6578"),
+        tickfont=dict(size=10, color="#3d6578"),
+        row=1,
+        col=1,
+    )
+    fig.update_yaxes(
+        title_text="value",
+        fixedrange=True,
+        showline=True,
+        mirror=True,
+        linewidth=1.5,
+        linecolor="#8a7f6e",
+        gridcolor="rgba(138,127,110,0.28)",
+        zeroline=False,
+        title_font=dict(size=11, color="#5c5346"),
+        tickfont=dict(size=10, color="#5c5346"),
+        row=2,
+        col=1,
+    )
     # X axis always bounded by this dataset's start/end (not wall-clock "now").
     tmin, tmax = data_time_bounds(view if len(view) else df)
     x0 = pd.to_datetime(start, utc=True) if start is not None else tmin
     x1 = pd.to_datetime(end, utc=True) if end is not None else tmax
     x0, x1 = clamp_time_range(x0, x1, tmin, tmax)
-    fig.update_xaxes(
-        range=[to_plot_time(x0), to_plot_time(x1)],
+    x_range = [to_plot_time(x0), to_plot_time(x1)]
+    x_axis_kwargs = dict(
+        range=x_range,
         autorange=False,
         type="date",
         tickformat="%Y년 %m월 %d일\n%H:%M",
@@ -1376,8 +1511,112 @@ def build_figure(
         spikedash="dot",
         spikecolor="royalblue",
         spikethickness=1,
+        showline=True,
+        mirror=True,
+        linewidth=1.5,
     )
+    fig.update_xaxes(
+        **x_axis_kwargs,
+        linecolor="#5f8499",
+        tickfont=dict(size=10, color="#3d6578"),
+        # Master time axis (top). Clear any inverted matches from make_subplots.
+        matches=None,
+        row=1,
+        col=1,
+    )
+    fig.update_xaxes(
+        **x_axis_kwargs,
+        title_text="시간 (KST)",
+        linecolor="#8a7f6e",
+        tickfont=dict(size=10, color="#5c5346"),
+        title_font=dict(size=11, color="#5c5346"),
+        # Bottom follows top so pan/zoom stays locked across panels.
+        matches="x",
+        row=2,
+        col=1,
+    )
+    _style_dual_panel_separation(fig)
     return fig
+
+
+def _style_dual_panel_separation(fig: go.Figure) -> None:
+    """Distinct fills, frames, and subtitle chips for the rate / metric rows."""
+    y_top = getattr(fig.layout.yaxis, "domain", None) or (0.565, 1.0)
+    y_bot = getattr(fig.layout.yaxis2, "domain", None) or (0.0, 0.435)
+    x_dom = getattr(fig.layout.xaxis2, "domain", None) or getattr(
+        fig.layout.xaxis, "domain", None
+    ) or (0.0, 1.0)
+
+    # Panel fills sit under traces; gutter (plot_bgcolor) shows between domains.
+    fig.add_shape(
+        type="rect",
+        xref="paper",
+        yref="paper",
+        x0=x_dom[0],
+        x1=x_dom[1],
+        y0=y_top[0],
+        y1=y_top[1],
+        fillcolor="#e7f1f7",
+        line=dict(color="#5f8499", width=1.5),
+        layer="below",
+        editable=False,
+        name="panel_bg_rate",
+    )
+    fig.add_shape(
+        type="rect",
+        xref="paper",
+        yref="paper",
+        x0=x_dom[0],
+        x1=x_dom[1],
+        y0=y_bot[0],
+        y1=y_bot[1],
+        fillcolor="#f7f5f1",
+        line=dict(color="#8a7f6e", width=1.5),
+        layer="below",
+        editable=False,
+        name="panel_bg_metrics",
+    )
+    # Explicit divider in the gutter between panels.
+    gap_mid = (y_bot[1] + y_top[0]) / 2
+    fig.add_shape(
+        type="line",
+        xref="paper",
+        yref="paper",
+        x0=0.01,
+        x1=0.99,
+        y0=gap_mid,
+        y1=gap_mid,
+        line=dict(color="#9a9286", width=2),
+        layer="above",
+        editable=False,
+        name="panel_divider",
+    )
+
+    title_styles = (
+        dict(
+            font=dict(size=12, color="#1f4f63", family="sans-serif"),
+            bgcolor="rgba(231,241,247,0.96)",
+            bordercolor="#5f8499",
+            borderwidth=1,
+            borderpad=4,
+        ),
+        dict(
+            font=dict(size=12, color="#4a4338", family="sans-serif"),
+            bgcolor="rgba(247,245,241,0.96)",
+            bordercolor="#8a7f6e",
+            borderwidth=1,
+            borderpad=4,
+        ),
+    )
+    anns = list(fig.layout.annotations or ())
+    for i, style in enumerate(title_styles):
+        if i >= len(anns):
+            break
+        data = anns[i].to_plotly_json() if hasattr(anns[i], "to_plotly_json") else dict(anns[i])
+        data.update(style)
+        anns[i] = data
+    if anns:
+        fig.layout.annotations = tuple(anns)
 
 
 def build_metric_figure(
