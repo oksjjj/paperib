@@ -34,20 +34,11 @@ RANK_CACHE_PATH = os.path.join(LABEL_DIR, "plmn_rank.csv")
 CACHE_DIR = os.path.join(os.path.dirname(__file__), "cache")
 RANK_SIGNATURE_PATH = os.path.join(CACHE_DIR, "plmn_rank.signature")
 
-TAG_COLORS = {
-    # Unselected anomaly matches web yellow; selected highlight uses crimson edges.
-    "anomaly": "rgba(201, 162, 39, 0.28)",
-    "normal": "rgba(20, 120, 50, 0.32)",
-    "uncertain": "rgba(200, 110, 0, 0.36)",
-    # OmniAnomaly (and other model) predictions — distinct from human labels.
-    "model": "rgba(124, 58, 237, 0.22)",
-}
-TAG_LINE = {
-    "anomaly": "#c9a227",
-    "normal": "#147832",
-    "uncertain": "#c86e00",
-    "model": "#7c3aed",
-}
+ANOMALY_FILL = "rgba(201, 162, 39, 0.28)"
+ANOMALY_LINE = "#c9a227"
+# OmniAnomaly (and other model) predictions — distinct from human labels.
+MODEL_FILL = "rgba(124, 58, 237, 0.22)"
+MODEL_LINE = "#7c3aed"
 
 # Mid-tone hues: readable on white without the previous near-black density.
 SERIES_COLORWAY = (
@@ -503,6 +494,7 @@ def load_labels(plmn: str, rank: int | None = None) -> dict[str, Any]:
     for item in doc["labels"]:
         if isinstance(item, dict):
             item.pop("metrics", None)
+            item.pop("tag", None)
     return doc
 
 
@@ -513,6 +505,7 @@ def save_labels(doc: dict[str, Any]) -> str:
     for item in doc.get("labels", []):
         item = dict(item)
         item.pop("metrics", None)
+        item.pop("tag", None)
         cleaned.append(item)
     doc["labels"] = cleaned
     path = label_path(doc["plmn"])
@@ -559,8 +552,8 @@ def add_model_indicator(fig: go.Figure, item: dict[str, Any]) -> bool:
     s = to_plot_time(s_utc)
     e = to_plot_time(e_utc)
     is_range = item.get("kind") == "range" or s_utc != e_utc
-    fill = TAG_COLORS["model"]
-    line = TAG_LINE["model"]
+    fill = MODEL_FILL
+    line = MODEL_LINE
     lid = str(item.get("id") or "")
 
     def _edge(x, which: str) -> None:
@@ -611,7 +604,6 @@ def labels_to_frame(doc: dict[str, Any]) -> pd.DataFrame:
             {
                 "id": item.get("id"),
                 "형식": "점" if kind == "point" else "구간",
-                "tag": item.get("tag"),
                 "시각 / 구간 (KST)": interval,
                 "updated_at": format_kst(item.get("updated_at"), seconds=True),
             }
@@ -621,7 +613,6 @@ def labels_to_frame(doc: dict[str, Any]) -> pd.DataFrame:
             columns=[
                 "id",
                 "형식",
-                "tag",
                 "시각 / 구간 (KST)",
                 "updated_at",
             ]
@@ -633,17 +624,13 @@ def add_label(
     doc: dict[str, Any],
     *,
     kind: str,
-    tag: str,
     start: str | pd.Timestamp,
     end: str | pd.Timestamp | None = None,
     label_id: str | None = None,
 ) -> dict[str, Any]:
     kind = kind.lower()
-    tag = tag.lower()
     if kind not in {"point", "range"}:
         raise ValueError("kind must be 'point' or 'range'")
-    if tag not in TAG_COLORS or tag == "model":
-        raise ValueError(f"tag must be one of {[t for t in TAG_COLORS if t != 'model']}")
 
     start_ts = parse_time(start)
     end_ts = start_ts if kind == "point" else parse_time(end)
@@ -653,7 +640,6 @@ def add_label(
     item = {
         "id": label_id or str(uuid.uuid4())[:8],
         "kind": kind,
-        "tag": tag,
         "start": start_ts.isoformat(),
         "end": end_ts.isoformat(),
         "updated_at": datetime.now(timezone.utc).isoformat(),
@@ -682,8 +668,6 @@ def update_label(doc: dict[str, Any], label_id: str, **fields: Any) -> dict[str,
 
     if "kind" in fields:
         found["kind"] = fields["kind"]
-    if "tag" in fields:
-        found["tag"] = fields["tag"]
     if "start" in fields:
         found["start"] = parse_time(fields["start"]).isoformat()
     if "end" in fields:
@@ -988,7 +972,6 @@ def add_label_indicator(
     e_utc = pd.to_datetime(item["end"], utc=True)
     s = to_plot_time(s_utc)
     e = to_plot_time(e_utc)
-    tag = item.get("tag", "anomaly")
     is_range = item.get("kind") == "range" or s_utc != e_utc
 
     if highlight:
@@ -996,8 +979,8 @@ def add_label_indicator(
         line = "crimson"
         line_w = 3
     else:
-        color = TAG_COLORS.get(tag, TAG_COLORS["anomaly"])
-        line = TAG_LINE.get(tag, "#c9a227")
+        color = ANOMALY_FILL
+        line = ANOMALY_LINE
         line_w = 2
 
     def _edge(x, which: str, label_id: str) -> None:
@@ -1178,7 +1161,7 @@ def pending_range_fill_shape(start_ts, end_ts=None) -> dict[str, Any]:
         x1=x1 if show else x0,
         y0=0,
         y1=1,
-        fillcolor=TAG_COLORS["anomaly"] if show else "rgba(0,0,0,0)",
+        fillcolor=ANOMALY_FILL if show else "rgba(0,0,0,0)",
         line=dict(width=0),
         layer="above",
         editable=False,
@@ -1382,9 +1365,7 @@ def build_figure(
             s_utc = pd.to_datetime(item["start"], utc=True)
             label_id = item.get("id", "")
             selected = hi is not None and str(label_id) == hi
-            line = "crimson" if selected else TAG_LINE.get(
-                item.get("tag", "anomaly"), "#c9a227"
-            )
+            line = "crimson" if selected else ANOMALY_LINE
             add_label_indicator(fig, item, highlight=selected)
 
             if y_ref is not None and len(view):
@@ -1399,7 +1380,7 @@ def build_figure(
                             color=line,
                             symbol="x",
                         ),
-                        name=f"{item.get('tag', 'anomaly')}:{label_id}",
+                        name=f"anomaly:{label_id}",
                         hoverinfo="skip",
                         showlegend=False,
                     ),

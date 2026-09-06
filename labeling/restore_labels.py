@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Restore data/labels/*_labels.json from exported viewer JSON.
 
-Viewer export embeds labels (id/kind/tag/start/end) in docs/viewer/data/*.json.
+Viewer export embeds labels (id/kind/start/end) in docs/viewer/data/*.json.
 Use when local label files were lost but a prior export still exists in git.
 
 Usage:
@@ -32,7 +32,6 @@ def _export_label_to_local(item: dict) -> dict:
     return {
         "id": item["id"],
         "kind": item.get("kind", "point"),
-        "tag": item.get("tag", "anomaly"),
         "start": item["start"],
         "end": item.get("end") or item["start"],
         "updated_at": item.get("updated_at"),

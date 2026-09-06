@@ -723,7 +723,6 @@ def _place_label_click(ts, click_mode: str):
         add_label(
             state["doc"],
             kind="point",
-            tag="anomaly",
             start=ts,
         )
         after = [x for x in state["doc"]["labels"] if x["id"] not in before]
@@ -787,7 +786,6 @@ def _place_label_click(ts, click_mode: str):
     add_label(
         state["doc"],
         kind="range",
-        tag="anomaly",
         start=a,
         end=b,
     )

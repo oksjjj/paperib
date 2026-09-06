@@ -151,8 +151,6 @@ def _human_anomaly_mask(df: pd.DataFrame, plmn: str) -> np.ndarray:
     mask = np.zeros(len(df), dtype=bool)
     times = pd.to_datetime(df["time"], utc=True)
     for item in doc.get("labels") or []:
-        if (item.get("tag") or "anomaly") != "anomaly":
-            continue
         start = pd.to_datetime(item["start"], utc=True)
         end = pd.to_datetime(item.get("end") or item["start"], utc=True)
         mask |= (times >= start) & (times <= end)
@@ -291,7 +289,6 @@ def _preds_to_label_items(
             {
                 "id": f"oa_{i:06d}",
                 "kind": kind,
-                "tag": "model",
                 "start": start_ts.isoformat(),
                 "end": end_ts.isoformat(),
                 "score": score_min,

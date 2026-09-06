@@ -233,7 +233,6 @@ def export_one(
             {
                 "id": item.get("id"),
                 "kind": item.get("kind", "point"),
-                "tag": item.get("tag", "anomaly"),
                 "start": item.get("start"),
                 "end": item.get("end"),
                 "line": label_line(item),
