@@ -35,7 +35,6 @@ def _export_label_to_local(item: dict) -> dict:
         "tag": item.get("tag", "anomaly"),
         "start": item["start"],
         "end": item.get("end") or item["start"],
-        "metrics": item.get("metrics") or ["ALL"],
         "updated_at": item.get("updated_at"),
     }
 

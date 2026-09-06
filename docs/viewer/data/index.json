@@ -1,15 +1,15 @@
 {
   "catalog": "labeled",
-  "build": "1788495134",
+  "build": "1788658128",
   "top_n": null,
   "plmns": [
     {
       "plmn": "P0480",
       "display": "P0480",
       "rank": 1,
-      "n_labels": 27,
+      "n_labels": 29,
       "start_kst": "2026년 04월 30일 00:00",
-      "end_kst": "2026년 09월 03일 23:55",
+      "end_kst": "2026년 09월 05일 23:55",
       "file": "P0480.json"
     },
     {
@@ -18,7 +18,7 @@
       "rank": 4,
       "n_labels": 12,
       "start_kst": "2026년 04월 30일 00:00",
-      "end_kst": "2026년 09월 03일 23:55",
+      "end_kst": "2026년 09월 05일 23:55",
       "file": "P1888.json"
     }
   ]

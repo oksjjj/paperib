@@ -294,7 +294,6 @@ def _preds_to_label_items(
                 "tag": "model",
                 "start": start_ts.isoformat(),
                 "end": end_ts.isoformat(),
-                "metrics": ["ALL"],
                 "score": score_min,
                 "source": "omnianomaly",
             }

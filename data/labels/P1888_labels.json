@@ -8,9 +8,6 @@
       "tag": "anomaly",
       "start": "2026-05-01T13:05:00+00:00",
       "end": "2026-05-01T13:45:00+00:00",
-      "metrics": [
-        "ALL"
-      ],
       "updated_at": null
     },
     {
@@ -19,9 +16,6 @@
       "tag": "anomaly",
       "start": "2026-05-19T17:35:00+00:00",
       "end": "2026-05-19T17:55:00+00:00",
-      "metrics": [
-        "ALL"
-      ],
       "updated_at": null
     },
     {
@@ -30,9 +24,6 @@
       "tag": "anomaly",
       "start": "2026-05-27T09:00:00+00:00",
       "end": "2026-05-27T10:10:00+00:00",
-      "metrics": [
-        "ALL"
-      ],
       "updated_at": null
     },
     {
@@ -41,9 +32,6 @@
       "tag": "anomaly",
       "start": "2026-05-27T17:10:00+00:00",
       "end": "2026-05-27T17:55:00+00:00",
-      "metrics": [
-        "ALL"
-      ],
       "updated_at": null
     },
     {
@@ -52,9 +40,6 @@
       "tag": "anomaly",
       "start": "2026-05-29T06:50:00+00:00",
       "end": "2026-05-29T08:50:00+00:00",
-      "metrics": [
-        "ALL"
-      ],
       "updated_at": null
     },
     {
@@ -63,9 +48,6 @@
       "tag": "anomaly",
       "start": "2026-05-29T14:30:00+00:00",
       "end": "2026-05-29T15:30:00+00:00",
-      "metrics": [
-        "ALL"
-      ],
       "updated_at": null
     },
     {
@@ -74,9 +56,6 @@
       "tag": "anomaly",
       "start": "2026-05-30T13:20:00+00:00",
       "end": "2026-05-30T13:40:00+00:00",
-      "metrics": [
-        "ALL"
-      ],
       "updated_at": null
     },
     {
@@ -85,9 +64,6 @@
       "tag": "anomaly",
       "start": "2026-05-31T14:20:00+00:00",
       "end": "2026-05-31T14:50:00+00:00",
-      "metrics": [
-        "ALL"
-      ],
       "updated_at": null
     },
     {
@@ -96,9 +72,6 @@
       "tag": "anomaly",
       "start": "2026-06-01T17:05:00+00:00",
       "end": "2026-06-01T17:35:00+00:00",
-      "metrics": [
-        "ALL"
-      ],
       "updated_at": null
     },
     {
@@ -107,9 +80,6 @@
       "tag": "anomaly",
       "start": "2026-06-05T16:00:00+00:00",
       "end": "2026-06-05T16:15:00+00:00",
-      "metrics": [
-        "ALL"
-      ],
       "updated_at": null
     },
     {
@@ -118,9 +88,6 @@
       "tag": "anomaly",
       "start": "2026-06-08T16:40:00+00:00",
       "end": "2026-06-08T18:20:00+00:00",
-      "metrics": [
-        "ALL"
-      ],
       "updated_at": null
     },
     {
@@ -129,9 +96,6 @@
       "tag": "anomaly",
       "start": "2026-06-11T13:05:00+00:00",
       "end": "2026-06-11T13:55:00+00:00",
-      "metrics": [
-        "ALL"
-      ],
       "updated_at": null
     }
   ],

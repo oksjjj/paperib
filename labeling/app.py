@@ -50,7 +50,7 @@ from tool import (  # noqa: E402
     load_plmn,
     load_predictions,
     metric_columns,
-    m971_daily_mean_series,
+    m971_tod_mean_series,
     is_rate_metric,
     is_synthetic_overlay,
     overlay_metrics_available,
@@ -725,7 +725,6 @@ def _place_label_click(ts, click_mode: str):
             kind="point",
             tag="anomaly",
             start=ts,
-            metrics=["ALL"],
         )
         after = [x for x in state["doc"]["labels"] if x["id"] not in before]
         lid = after[0]["id"] if after else None
@@ -791,7 +790,6 @@ def _place_label_click(ts, click_mode: str):
         tag="anomaly",
         start=a,
         end=b,
-        metrics=["ALL"],
     )
     after = [x for x in state["doc"]["labels"] if x["id"] not in before]
     lid = after[0]["id"] if after else None
@@ -1519,7 +1517,7 @@ def _do_load(plmn: str, click_mode: str):
     doc = load_labels(plmn, rank=rank)
     preds = load_predictions(plmn, source="omnianomaly")
     tmin, tmax = data_time_bounds(df)
-    dm = m971_daily_mean_series(df)
+    dm = m971_tod_mean_series(df)
     state.update(
         df=df,
         doc=doc,

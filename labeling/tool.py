@@ -28,9 +28,6 @@ _KST_PARSE_FMTS = (
 )
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
-ANALYSIS_RANK_PATH = os.path.join(
-    os.path.dirname(__file__), "..", "analysis", "plmn_m971_sum_sorted.csv"
-)
 LABEL_DIR = os.path.join(DATA_DIR, "labels")
 PRED_DIR = os.path.join(DATA_DIR, "predictions")
 RANK_CACHE_PATH = os.path.join(LABEL_DIR, "plmn_rank.csv")
@@ -260,9 +257,6 @@ def m971_tod_mean_series(df: pd.DataFrame) -> pd.Series | None:
     return tod.map(profile)
 
 
-m971_daily_mean_series = m971_tod_mean_series
-
-
 def window_plot_indices(
     values: np.ndarray,
     df: pd.DataFrame,
@@ -363,14 +357,8 @@ def load_or_build_ranking(top_n: int | None = None) -> pd.DataFrame:
         save_ranking_cache(rank_df, signature)
     elif os.path.exists(RANK_CACHE_PATH):
         rank_df = pd.read_csv(RANK_CACHE_PATH)
-    elif os.path.exists(ANALYSIS_RANK_PATH):
-        rank_df = pd.read_csv(ANALYSIS_RANK_PATH)
     else:
         raise FileNotFoundError(f"No source CSV or ranking cache found under {DATA_DIR}")
-
-    if "rank" not in rank_df.columns:
-        rank_df = rank_df.sort_values("M971_sum", ascending=False).reset_index(drop=True)
-        rank_df.insert(0, "rank", rank_df.index + 1)
 
     if top_n is not None:
         rank_df = rank_df.head(top_n).copy()
@@ -512,6 +500,9 @@ def load_labels(plmn: str, rank: int | None = None) -> dict[str, Any]:
     if rank is not None:
         doc["rank"] = rank
     doc.setdefault("labels", [])
+    for item in doc["labels"]:
+        if isinstance(item, dict):
+            item.pop("metrics", None)
     return doc
 
 
@@ -521,7 +512,7 @@ def save_labels(doc: dict[str, Any]) -> str:
     cleaned = []
     for item in doc.get("labels", []):
         item = dict(item)
-        item.pop("note", None)
+        item.pop("metrics", None)
         cleaned.append(item)
     doc["labels"] = cleaned
     path = label_path(doc["plmn"])
@@ -612,7 +603,6 @@ def add_model_indicator(fig: go.Figure, item: dict[str, Any]) -> bool:
 def labels_to_frame(doc: dict[str, Any]) -> pd.DataFrame:
     rows = []
     for item in doc.get("labels", []):
-        metrics = item.get("metrics") or ["ALL"]
         kind = item.get("kind", "point")
         start = format_kst(item.get("start"))
         end = format_kst(item.get("end"))
@@ -623,9 +613,6 @@ def labels_to_frame(doc: dict[str, Any]) -> pd.DataFrame:
                 "형식": "점" if kind == "point" else "구간",
                 "tag": item.get("tag"),
                 "시각 / 구간 (KST)": interval,
-                "metrics": ",".join(
-                    m if m == "ALL" else display_metric(m) for m in metrics
-                ),
                 "updated_at": format_kst(item.get("updated_at"), seconds=True),
             }
         )
@@ -636,7 +623,6 @@ def labels_to_frame(doc: dict[str, Any]) -> pd.DataFrame:
                 "형식",
                 "tag",
                 "시각 / 구간 (KST)",
-                "metrics",
                 "updated_at",
             ]
         )
@@ -650,7 +636,6 @@ def add_label(
     tag: str,
     start: str | pd.Timestamp,
     end: str | pd.Timestamp | None = None,
-    metrics: list[str] | None = None,
     label_id: str | None = None,
 ) -> dict[str, Any]:
     kind = kind.lower()
@@ -671,7 +656,6 @@ def add_label(
         "tag": tag,
         "start": start_ts.isoformat(),
         "end": end_ts.isoformat(),
-        "metrics": metrics or ["ALL"],
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -700,8 +684,6 @@ def update_label(doc: dict[str, Any], label_id: str, **fields: Any) -> dict[str,
         found["kind"] = fields["kind"]
     if "tag" in fields:
         found["tag"] = fields["tag"]
-    if "metrics" in fields:
-        found["metrics"] = fields["metrics"]
     if "start" in fields:
         found["start"] = parse_time(fields["start"]).isoformat()
     if "end" in fields:
@@ -1651,9 +1633,6 @@ def build_metric_figure(
         )
     )
     for item in doc.get("labels", []):
-        metrics = item.get("metrics") or ["ALL"]
-        if "ALL" not in metrics and metric not in metrics:
-            continue
         add_label_indicator(fig, item)
     fig.update_layout(
         title=f"{display_plmn(str(doc.get('plmn')))} — {display_metric(metric)}",
