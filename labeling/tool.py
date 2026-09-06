@@ -812,8 +812,6 @@ def clamp_time_range(
     if end_ts > tmax:
         end_ts = tmax
         start_ts = tmax - width
-    if start_ts < tmin:
-        start_ts = tmin
     return start_ts, end_ts
 
 
