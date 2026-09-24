@@ -82,6 +82,10 @@ from tool import (  # noqa: E402
 
 PRED_DIR = os.path.join(PAPERIB_ROOT, "data", "ib_data", "predictions")
 
+# paperib (all-raw) training defaults: drop metrics that are almost never seen on
+# train but appear sparsely on valid/test and are not operationally meaningful.
+EXCLUDED_TRAIN_METRICS: frozenset[str] = frozenset({"M688"})
+
 # --- COMB runs (see COMB_RUNS.md) ---
 COMB_RUN_NAME = "comb"
 COMB_SHARE_RUN_NAME = "comb_share"
@@ -205,8 +209,16 @@ class PlmnConfig:
 
 
 def _feature_columns(df: pd.DataFrame) -> list[str]:
-    """All-metric (paperib) features: raw counters only, no rate overlays."""
-    return [c for c in metric_columns(df) if not is_rate_metric(c)]
+    """All-metric (paperib) features: raw counters only, no rate overlays.
+
+    Drops ``EXCLUDED_TRAIN_METRICS`` (operationally unimportant / mostly absent
+    on train but sparse on valid·test — e.g. M688).
+    """
+    return [
+        c
+        for c in metric_columns(df)
+        if not is_rate_metric(c) and c not in EXCLUDED_TRAIN_METRICS
+    ]
 
 
 def _comb_matrix(df: pd.DataFrame) -> np.ndarray:
@@ -257,7 +269,8 @@ def _scale_comb_splits(
 def features_for_run(run_name: str, df: pd.DataFrame) -> list[str] | None:
     """Resolve feature columns for a run.
 
-    ``paperib`` → all raw metrics (None means use ``_feature_columns``).
+    ``paperib`` → all raw metrics except ``EXCLUDED_TRAIN_METRICS``
+    (``None`` means use ``_feature_columns``).
     ``comb`` → COMB_LEGACY_COLUMNS (raw + S_RATE/A_RATE).
     ``comb_share`` → M971 + counter÷M971 (COMB_ENGINEERED_COLUMNS).
     """
@@ -426,6 +439,9 @@ def prepare_arrays(
         "x_dim": int(train.shape[1]),
         "feature_columns": cols,
         "feature_mode": feature_mode,
+        "excluded_train_metrics": sorted(EXCLUDED_TRAIN_METRICS)
+        if feature_mode == "all"
+        else [],
         "comb_scaling": comb_scaling,
         "comb_raw_counters": list(COMB_RAW_COUNTERS)
         if (use_comb_legacy or use_comb_share)

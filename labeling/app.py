@@ -36,6 +36,7 @@ os.chdir(ROOT)
 from tool import (  # noqa: E402
     LABEL_HIGHLIGHT_END,
     LABEL_HIGHLIGHT_START,
+    LABEL_REASON_DEFS,
     ANOMALY_SCORE_KEY,
     add_label,
     apply_threshold_mode,
@@ -50,6 +51,7 @@ from tool import (  # noqa: E402
     freeze_shape_editing,
     label_highlight_overlays,
     label_line,
+    labels_missing_reasons,
     load_labels,
     load_or_build_ranking,
     load_plmn,
@@ -134,6 +136,12 @@ state: dict = {
     "pred_source": "omnianomaly",
     "selected_pred_id": None,
     "threshold_mode": "pot",  # "pot" | "best_f1"
+    # Draft label reasons (applied to new placements; mirrored from selected label).
+    "draft_reasons": [],
+    "draft_fail_metrics": [],
+    "draft_note": "",
+    # Label id currently shown in the reason panel (flush target when switching).
+    "reason_bound_id": None,
 }
 
 
@@ -195,6 +203,69 @@ def _label_options():
         prefix = f"[{tag}] " if tag else ""
         opts.append({"label": f"{prefix}{label_line(x)}", "value": x["id"]})
     return opts
+
+
+def _fail_metric_options() -> list[dict[str, str]]:
+    """Multi-select options for fail_surge (counter metrics, rates excluded)."""
+    cols = list(state.get("metrics") or [])
+    if not cols and state.get("df") is not None:
+        cols = metric_columns(state["df"])
+    opts = []
+    for c in cols:
+        if is_rate_metric(c):
+            continue
+        opts.append({"label": display_metric(c), "value": c})
+    return opts
+
+
+def _reason_checklist_options() -> list[dict[str, str]]:
+    return [{"label": label, "value": code} for code, label in LABEL_REASON_DEFS]
+
+
+def _store_draft_reasons(
+    reasons: list[str] | None,
+    fail_metrics: list[str] | None,
+    note: str | None,
+) -> None:
+    state["draft_reasons"] = list(reasons or [])
+    state["draft_fail_metrics"] = list(fail_metrics or [])
+    state["draft_note"] = (note or "").strip()
+
+
+def _draft_reason_kwargs() -> dict[str, Any]:
+    return {
+        "reasons": list(state.get("draft_reasons") or []),
+        "fail_metrics": list(state.get("draft_fail_metrics") or []),
+        "note": state.get("draft_note") or "",
+    }
+
+
+def _flush_reasons_to_label(
+    label_id: str | None,
+    *,
+    reasons: list[str] | None,
+    fail_metrics: list[str] | None,
+    note: str | None,
+) -> bool:
+    """Persist current reason UI fields onto a label. Returns True if updated."""
+    if not label_id or state.get("doc") is None:
+        return False
+    if _label_by_id(label_id) is None:
+        return False
+    codes = list(reasons or [])
+    mets = list(fail_metrics or [])
+    if "fail_surge" not in codes:
+        mets = []
+    update_label(
+        state["doc"],
+        label_id,
+        reasons=codes,
+        fail_metrics=mets,
+        note=note or "",
+    )
+    _store_draft_reasons(codes, mets, note)
+    _bump_label_rev()
+    return True
 
 
 def _ui_feature_mode_for_display(preds: dict | None = None) -> str | None:
@@ -712,7 +783,8 @@ def _interval_hit_at_time(
 def _select_or_toggle_label_hit(hit: dict, click_mode: str):
     """Select a graph-clicked label, or clear highlight if already selected.
 
-    Zoom is unchanged (unlike 「라벨 선택해제」 which resets to 전체).
+    Zoom is unchanged on deselection. In 구간 편집, re-clicking the same
+    label keeps the selection so edge drags are not cancelled by a toggle.
     """
     state["label_range_anchor"] = None
     kind = (hit.get("kind") or "point").lower()
@@ -722,8 +794,19 @@ def _select_or_toggle_label_hit(hit: dict, click_mode: str):
         and str(state["highlight_id"]) == str(hit["id"])
     )
     if already:
+        if click_mode == "edit_range":
+            return (
+                _build_graph(click_mode),
+                _label_options(),
+                hit["id"],
+                f"선택 유지 ({tag}): 빨간 경계를 드래그하세요.",
+                _cancel_style(click_mode),
+                no_update,
+                no_update,
+            )
         state["highlight_id"] = None
         state.pop("_offscreen_cleared", None)
+        _store_draft_reasons([], [], "")
         return (
             _build_graph(click_mode),
             no_update,
@@ -1212,8 +1295,9 @@ def _build_graph(click_mode: str):
     ) and samples:
         # Heavy arrays: push once per PLMN/pred load. Clientside keeps them on
         # window.__plotHoverCache so pan/zoom/inspect redraws stay small.
+        # edit_range always gets sample_ms so edge drag can snap to 5 minutes.
         meta["hover_cache_seq"] = int(state.get("hover_cache_seq") or 0)
-        if not state.get("_hover_arrays_pushed"):
+        if not state.get("_hover_arrays_pushed") or click_mode == "edit_range":
             meta["sample_ms"] = samples
             if _has_score_panel():
                 score_arr = state.get("_score_hover")
@@ -1303,15 +1387,29 @@ def _place_label_click(ts, click_mode: str):
     if click_mode == "label_point":
         state["label_range_anchor"] = None
         ts = _snap_to_data_time(ts)
+        # Keep prior selection's reasons on that label; new label starts blank.
+        prev = state.get("reason_bound_id") or state.get("highlight_id")
+        if prev:
+            _flush_reasons_to_label(
+                prev,
+                reasons=state.get("draft_reasons"),
+                fail_metrics=state.get("draft_fail_metrics"),
+                note=state.get("draft_note"),
+            )
+        _store_draft_reasons([], [], "")
         before = {x["id"] for x in state["doc"].get("labels", [])}
         add_label(
             state["doc"],
             kind="point",
             start=ts,
+            reasons=[],
+            fail_metrics=[],
+            note="",
         )
         after = [x for x in state["doc"]["labels"] if x["id"] not in before]
         lid = after[0]["id"] if after else None
         state["highlight_id"] = lid
+        state["reason_bound_id"] = lid
         opts = _label_options()
         _bump_label_rev()
         _arm_place_click_guard()
@@ -1320,7 +1418,8 @@ def _place_label_click(ts, click_mode: str):
             opts,
             lid,
             html.Span(
-                f"✔ [점] anomaly 추가됨 ({lid}) {format_kst(ts)} — Save Labels로 저장",
+                f"✔ [점] anomaly 추가됨 ({lid}) {format_kst(ts)} — "
+                "Save Labels로 저장 · 판정 기준을 아래에서 선택하세요",
                 style={"color": "green"},
             ),
             _cancel_style(click_mode),
@@ -1366,19 +1465,31 @@ def _place_label_click(ts, click_mode: str):
     a, b = anchor, ts
     state["label_range_anchor"] = None
     _bump_place_rev()
+    prev = state.get("reason_bound_id") or state.get("highlight_id")
+    if prev:
+        _flush_reasons_to_label(
+            prev,
+            reasons=state.get("draft_reasons"),
+            fail_metrics=state.get("draft_fail_metrics"),
+            note=state.get("draft_note"),
+        )
+    _store_draft_reasons([], [], "")
     before = {x["id"] for x in state["doc"].get("labels", [])}
     add_label(
         state["doc"],
         kind="range",
         start=a,
         end=b,
+        reasons=[],
+        fail_metrics=[],
+        note="",
     )
     after = [x for x in state["doc"]["labels"] if x["id"] not in before]
     lid = after[0]["id"] if after else None
     state["highlight_id"] = lid
+    state["reason_bound_id"] = lid
     opts = _label_options()
     when = f"{format_kst(a)} → {format_kst(b)}"
-    _bump_label_rev()
     state["_range_label_done"] = int(time.time() * 1000)
     state["_keep_highlight_id"] = True
     _arm_place_click_guard()
@@ -1387,7 +1498,8 @@ def _place_label_click(ts, click_mode: str):
         opts,
         lid,
         html.Span(
-            f"✔ [구간] anomaly 추가됨 ({lid}) {when} — Save Labels로 저장 · 이동(Y자동)",
+            f"✔ [구간] anomaly 추가됨 ({lid}) {when} — "
+            "Save Labels로 저장 · 이동(Y자동) · 판정 기준을 아래에서 선택하세요",
             style={"color": "green"},
         ),
         {"display": "none"},
@@ -1463,9 +1575,11 @@ def _apply_label_edge_from_drag(payload) -> str | None:
     """Update the selected label from a horizontal-only edge drag event."""
     if not payload or state["doc"] is None:
         return None
-    label_id = state.get("highlight_id")
+    label_id = state.get("highlight_id") or payload.get("label_id")
     if not label_id:
         return None
+    if not state.get("highlight_id"):
+        state["highlight_id"] = label_id
     item = _label_by_id(label_id)
     if item is None:
         return None
@@ -2408,6 +2522,107 @@ app.layout = html.Div(
             },
         ),
         html.Div(
+            [
+                html.Div(
+                    [
+                        html.B("판정 기준", style={"marginRight": "8px"}),
+                        html.Span(
+                            "선택 라벨에 저장 · 새로 찍는 라벨에도 적용 (복수 가능)",
+                            style={"fontSize": "12px", "color": "#666"},
+                        ),
+                    ],
+                    style={
+                        "display": "flex",
+                        "alignItems": "center",
+                        "flexWrap": "wrap",
+                        "gap": "4px",
+                        "marginBottom": "4px",
+                    },
+                ),
+                dcc.Checklist(
+                    id="label-reason-codes",
+                    options=_reason_checklist_options(),
+                    value=[],
+                    inline=True,
+                    labelStyle={
+                        "display": "inline-block",
+                        "marginRight": "14px",
+                        "marginBottom": "2px",
+                        "fontSize": "12px",
+                        "whiteSpace": "nowrap",
+                    },
+                    style={"lineHeight": "1.7"},
+                ),
+                html.Div(
+                    [
+                        html.Span(
+                            "fail_surge 지표",
+                            style={
+                                "fontSize": "12px",
+                                "fontWeight": "600",
+                                "marginRight": "8px",
+                                "whiteSpace": "nowrap",
+                            },
+                        ),
+                        dcc.Dropdown(
+                            id="label-fail-metrics",
+                            options=[],
+                            value=[],
+                            multi=True,
+                            placeholder="FAIL/TO 등 폭증 지표 (복수)",
+                            style={"flex": "1 1 360px", "minWidth": "260px"},
+                        ),
+                    ],
+                    id="label-fail-metrics-wrap",
+                    style={
+                        "display": "none",
+                        "alignItems": "center",
+                        "gap": "4px",
+                        "marginTop": "6px",
+                        "flexWrap": "wrap",
+                    },
+                ),
+                dcc.Textarea(
+                    id="label-reason-note",
+                    value="",
+                    placeholder="메모 (선택, other면 권장)",
+                    style={
+                        "width": "100%",
+                        "height": "48px",
+                        "marginTop": "6px",
+                        "fontSize": "12px",
+                        "resize": "vertical",
+                    },
+                ),
+                html.Div(
+                    [
+                        html.Button(
+                            "메모·기준 반영",
+                            id="btn-apply-reason",
+                            n_clicks=0,
+                            title="같은 라벨에 머문 채 메모를 즉시 저장 (다른 라벨로 옮기거나 Save 할 때도 자동 저장됨)",
+                            style={"fontSize": "12px"},
+                        ),
+                        html.Span(
+                            id="reason-status",
+                            style={
+                                "fontSize": "12px",
+                                "color": "#64748b",
+                                "marginLeft": "10px",
+                            },
+                        ),
+                    ],
+                    style={"marginTop": "6px", "display": "flex", "alignItems": "center"},
+                ),
+            ],
+            style={
+                "border": "1px solid #e0e0e0",
+                "padding": "8px 10px",
+                "marginBottom": "8px",
+                "background": "#fafafa",
+            },
+        ),
+        html.Div(
             id="confirm-modal",
             style={
                 "display": "none",
@@ -3102,6 +3317,9 @@ def _zoom_model_pred(n_clicks, pred_id):
     Input("graph", "relayoutData"),
     State("click-mode", "value"),
     State("view-range", "data"),
+    State("label-reason-codes", "value"),
+    State("label-fail-metrics", "value"),
+    State("label-reason-note", "value"),
     prevent_initial_call=False,
 )
 def _main(
@@ -3123,7 +3341,23 @@ def _main(
     relayout,
     click_mode,
     view_range,
+    reason_codes,
+    fail_metrics,
+    reason_note,
 ):
+    tid = getattr(callback_context, "triggered_id", None)
+    deselecting = (
+        tid == "btn-clear-selection"
+        or (tid == "label-list" and not selected_label)
+    )
+    if deselecting:
+        _store_draft_reasons([], [], "")
+    elif tid != "label-list":
+        # label-list switches are owned by _sync_label_reasons (flush + load).
+        # Keep draft in sync with UI so newly placed labels pick up current reasons.
+        codes = list(reason_codes or [])
+        mets = list(fail_metrics or []) if "fail_surge" in codes else []
+        _store_draft_reasons(codes, mets, reason_note)
     result = _main_body(
         plmn,
         n_prev,
@@ -3178,7 +3412,7 @@ def _finish_range_label(seq):
     prevent_initial_call=True,
 )
 def _sync_click_mode_on_nav(_n_zoom, _list_value, _n_reset, selected_label, click_mode):
-    """선택 구간 줌 → 값 탐색; 「전체」 → 줌."""
+    """선택 구간 줌 → 값 탐색; 「전체」 → 줌. 구간 편집 모드는 유지."""
     tid = getattr(callback_context, "triggered_id", None)
     if tid == "btn-reset-zoom":
         # Avoid a redundant click-mode rewrite that can race with axis-cmd.
@@ -3191,6 +3425,9 @@ def _sync_click_mode_on_nav(_n_zoom, _list_value, _n_reset, selected_label, clic
         return "inspect"
     if tid == "label-list":
         if not selected_label:
+            return no_update
+        # Stay in 구간 편집 when picking another label from the list.
+        if (click_mode or "") == "edit_range":
             return no_update
         # Same rule as main: only when already zoomed (not full view).
         if _is_full_x_view():
@@ -3273,11 +3510,20 @@ def _confirm_modal_ui(
             )
         plmn = state.get("plmn") or ""
         n = len((state.get("doc") or {}).get("labels") or [])
+        missing = labels_missing_reasons(state.get("doc"))
+        warn = ""
+        if missing:
+            sample = ", ".join(missing[:5])
+            more = f" 외 {len(missing) - 5}개" if len(missing) > 5 else ""
+            warn = (
+                f"\n\n⚠ 판정 기준 미입력 {len(missing)}개: {sample}{more}\n"
+                "가능하면 아래에서 기준을 고른 뒤 저장하세요."
+            )
         state["confirm_action"] = "save"
         return (
             shown,
             "라벨 저장",
-            f"현재 라벨을 파일에 저장할까요?\n\n{display_plmn(plmn)} · {n}개",
+            f"현재 라벨을 파일에 저장할까요?\n\n{display_plmn(plmn)} · {n}개{warn}",
             "저장",
             {**ok_base, "background": "#2563eb"},
             no_update,
@@ -3308,6 +3554,121 @@ def _confirm_modal_ui(
             state["confirm_action"] = None
         return hidden, no_update, no_update, no_update, no_update, no_update
     return hidden, no_update, no_update, no_update, no_update, no_update
+
+
+def _fail_metrics_wrap_style(reasons: list[str] | None) -> dict[str, str]:
+    show = "fail_surge" in (reasons or [])
+    return {
+        "display": "flex" if show else "none",
+        "alignItems": "center",
+        "gap": "4px",
+        "marginTop": "6px",
+        "flexWrap": "wrap",
+    }
+
+
+@app.callback(
+    Output("label-reason-codes", "value"),
+    Output("label-fail-metrics", "value"),
+    Output("label-fail-metrics", "options"),
+    Output("label-fail-metrics-wrap", "style"),
+    Output("label-reason-note", "value"),
+    Output("reason-status", "children"),
+    Output("label-list", "options", allow_duplicate=True),
+    Input("label-list", "value"),
+    Input("label-reason-codes", "value"),
+    Input("label-fail-metrics", "value"),
+    Input("btn-apply-reason", "n_clicks"),
+    Input("dd-plmn", "value"),
+    State("label-reason-note", "value"),
+    prevent_initial_call="initial_duplicate",
+)
+def _sync_label_reasons(
+    selected_label,
+    reason_codes,
+    fail_metrics,
+    _n_apply,
+    _plmn,
+    note,
+):
+    """Keep reason UI ↔ selected/new label draft in sync."""
+    tid = getattr(callback_context, "triggered_id", None)
+    fail_opts = _fail_metric_options()
+    list_opts = no_update
+
+    if tid in ("label-list", "dd-plmn", None):
+        # Before switching away, flush typed note/checklist to the previously
+        # bound label (note only lives in the textarea until then).
+        prev = state.get("reason_bound_id")
+        if tid == "label-list" and prev and str(prev) != str(selected_label or ""):
+            if _flush_reasons_to_label(
+                prev,
+                reasons=reason_codes,
+                fail_metrics=fail_metrics,
+                note=note,
+            ):
+                list_opts = _label_options()
+
+        item = _label_by_id(selected_label) if selected_label else None
+        if item is not None:
+            codes = list(item.get("reasons") or [])
+            mets = list(item.get("fail_metrics") or [])
+            note_s = item.get("note") or ""
+            state["reason_bound_id"] = selected_label
+            _store_draft_reasons(codes, mets, note_s)
+            return (
+                codes,
+                mets,
+                fail_opts,
+                _fail_metrics_wrap_style(codes),
+                note_s,
+                "",
+                list_opts,
+            )
+        # Deselect / no label: clear reason UI so the next placement starts blank.
+        state["reason_bound_id"] = None
+        _store_draft_reasons([], [], "")
+        return (
+            [],
+            [],
+            fail_opts,
+            _fail_metrics_wrap_style([]),
+            "",
+            "",
+            list_opts,
+        )
+
+    codes = list(reason_codes or [])
+    mets = list(fail_metrics or [])
+    note_s = note if note is not None else ""
+    if "fail_surge" not in codes:
+        mets = []
+    _store_draft_reasons(codes, mets, note_s)
+
+    reason_msg = ""
+    bound = selected_label or state.get("reason_bound_id")
+    if bound and state.get("doc") is not None:
+        if _flush_reasons_to_label(
+            bound,
+            reasons=codes,
+            fail_metrics=mets,
+            note=note_s,
+        ):
+            state["reason_bound_id"] = bound
+            list_opts = _label_options()
+            item = _label_by_id(bound)
+            if item is not None:
+                reason_msg = f"반영됨 · {label_line(item)}"
+
+    return (
+        codes,
+        mets,
+        fail_opts,
+        _fail_metrics_wrap_style(codes),
+        no_update if tid != "btn-apply-reason" else note_s,
+        reason_msg,
+        list_opts,
+    )
 
 
 def _main_body(
@@ -3477,6 +3838,14 @@ def _main_body(
     if prop == "btn-confirm-ok.n_clicks":
         action = state.pop("confirm_action", None)
         if action == "save":
+            bound = selected_label or state.get("reason_bound_id")
+            if bound:
+                _flush_reasons_to_label(
+                    bound,
+                    reasons=state.get("draft_reasons"),
+                    fail_metrics=state.get("draft_fail_metrics"),
+                    note=state.get("draft_note"),
+                )
             path = save_labels(state["doc"])
             return (
                 no_update,
@@ -3535,10 +3904,8 @@ def _main_body(
     if prop == "btn-clear-selection.n_clicks":
         state["highlight_id"] = None
         state["label_range_anchor"] = None
-        if state.get("df") is not None:
-            state["zoom_start"], state["zoom_end"] = data_time_bounds(state["df"])
-            state["x_full_view"] = True
-            _reset_y()
+        state.pop("_offscreen_cleared", None)
+        _store_draft_reasons([], [], "")
         return (
             _build_graph(click_mode),
             no_update,
@@ -3572,12 +3939,11 @@ def _main_body(
 
     if prop == "label-list.value":
         if not selected_label:
-            # Clear highlight only. Do NOT reset zoom — graph deselect also
-            # writes value=None and must leave a zoomed window intact.
-            # 「라벨 선택해제」 / 「전체」 are what reset to full view.
+            # Clear highlight only. Do NOT reset zoom — keep the current window.
             state["highlight_id"] = None
             state["label_range_anchor"] = None
             state.pop("_offscreen_cleared", None)
+            _store_draft_reasons([], [], "")
             return (
                 _build_graph(click_mode),
                 no_update,
@@ -3603,7 +3969,8 @@ def _main_body(
             )
         # Criterion is view state only (not whether a label is selected):
         # full → select only; already zoomed → select + zoom to the new item.
-        do_zoom = not _is_full_x_view()
+        # Exception: stay in 구간 편집 (do not jump to 값 탐색).
+        do_zoom = not _is_full_x_view() and click_mode != "edit_range"
         if do_zoom:
             _zoom_to_label_item(item)
             snapped = _snap_inspect_to_item(item)
@@ -4470,9 +4837,24 @@ app.clientside_callback(
         }
         window.__syncEditRangePointerStyle();
 
-        if (!window.__plotPlaceUtils) {
-            window.__plotPlaceUtils = function(gd) {
+        // Always redefine so hot reloads pick up coord / snap fixes.
+        window.__plotPlaceUtils = function(gd) {
                 function plotAreaRect() {
+                    // Prefer top x-axis subplot so p2d pixels match clientX.
+                    try {
+                        var fl = gd._fullLayout;
+                        var plot0 = fl && fl._plots && (fl._plots.xy || fl._plots.x2y2);
+                        if (plot0 && plot0.plot && plot0.plot.getBoundingClientRect) {
+                            var r0 = plot0.plot.getBoundingClientRect();
+                            if (r0.width > 2 && r0.height > 2) {
+                                return {
+                                    left: r0.left, top: r0.top,
+                                    right: r0.right, bottom: r0.bottom,
+                                    width: r0.width, height: r0.height
+                                };
+                            }
+                        }
+                    } catch (err) {}
                     if (window.__combinedPlotRect) {
                         var dual = window.__combinedPlotRect(gd);
                         if (dual) return dual;
@@ -4487,6 +4869,15 @@ app.clientside_callback(
                         right: bb.right, bottom: bb.bottom,
                         width: bb.width, height: bb.height
                     };
+                }
+
+                function yHitRect() {
+                    // Allow clicks across stacked panels.
+                    if (window.__combinedPlotRect) {
+                        var dual = window.__combinedPlotRect(gd);
+                        if (dual) return dual;
+                    }
+                    return plotAreaRect();
                 }
 
                 function clientXToPlotX(clientX) {
@@ -4544,27 +4935,40 @@ app.clientside_callback(
                     return (Math.abs(ms - a) <= Math.abs(ms - b)) ? a : b;
                 }
 
+                function sampleList() {
+                    var meta = (gd.layout && gd.layout.meta) || {};
+                    if (meta.sample_ms && meta.sample_ms.length) return meta.sample_ms;
+                    if (window.__plotHoverCache && window.__plotHoverCache.sample_ms
+                        && window.__plotHoverCache.sample_ms.length) {
+                        return window.__plotHoverCache.sample_ms;
+                    }
+                    return null;
+                }
+
                 function snapClientX(clientX) {
                     var xVal = clientXToPlotX(clientX);
                     if (xVal == null) return null;
-                    var meta = (gd.layout && gd.layout.meta) || {};
-                    var samples = meta.sample_ms;
+                    var samples = sampleList();
                     var ms = plotXToMs(xVal);
-                    if (!isFinite(ms)) return String(xVal);
+                    if (!(typeof ms === 'number' && isFinite(ms))) return String(xVal);
                     var snapped = (samples && samples.length)
                         ? nearestSampleMs(ms, samples) : null;
-                    if (!isFinite(snapped)) {
+                    // NOTE: isFinite(null)===true in JS — must check null explicitly.
+                    if (snapped == null || !(typeof snapped === 'number' && isFinite(snapped))) {
+                        // Data is 5-minute; snap wall-clock when sample list missing.
                         var step = 5 * 60 * 1000;
                         snapped = Math.round(ms / step) * step;
                     }
-                    return isFinite(snapped) ? formatPlotNaive(snapped) : String(xVal);
+                    return (typeof snapped === 'number' && isFinite(snapped))
+                        ? formatPlotNaive(snapped) : String(xVal);
                 }
 
                 function inPlotArea(clientX, clientY) {
-                    var r = plotAreaRect();
-                    if (!r) return false;
-                    return clientX >= r.left && clientX <= r.right
-                        && clientY >= r.top && clientY <= r.bottom;
+                    var xR = plotAreaRect();
+                    var yR = yHitRect() || xR;
+                    if (!xR || !yR) return false;
+                    return clientX >= xR.left && clientX <= xR.right
+                        && clientY >= yR.top && clientY <= yR.bottom;
                 }
 
                 return {
@@ -4575,7 +4979,6 @@ app.clientside_callback(
                     inPlotArea: inPlotArea
                 };
             };
-        }
 
         if (!window.__readGraphView) {
             window.__readGraphView = function() {
@@ -4785,7 +5188,7 @@ app.clientside_callback(
                 var host = document.getElementById('graph');
                 if (!host || host.__customEdgeEditBound) return;
                 host.__customEdgeEditBound = true;
-                var HIT_PX = 14;
+                var HIT_PX = 18;
                 var dragState = null;
 
                 function activeGd() {
@@ -4968,14 +5371,26 @@ app.clientside_callback(
                     var xa = fl && fl.xaxis;
                     var edges = collectEditEdges(gd);
                     if (!xa || !edges.length) return null;
-                    var r = plotHitRect(gd);
+                    // Prefer the top x-axis plot rect so d2p pixels match clientX.
+                    var r = null;
+                    try {
+                        var plot0 = fl._plots && (fl._plots.xy || fl._plots.x2y2);
+                        if (plot0 && plot0.plot && plot0.plot.getBoundingClientRect) {
+                            r = plot0.plot.getBoundingClientRect();
+                        }
+                    } catch (err) {}
+                    if (!r || !(r.width > 2)) {
+                        r = plotHitRect(gd);
+                    }
                     if (!r) {
                         var el = dragEl(gd);
                         if (!el) return null;
                         r = el.getBoundingClientRect();
                     }
+                    // Y: allow hits across stacked panels (combined rect).
+                    var yR = plotHitRect(gd) || r;
                     if (clientX < r.left || clientX > r.right ||
-                        clientY < r.top || clientY > r.bottom) {
+                        clientY < yR.top || clientY > yR.bottom) {
                         return null;
                     }
                     var xPx = clientX - r.left;
@@ -5001,16 +5416,38 @@ app.clientside_callback(
                 function snapToSample(gd, xVal) {
                     var meta = (gd.layout && gd.layout.meta) || {};
                     var samples = meta.sample_ms;
-                    if (!samples || !samples.length) return xVal;
+                    if ((!samples || !samples.length) && window.__plotHoverCache) {
+                        samples = window.__plotHoverCache.sample_ms;
+                    }
                     var ms = toMs(gd, xVal);
-                    if (!isFinite(ms)) return xVal;
-                    var snapped = nearestSampleMs(ms, samples);
-                    return snapped == null ? xVal : formatPlotNaive(snapped);
+                    if (!isFinite(ms)) {
+                        return (typeof xVal === 'string') ? xVal : String(xVal);
+                    }
+                    var snapped = null;
+                    if (samples && samples.length) {
+                        snapped = nearestSampleMs(ms, samples);
+                    }
+                    if (snapped == null || !(typeof snapped === 'number' && isFinite(snapped))) {
+                        // Always snap to 5-minute wall clock (data cadence).
+                        var step = 5 * 60 * 1000;
+                        snapped = Math.round(ms / step) * step;
+                    }
+                    return formatPlotNaive(snapped);
                 }
 
                 function xFromClientX(gd, clientX) {
                     var xa = gd._fullLayout.xaxis;
-                    var r = plotHitRect(gd);
+                    var r = null;
+                    try {
+                        var fl = gd._fullLayout;
+                        var plot0 = fl._plots && (fl._plots.xy || fl._plots.x2y2);
+                        if (plot0 && plot0.plot && plot0.plot.getBoundingClientRect) {
+                            r = plot0.plot.getBoundingClientRect();
+                        }
+                    } catch (err) {}
+                    if (!r || !(r.width > 2)) {
+                        r = plotHitRect(gd);
+                    }
                     if (!r) {
                         var el = dragEl(gd);
                         if (!el) return null;
@@ -5188,10 +5625,12 @@ app.clientside_callback(
                     var xVal = formatXForServer(gd, lastX);
                     if (xVal == null) return;
                     if (!window.dash_clientside || !window.dash_clientside.set_props) return;
+                    var meta = (gd.layout && gd.layout.meta) || {};
                     window.dash_clientside.set_props('edge-drag-event', {
                         data: {
                             name: name,
                             x: xVal,
+                            label_id: meta.edit_label_id || null,
                             sequence: Date.now()
                         }
                     });
@@ -5313,13 +5752,14 @@ app.clientside_callback(
             };
         }
 
-        // Empty-area clicks → snapped time. Always redefine install fn; rebind per host.
+        // Empty-area / band clicks → snapped time. Always redefine; rebind with V5.
         window.__installPlotClickHost = function() {
                 var host = document.getElementById('graph');
                 if (!host) return;
-                if (host.__plotClickHostBoundV4) return;
-                host.__plotClickHostBoundV4 = true;
+                if (host.__plotClickHostBoundV5) return;
+                host.__plotClickHostBoundV5 = true;
                 var lastEmit = {x: null, t: 0};
+                var ptrDown = null;
 
                 function emitSnap(clientX, clientY) {
                     var gd = host.querySelector('.js-plotly-plot');
@@ -5329,7 +5769,7 @@ app.clientside_callback(
                     var xVal = plot.snapClientX(clientX);
                     if (xVal == null) return false;
                     var now = Date.now();
-                    if (lastEmit.x === xVal && now - lastEmit.t < 80) return false;
+                    if (lastEmit.x === xVal && now - lastEmit.t < 120) return false;
                     lastEmit = {x: xVal, t: now};
                     if (!window.dash_clientside || !window.dash_clientside.set_props) return false;
                     window.dash_clientside.set_props('shape-click-event', {
@@ -5337,6 +5777,11 @@ app.clientside_callback(
                     });
                     return true;
                 }
+
+                host.addEventListener('pointerdown', function(ev) {
+                    if (ev.button !== 0) return;
+                    ptrDown = {x: ev.clientX, y: ev.clientY};
+                }, true);
 
                 host.addEventListener('click', function(ev) {
                     if (ev.button !== 0) return;
@@ -5360,12 +5805,25 @@ app.clientside_callback(
                     emitSnap(ev.clientX, ev.clientY);
                 }, true);
 
-                // 값 탐색: WebGL score panel often swallows bubble clicks; capture
-                // pointerup so score-box clicks still snap the cursor.
+                // Short clicks: select labels even when Plotly zoom/pan swallows click.
+                // Also covers 값 탐색 WebGL score-panel picks.
                 host.addEventListener('pointerup', function(ev) {
                     if (ev.button !== 0) return;
-                    if (window.__currentClickMode !== 'inspect') return;
                     if (window.__edgeDragging) return;
+                    var down = ptrDown;
+                    ptrDown = null;
+                    if (window.__skipNextShapeClick) {
+                        window.__skipNextShapeClick = false;
+                        return;
+                    }
+                    var mode = window.__currentClickMode;
+                    // Placement modes use click (empty) + clickData (traces).
+                    if (mode === 'label_range' || mode === 'label_point') return;
+                    if (down) {
+                        var dx = Math.abs(ev.clientX - down.x);
+                        var dy = Math.abs(ev.clientY - down.y);
+                        if (dx > 6 || dy > 6) return; // pan/zoom drag
+                    }
                     emitSnap(ev.clientX, ev.clientY);
                 }, true);
             };
@@ -5808,8 +6266,10 @@ app.clientside_callback(
                     var meta = (gd.layout && gd.layout.meta) || {};
                     var cache = ingestHoverMeta(meta);
                     var snapped = nearestSampleMs(ms, cache.sample_ms);
-                    if (!isFinite(snapped)) snapped = snapFiveMinMs(ms);
-                    if (!isFinite(snapped)) {
+                    if (snapped == null || !(typeof snapped === 'number' && isFinite(snapped))) {
+                        snapped = snapFiveMinMs(ms);
+                    }
+                    if (snapped == null || !(typeof snapped === 'number' && isFinite(snapped))) {
                         hideTip();
                         return;
                     }

@@ -639,6 +639,13 @@ def load_labels(plmn: str, rank: int | None = None) -> dict[str, Any]:
         if isinstance(item, dict):
             item.pop("metrics", None)
             item.pop("tag", None)
+            item.update(
+                normalize_label_reason_fields(
+                    reasons=item.get("reasons"),
+                    fail_metrics=item.get("fail_metrics"),
+                    note=item.get("note"),
+                )
+            )
     return doc
 
 
@@ -650,6 +657,13 @@ def save_labels(doc: dict[str, Any]) -> str:
         item = dict(item)
         item.pop("metrics", None)
         item.pop("tag", None)
+        item.update(
+            normalize_label_reason_fields(
+                reasons=item.get("reasons"),
+                fail_metrics=item.get("fail_metrics"),
+                note=item.get("note"),
+            )
+        )
         cleaned.append(item)
     doc["labels"] = cleaned
     path = label_path(doc["plmn"])
@@ -1671,6 +1685,7 @@ def labels_to_frame(doc: dict[str, Any]) -> pd.DataFrame:
                 "id": item.get("id"),
                 "형식": "점" if kind == "point" else "구간",
                 "시각 / 구간 (KST)": interval,
+                "판정 기준": label_reason_summary(item),
                 "updated_at": format_kst(item.get("updated_at"), seconds=True),
             }
         )
@@ -1680,10 +1695,85 @@ def labels_to_frame(doc: dict[str, Any]) -> pd.DataFrame:
                 "id",
                 "형식",
                 "시각 / 구간 (KST)",
+                "판정 기준",
                 "updated_at",
             ]
         )
     return pd.DataFrame(rows)
+
+
+LABEL_REASON_DEFS: list[tuple[str, str]] = [
+    ("rate_degrade", "SUCCESS/ACCEPT rate 급락·낮은 지속"),
+    ("attempt_drop", "M971 급락"),
+    ("attempt_spike", "M971 급증"),
+    ("fail_surge", "FAIL/TO 등 실패·타임아웃 폭증"),
+    ("other", "기타 (메모 권장)"),
+]
+LABEL_REASON_CODES = frozenset(code for code, _ in LABEL_REASON_DEFS)
+LABEL_REASON_LABELS = dict(LABEL_REASON_DEFS)
+
+
+def normalize_label_reason_fields(
+    *,
+    reasons: list[str] | None = None,
+    fail_metrics: list[str] | None = None,
+    note: str | None = None,
+) -> dict[str, Any]:
+    """Sanitize reason / fail_metrics / note for a human label item."""
+    codes = []
+    for raw in reasons or []:
+        code = str(raw).strip()
+        if code in LABEL_REASON_CODES and code not in codes:
+            codes.append(code)
+    metrics: list[str] = []
+    if "fail_surge" in codes:
+        for raw in fail_metrics or []:
+            m = str(raw).strip()
+            if m and m not in metrics:
+                metrics.append(m)
+    note_s = (note or "").strip()
+    out: dict[str, Any] = {"reasons": codes}
+    if metrics:
+        out["fail_metrics"] = metrics
+    else:
+        out["fail_metrics"] = []
+    out["note"] = note_s
+    return out
+
+
+def label_reason_summary(item: dict[str, Any]) -> str:
+    """Short Korean summary of stored reasons for list UI."""
+    codes = [c for c in (item.get("reasons") or []) if c in LABEL_REASON_CODES]
+    if not codes:
+        return "기준 미입력"
+    parts: list[str] = []
+    for c in codes:
+        if c == "fail_surge":
+            mets = [str(m) for m in (item.get("fail_metrics") or []) if m]
+            if mets:
+                shown = ", ".join(mets[:4])
+                if len(mets) > 4:
+                    shown += "…"
+                parts.append(f"실패 폭증({shown})")
+            else:
+                parts.append(LABEL_REASON_LABELS.get(c, c))
+        else:
+            parts.append(LABEL_REASON_LABELS.get(c, c))
+    note = (item.get("note") or "").strip()
+    text = " · ".join(parts)
+    if note:
+        text = f"{text} · {note[:40]}{'…' if len(note) > 40 else ''}"
+    return text
+
+
+def labels_missing_reasons(doc: dict[str, Any] | None) -> list[str]:
+    """Label ids that have no reason codes (should set before save)."""
+    missing = []
+    for item in (doc or {}).get("labels") or []:
+        codes = [c for c in (item.get("reasons") or []) if c in LABEL_REASON_CODES]
+        if not codes:
+            missing.append(str(item.get("id")))
+    return missing
 
 
 def add_label(
@@ -1693,6 +1783,9 @@ def add_label(
     start: str | pd.Timestamp,
     end: str | pd.Timestamp | None = None,
     label_id: str | None = None,
+    reasons: list[str] | None = None,
+    fail_metrics: list[str] | None = None,
+    note: str | None = None,
 ) -> dict[str, Any]:
     kind = kind.lower()
     if kind not in {"point", "range"}:
@@ -1710,6 +1803,13 @@ def add_label(
         "end": end_ts.isoformat(),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
+    item.update(
+        normalize_label_reason_fields(
+            reasons=reasons,
+            fail_metrics=fail_metrics,
+            note=note,
+        )
+    )
 
     labels = [x for x in doc.get("labels", []) if x.get("id") != item["id"]]
     labels.append(item)
@@ -1738,6 +1838,18 @@ def update_label(doc: dict[str, Any], label_id: str, **fields: Any) -> dict[str,
         found["start"] = parse_time(fields["start"]).isoformat()
     if "end" in fields:
         found["end"] = parse_time(fields["end"]).isoformat()
+    if any(k in fields for k in ("reasons", "fail_metrics", "note")):
+        found.update(
+            normalize_label_reason_fields(
+                reasons=fields["reasons"]
+                if "reasons" in fields
+                else found.get("reasons"),
+                fail_metrics=fields["fail_metrics"]
+                if "fail_metrics" in fields
+                else found.get("fail_metrics"),
+                note=fields["note"] if "note" in fields else found.get("note"),
+            )
+        )
     if found["kind"] == "point":
         found["end"] = found["start"]
     else:
@@ -2332,10 +2444,11 @@ def label_line(item: dict[str, Any]) -> str:
     kind = (item.get("kind") or "point").lower()
     start = format_kst(item.get("start"))
     end = format_kst(item.get("end"))
+    reason = label_reason_summary(item)
     if kind == "point":
-        text = f"[점] anomaly · {start}"
+        text = f"[점] anomaly · {start} · {reason}"
     else:
-        text = f"[구간] anomaly · {start} → {end}"
+        text = f"[구간] anomaly · {start} → {end} · {reason}"
     return f"{text}  ({item.get('id')})"
 
 

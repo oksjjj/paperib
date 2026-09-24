@@ -23,6 +23,7 @@ Default chronological split: **train 60% / valid 20% / test 20%**.
 - Detection metrics + UI overlay use **valid only**
 - **test is held out** (not scored) until you intentionally evaluate it
 - Change ratios with `--train_ratio` / `--valid_ratio`
+- **`paperib` features:** all raw counters except `EXCLUDED_TRAIN_METRICS` (default: `M688`). See `docs/논문-설계-노트.md`.
 
 TensorBoard is **on by default** (train/valid loss, lr). Disable with `--no_tensorboard`.
 

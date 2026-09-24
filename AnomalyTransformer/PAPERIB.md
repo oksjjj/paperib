@@ -45,9 +45,9 @@ Same three views as OmniAnomaly (prep reused from `OmniAnomaly/run_plmn.py`):
 
 | `run_name` | Features | Standardization |
 |------------|----------|-----------------|
-| `paperib` | All raw metrics | MinMax (train fit) |
-| `comb` | COMB counters + S_RATE/A_RATE | MinMax |
-| `comb_share` | M971 + counter÷M971 | log1p(M971)+MinMax |
+| `paperib` | All raw metrics except `EXCLUDED_TRAIN_METRICS` (default drop: `M688`) | MinMax (train fit) |
+| `comb` | COMB raw + S_RATE/A_RATE | MinMax (train fit) |
+| `comb_share` | M971 + counter÷M971 | log1p(M971)+MinMax; share MinMax |
 
 See [OmniAnomaly/COMB_RUNS.md](../OmniAnomaly/COMB_RUNS.md).
 

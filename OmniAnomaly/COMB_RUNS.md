@@ -1,6 +1,6 @@
 # COMB run 설계 (paperib × OmniAnomaly)
 
-`paperib` run은 PLMN에 포함된 **모든 raw metric**으로 학습한다.  
+`paperib` run은 PLMN에 포함된 **raw metric**(학습 시 `EXCLUDED_TRAIN_METRICS` 제외)으로 학습한다.  
 운영 관점에서 의미 있는 신호만 쓰려면 **COMB 계열 run**을 따로 둔다.
 
 라벨링 UI에서는 **모델 run** 드롭다운으로 `paperib` / `comb` / `comb_share` 예측 JSON을 전환한다.
@@ -69,7 +69,8 @@ cd OmniAnomaly
 
 ## 3. `paperib`와의 관계
 
-- **`paperib`**: 변경 없음. 전체 raw metric, MinMax.
+- **`paperib`**: 전체 raw metric에서 **학습 기본 제외 목록**(`EXCLUDED_TRAIN_METRICS`, 현재 `M688`)만 빼고 MinMax.  
+  M688은 train에 거의 없고 valid/test에만 희소하며 운용상 비중요 → full-raw 학습에서 제외 (라벨링 UI 표시는 유지).
 - **`comb` / `comb_share`**: 모델·체크포인트·예측 JSON 경로가 run 이름별로 **분리**되어 서로 덮어쓰지 않는다.
 - **`window_length` ≠ 100**: 경로에 `_w{N}`이 붙는다 (예: `model/P0480/comb_w200/`, `P0480_omnianomaly_comb_w200.json`). 기본 win=100 산출물은 유지된다.
 

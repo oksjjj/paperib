@@ -1,0 +1,532 @@
+{
+  "plmn": "P0480",
+  "rank": 1,
+  "updated_at": "2026-09-24T13:44:04.168303+00:00",
+  "labels": [
+    {
+      "id": "acf1caca",
+      "kind": "range",
+      "start": "2026-05-01T13:05:00+00:00",
+      "end": "2026-05-01T13:45:00+00:00",
+      "updated_at": "2026-09-24T13:41:08.551824+00:00",
+      "reasons": [
+        "rate_degrade",
+        "attempt_drop"
+      ],
+      "fail_metrics": [],
+      "note": ""
+    },
+    {
+      "id": "92fb3c0f",
+      "kind": "range",
+      "start": "2026-05-06T14:00:00+00:00",
+      "end": "2026-05-06T14:55:00+00:00",
+      "updated_at": "2026-09-24T13:11:30.540724+00:00",
+      "reasons": [
+        "attempt_spike"
+      ],
+      "fail_metrics": [],
+      "note": ""
+    },
+    {
+      "id": "6805c8d3",
+      "kind": "point",
+      "start": "2026-05-06T17:15:00+00:00",
+      "end": "2026-05-06T17:15:00+00:00",
+      "updated_at": "2026-09-24T13:27:21.538225+00:00",
+      "reasons": [
+        "fail_surge"
+      ],
+      "fail_metrics": [
+        "M855",
+        "M037"
+      ],
+      "note": ""
+    },
+    {
+      "id": "33bd5096",
+      "kind": "point",
+      "start": "2026-05-06T17:45:00+00:00",
+      "end": "2026-05-06T17:45:00+00:00",
+      "updated_at": "2026-09-24T13:27:50.624159+00:00",
+      "reasons": [
+        "fail_surge"
+      ],
+      "fail_metrics": [
+        "M855",
+        "M037"
+      ],
+      "note": ""
+    },
+    {
+      "id": "22ade8f7",
+      "kind": "point",
+      "start": "2026-05-07T17:45:00+00:00",
+      "end": "2026-05-07T17:45:00+00:00",
+      "updated_at": "2026-09-24T13:25:38.852838+00:00",
+      "reasons": [
+        "fail_surge"
+      ],
+      "fail_metrics": [
+        "M855",
+        "M037"
+      ],
+      "note": ""
+    },
+    {
+      "id": "f7488992",
+      "kind": "point",
+      "start": "2026-05-07T18:00:00+00:00",
+      "end": "2026-05-07T18:00:00+00:00",
+      "updated_at": "2026-09-24T13:26:09.729120+00:00",
+      "reasons": [
+        "fail_surge"
+      ],
+      "fail_metrics": [
+        "M855",
+        "M037"
+      ],
+      "note": ""
+    },
+    {
+      "id": "254e4023",
+      "kind": "range",
+      "start": "2026-05-11T11:55:00+00:00",
+      "end": "2026-05-11T12:30:00+00:00",
+      "updated_at": "2026-09-24T12:31:52.397654+00:00",
+      "reasons": [
+        "rate_degrade",
+        "attempt_drop"
+      ],
+      "fail_metrics": [],
+      "note": ""
+    },
+    {
+      "id": "28a514bb",
+      "kind": "point",
+      "start": "2026-05-11T18:20:00+00:00",
+      "end": "2026-05-11T18:20:00+00:00",
+      "updated_at": "2026-09-24T13:28:25.372421+00:00",
+      "reasons": [
+        "fail_surge"
+      ],
+      "fail_metrics": [
+        "M855",
+        "M037"
+      ],
+      "note": ""
+    },
+    {
+      "id": "e5739b81",
+      "kind": "point",
+      "start": "2026-05-13T17:25:00+00:00",
+      "end": "2026-05-13T17:25:00+00:00",
+      "updated_at": "2026-09-24T13:29:13.126003+00:00",
+      "reasons": [
+        "fail_surge"
+      ],
+      "fail_metrics": [
+        "M855",
+        "M037"
+      ],
+      "note": ""
+    },
+    {
+      "id": "0c083a28",
+      "kind": "point",
+      "start": "2026-05-13T18:50:00+00:00",
+      "end": "2026-05-13T18:50:00+00:00",
+      "updated_at": "2026-09-24T13:29:39.194433+00:00",
+      "reasons": [
+        "fail_surge"
+      ],
+      "fail_metrics": [
+        "M855",
+        "M037"
+      ],
+      "note": ""
+    },
+    {
+      "id": "ef31871d",
+      "kind": "range",
+      "start": "2026-05-19T17:35:00+00:00",
+      "end": "2026-05-19T17:55:00+00:00",
+      "updated_at": "2026-09-24T13:12:37.025178+00:00",
+      "reasons": [
+        "attempt_drop"
+      ],
+      "fail_metrics": [],
+      "note": ""
+    },
+    {
+      "id": "e29579dc",
+      "kind": "point",
+      "start": "2026-05-21T14:45:00+00:00",
+      "end": "2026-05-21T14:45:00+00:00",
+      "updated_at": "2026-09-24T13:30:18.746330+00:00",
+      "reasons": [
+        "fail_surge"
+      ],
+      "fail_metrics": [
+        "M855",
+        "M037"
+      ],
+      "note": ""
+    },
+    {
+      "id": "83a7d603",
+      "kind": "point",
+      "start": "2026-05-25T12:20:00+00:00",
+      "end": "2026-05-25T12:20:00+00:00",
+      "updated_at": "2026-09-24T13:13:15.650602+00:00",
+      "reasons": [
+        "attempt_drop"
+      ],
+      "fail_metrics": [],
+      "note": ""
+    },
+    {
+      "id": "d01ca908",
+      "kind": "point",
+      "start": "2026-05-26T10:45:00+00:00",
+      "end": "2026-05-26T10:45:00+00:00",
+      "updated_at": "2026-09-24T13:30:47.294563+00:00",
+      "reasons": [
+        "fail_surge"
+      ],
+      "fail_metrics": [
+        "M855",
+        "M037"
+      ],
+      "note": ""
+    },
+    {
+      "id": "e964889c",
+      "kind": "range",
+      "start": "2026-05-29T05:15:00+00:00",
+      "end": "2026-05-29T05:25:00+00:00",
+      "updated_at": "2026-09-24T13:14:09.322453+00:00",
+      "reasons": [
+        "attempt_drop"
+      ],
+      "fail_metrics": [],
+      "note": ""
+    },
+    {
+      "id": "4a55dcf8",
+      "kind": "range",
+      "start": "2026-06-01T17:05:00+00:00",
+      "end": "2026-06-01T17:35:00+00:00",
+      "updated_at": "2026-09-24T12:30:46.911629+00:00",
+      "reasons": [
+        "rate_degrade",
+        "attempt_drop"
+      ],
+      "fail_metrics": [],
+      "note": ""
+    },
+    {
+      "id": "ac8170aa",
+      "kind": "range",
+      "start": "2026-06-08T16:40:00+00:00",
+      "end": "2026-06-08T18:20:00+00:00",
+      "updated_at": "2026-09-24T13:14:45.778710+00:00",
+      "reasons": [
+        "attempt_drop"
+      ],
+      "fail_metrics": [],
+      "note": ""
+    },
+    {
+      "id": "dd00357a",
+      "kind": "range",
+      "start": "2026-06-11T13:05:00+00:00",
+      "end": "2026-06-11T13:55:00+00:00",
+      "updated_at": "2026-09-24T12:31:25.252133+00:00",
+      "reasons": [
+        "rate_degrade",
+        "attempt_drop"
+      ],
+      "fail_metrics": [],
+      "note": ""
+    },
+    {
+      "id": "033034b3",
+      "kind": "range",
+      "start": "2026-06-14T13:10:00+00:00",
+      "end": "2026-06-14T13:35:00+00:00",
+      "updated_at": "2026-09-24T12:32:21.988513+00:00",
+      "reasons": [
+        "rate_degrade",
+        "attempt_drop"
+      ],
+      "fail_metrics": [],
+      "note": ""
+    },
+    {
+      "id": "2e671e00",
+      "kind": "range",
+      "start": "2026-06-28T17:15:00+00:00",
+      "end": "2026-06-28T18:20:00+00:00",
+      "updated_at": "2026-09-24T12:33:24.010597+00:00",
+      "reasons": [
+        "rate_degrade",
+        "attempt_drop"
+      ],
+      "fail_metrics": [],
+      "note": ""
+    },
+    {
+      "id": "4bcc3c88",
+      "kind": "range",
+      "start": "2026-06-30T05:05:00+00:00",
+      "end": "2026-06-30T05:15:00+00:00",
+      "updated_at": "2026-09-24T12:34:27.672411+00:00",
+      "reasons": [
+        "rate_degrade",
+        "attempt_drop"
+      ],
+      "fail_metrics": [],
+      "note": ""
+    },
+    {
+      "id": "b5f7ef6d",
+      "kind": "range",
+      "start": "2026-06-30T05:35:00+00:00",
+      "end": "2026-06-30T06:05:00+00:00",
+      "updated_at": "2026-09-24T12:37:22.785289+00:00",
+      "reasons": [
+        "rate_degrade",
+        "attempt_drop"
+      ],
+      "fail_metrics": [],
+      "note": ""
+    },
+    {
+      "id": "2511ef5b",
+      "kind": "range",
+      "start": "2026-07-03T14:10:00+00:00",
+      "end": "2026-07-03T14:40:00+00:00",
+      "updated_at": "2026-09-24T13:15:41.589739+00:00",
+      "reasons": [
+        "attempt_spike"
+      ],
+      "fail_metrics": [],
+      "note": ""
+    },
+    {
+      "id": "279b0de4",
+      "kind": "point",
+      "start": "2026-07-13T17:35:00+00:00",
+      "end": "2026-07-13T17:35:00+00:00",
+      "updated_at": "2026-09-24T13:31:31.217445+00:00",
+      "reasons": [
+        "fail_surge"
+      ],
+      "fail_metrics": [
+        "M855",
+        "M037"
+      ],
+      "note": ""
+    },
+    {
+      "id": "c937dc57",
+      "kind": "point",
+      "start": "2026-07-13T18:20:00+00:00",
+      "end": "2026-07-13T18:20:00+00:00",
+      "updated_at": "2026-09-24T13:31:52.685726+00:00",
+      "reasons": [
+        "fail_surge"
+      ],
+      "fail_metrics": [
+        "M855",
+        "M037"
+      ],
+      "note": ""
+    },
+    {
+      "id": "15f37fb6",
+      "kind": "range",
+      "start": "2026-07-22T16:05:00+00:00",
+      "end": "2026-07-22T16:30:00+00:00",
+      "updated_at": "2026-09-24T13:16:18.962010+00:00",
+      "reasons": [
+        "attempt_drop"
+      ],
+      "fail_metrics": [],
+      "note": ""
+    },
+    {
+      "id": "4025f8e4",
+      "kind": "range",
+      "start": "2026-07-24T07:55:00+00:00",
+      "end": "2026-07-24T08:55:00+00:00",
+      "updated_at": "2026-09-24T12:56:42.909699+00:00",
+      "reasons": [
+        "rate_degrade",
+        "fail_surge",
+        "attempt_spike"
+      ],
+      "fail_metrics": [
+        "M185",
+        "M841",
+        "M855"
+      ],
+      "note": ""
+    },
+    {
+      "id": "d378c29a",
+      "kind": "range",
+      "start": "2026-07-24T08:55:00+00:00",
+      "end": "2026-07-24T09:05:00+00:00",
+      "updated_at": "2026-09-24T13:00:06.522405+00:00",
+      "reasons": [
+        "attempt_spike",
+        "fail_surge"
+      ],
+      "fail_metrics": [
+        "M855",
+        "M037"
+      ],
+      "note": ""
+    },
+    {
+      "id": "d00d16d0",
+      "kind": "point",
+      "start": "2026-07-26T20:55:00+00:00",
+      "end": "2026-07-26T20:55:00+00:00",
+      "updated_at": "2026-09-24T13:36:11.591180+00:00",
+      "reasons": [
+        "fail_surge"
+      ],
+      "fail_metrics": [
+        "M965"
+      ],
+      "note": ""
+    },
+    {
+      "id": "9bbaee38",
+      "kind": "range",
+      "start": "2026-07-29T15:10:00+00:00",
+      "end": "2026-07-29T15:25:00+00:00",
+      "updated_at": "2026-09-24T13:01:20.845277+00:00",
+      "reasons": [
+        "rate_degrade",
+        "attempt_drop"
+      ],
+      "fail_metrics": [],
+      "note": ""
+    },
+    {
+      "id": "bdcf7e0a",
+      "kind": "range",
+      "start": "2026-08-02T13:10:00+00:00",
+      "end": "2026-08-02T13:50:00+00:00",
+      "updated_at": "2026-09-24T13:05:03.781418+00:00",
+      "reasons": [
+        "rate_degrade",
+        "attempt_drop"
+      ],
+      "fail_metrics": [],
+      "note": ""
+    },
+    {
+      "id": "911dc02f",
+      "kind": "range",
+      "start": "2026-08-07T07:25:00+00:00",
+      "end": "2026-08-07T07:30:00+00:00",
+      "updated_at": "2026-09-24T13:18:19.854847+00:00",
+      "reasons": [
+        "attempt_drop"
+      ],
+      "fail_metrics": [],
+      "note": ""
+    },
+    {
+      "id": "f18e7c25",
+      "kind": "range",
+      "start": "2026-08-18T17:25:00+00:00",
+      "end": "2026-08-18T17:35:00+00:00",
+      "updated_at": "2026-09-24T13:06:09.255250+00:00",
+      "reasons": [
+        "rate_degrade",
+        "attempt_drop"
+      ],
+      "fail_metrics": [],
+      "note": ""
+    },
+    {
+      "id": "f6d7cf95",
+      "kind": "range",
+      "start": "2026-08-25T13:00:00+00:00",
+      "end": "2026-08-25T13:10:00+00:00",
+      "updated_at": "2026-09-24T13:20:27.470805+00:00",
+      "reasons": [
+        "attempt_drop"
+      ],
+      "fail_metrics": [],
+      "note": ""
+    },
+    {
+      "id": "18003820",
+      "kind": "range",
+      "start": "2026-08-31T13:55:00+00:00",
+      "end": "2026-08-31T15:15:00+00:00",
+      "updated_at": "2026-09-24T13:35:26.601477+00:00",
+      "reasons": [
+        "fail_surge"
+      ],
+      "fail_metrics": [
+        "M855",
+        "M037",
+        "M841"
+      ],
+      "note": ""
+    },
+    {
+      "id": "5bab95e6",
+      "kind": "range",
+      "start": "2026-08-31T15:30:00+00:00",
+      "end": "2026-08-31T16:35:00+00:00",
+      "updated_at": "2026-09-24T13:07:12.602185+00:00",
+      "reasons": [
+        "rate_degrade",
+        "attempt_drop"
+      ],
+      "fail_metrics": [],
+      "note": ""
+    },
+    {
+      "id": "cdea45d1",
+      "kind": "range",
+      "start": "2026-09-01T14:00:00+00:00",
+      "end": "2026-09-01T15:20:00+00:00",
+      "updated_at": "2026-09-24T13:34:14.628794+00:00",
+      "reasons": [
+        "fail_surge"
+      ],
+      "fail_metrics": [
+        "M855",
+        "M037",
+        "M841"
+      ],
+      "note": ""
+    },
+    {
+      "id": "632f9316",
+      "kind": "range",
+      "start": "2026-09-02T13:35:00+00:00",
+      "end": "2026-09-02T15:30:00+00:00",
+      "updated_at": "2026-09-24T13:17:23.791397+00:00",
+      "reasons": [
+        "rate_degrade",
+        "fail_surge"
+      ],
+      "fail_metrics": [
+        "M855",
+        "M841"
+      ],
+      "note": ""
+    }
+  ]
+}
