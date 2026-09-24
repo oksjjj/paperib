@@ -1293,26 +1293,28 @@ def _build_graph(click_mode: str):
         "pan_keep_y",
         "zoom",
     ) and samples:
-        # Heavy arrays: push once per PLMN/pred load. Clientside keeps them on
-        # window.__plotHoverCache so pan/zoom/inspect redraws stay small.
-        # edit_range always gets sample_ms so edge drag can snap to 5 minutes.
+        # sample_ms is heavy (~full PLMN): push once per load; clientside cache
+        # + react merge keep it across pan/zoom. score_* is smaller and must be
+        # present whenever the score panel is on — otherwise a later Plotly.react
+        # that omits them wipes layout.meta before the tip ever ingests, and the
+        # tip shows "(없음)" even on valid.
+        # edit_range always gets sample_ms so edge drag can snap to samples.
         meta["hover_cache_seq"] = int(state.get("hover_cache_seq") or 0)
         if not state.get("_hover_arrays_pushed") or click_mode == "edit_range":
             meta["sample_ms"] = samples
-            if _has_score_panel():
-                score_arr = state.get("_score_hover")
-                if score_arr is None:
-                    score_arr = score_hover_arrays(
-                        state.get("predictions")
-                        if state.get("show_model_preds", True)
-                        else None
-                    )
-                    state["_score_hover"] = score_arr
-                if score_arr is not None:
-                    meta["score_ms"] = score_arr[0]
-                    meta["score_vals"] = score_arr[1]
             state["_hover_arrays_pushed"] = True
         if _has_score_panel():
+            score_arr = state.get("_score_hover")
+            if score_arr is None:
+                score_arr = score_hover_arrays(
+                    state.get("predictions")
+                    if state.get("show_model_preds", True)
+                    else None
+                )
+                state["_score_hover"] = score_arr
+            if score_arr is not None:
+                meta["score_ms"] = score_arr[0]
+                meta["score_vals"] = score_arr[1]
             thr = None
             preds = state.get("predictions") or {}
             ss = preds.get("score_series") or {}
@@ -6130,6 +6132,29 @@ app.clientside_callback(
                     window.__plotHoverCache = cache;
                     return cache;
                 }
+                // Figure updates call this before Plotly.react so arrays are cached
+                // even if the user has not hovered yet.
+                window.__ingestHoverMeta = ingestHoverMeta;
+                window.__withCachedHoverMeta = function(layout) {
+                    if (!layout) return layout;
+                    var meta = Object.assign({}, layout.meta || {});
+                    ingestHoverMeta(meta);
+                    var cache = window.__plotHoverCache || {};
+                    if (cache.sample_ms && cache.sample_ms.length
+                        && !(meta.sample_ms && meta.sample_ms.length)) {
+                        meta.sample_ms = cache.sample_ms;
+                    }
+                    if (cache.score_ms && cache.score_ms.length
+                        && !(meta.score_ms && meta.score_ms.length)) {
+                        meta.score_ms = cache.score_ms;
+                        meta.score_vals = cache.score_vals;
+                    }
+                    if (cache.score_threshold != null && meta.score_threshold == null) {
+                        meta.score_threshold = cache.score_threshold;
+                    }
+                    layout.meta = meta;
+                    return layout;
+                };
 
                 function inScorePanel(clientY) {
                     try {
@@ -6332,6 +6357,53 @@ app.clientside_callback(
             window.__ignoreDataXClampUntil = Date.now() + 1500;
             if (!gd || !window.Plotly) return;
 
+            // Standalone hover-cache helpers (tip install may not have run yet).
+            if (!window.__ingestHoverMeta) {
+                window.__ingestHoverMeta = function(rawMeta) {
+                    var meta = rawMeta || {};
+                    var cache = window.__plotHoverCache || {};
+                    if (meta.hover_cache_seq != null && cache.seq != null
+                        && meta.hover_cache_seq !== cache.seq) {
+                        cache = {seq: meta.hover_cache_seq};
+                    }
+                    if (meta.sample_ms && meta.sample_ms.length) {
+                        cache.sample_ms = meta.sample_ms;
+                    }
+                    if (meta.score_ms && meta.score_ms.length) {
+                        cache.score_ms = meta.score_ms;
+                        cache.score_vals = meta.score_vals;
+                    }
+                    if (meta.score_threshold != null) {
+                        cache.score_threshold = meta.score_threshold;
+                    }
+                    if (meta.hover_cache_seq != null) cache.seq = meta.hover_cache_seq;
+                    window.__plotHoverCache = cache;
+                    return cache;
+                };
+            }
+            if (!window.__withCachedHoverMeta) {
+                window.__withCachedHoverMeta = function(layout) {
+                    if (!layout) return layout;
+                    var meta = Object.assign({}, layout.meta || {});
+                    window.__ingestHoverMeta(meta);
+                    var cache = window.__plotHoverCache || {};
+                    if (cache.sample_ms && cache.sample_ms.length
+                        && !(meta.sample_ms && meta.sample_ms.length)) {
+                        meta.sample_ms = cache.sample_ms;
+                    }
+                    if (cache.score_ms && cache.score_ms.length
+                        && !(meta.score_ms && meta.score_ms.length)) {
+                        meta.score_ms = cache.score_ms;
+                        meta.score_vals = cache.score_vals;
+                    }
+                    if (cache.score_threshold != null && meta.score_threshold == null) {
+                        meta.score_threshold = cache.score_threshold;
+                    }
+                    layout.meta = meta;
+                    return layout;
+                };
+            }
+
             function afterGraphReady() {
                 window.__clampPanToData(gd);
                 window.__installSharedPanelSync(gd);
@@ -6376,6 +6448,14 @@ app.clientside_callback(
                     autosize: true,
                     height: wantH
                 });
+                // Ingest/preserve hover arrays: later figures often omit sample_ms
+                // (one-shot push) and Plotly.react would wipe them from layout.meta
+                // before the tip ever runs — tip then shows score "(없음)".
+                if (window.__withCachedHoverMeta) {
+                    layout = window.__withCachedHoverMeta(layout);
+                } else if (window.__ingestHoverMeta && layout.meta) {
+                    window.__ingestHoverMeta(layout.meta);
+                }
                 window.Plotly.react(gd, figure.data, layout, cfg).then(function() {
                     try { window.Plotly.Plots.resize(gd); } catch (err) {}
                     afterGraphReady();
