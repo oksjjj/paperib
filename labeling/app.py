@@ -3771,7 +3771,10 @@ def _main_body(
         state["label_range_anchor"] = None
         state.pop("place_click_guard_until", None)
         if click_mode != "inspect":
-            state["value_cursor_pos"] = None
+            if state.get("value_cursor_pos") is not None:
+                state["value_cursor_pos"] = None
+                # Bump so Plotly drops the royalblue cursor shape (uirevision).
+                state["cursor_rev"] = int(state.get("cursor_rev") or 0) + 1
         else:
             # Fresh inspect session: don't let a prior click debounce swallow the first pick.
             state["_last_click"] = (None, 0.0)
@@ -4640,6 +4643,14 @@ app.clientside_callback(
             || mode === 'pan' || mode === 'pan_keep_y'
             || mode === 'zoom'
         );
+        // Leaving 값 탐색: drop the blue dotted spike immediately (server
+        // figure rebuild clears the solid value_cursor shape).
+        if (mode !== 'inspect') {
+            var leaveSpike = document.getElementById('place-time-spike');
+            if (leaveSpike) leaveSpike.style.display = 'none';
+            var leaveTip = document.getElementById('place-time-tip');
+            if (leaveTip) leaveTip.style.display = 'none';
+        }
         if (!window.__showPlaceTimeTip) {
             var placeTip = document.getElementById('place-time-tip');
             if (placeTip) placeTip.style.display = 'none';
