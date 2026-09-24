@@ -1,0 +1,53 @@
+.venv/
+.DS_Store
+__pycache__/
+*.py[cod]
+*$py.class
+
+# data/ib_data — paperib; track labels + predictions only
+/data/*
+!/data/.gitkeep
+!/data/README.md
+!/data/ib_data/
+!/data/ib_data/README.md
+!/data/ib_data/labels/
+!/data/ib_data/predictions/
+
+/data/ib_data/*
+!/data/ib_data/README.md
+!/data/ib_data/labels/
+!/data/ib_data/predictions/
+!/data/ib_data/.gitkeep
+
+/data/ib_data/raw/
+# Never commit PLMN/metric de-identification maps (or paste mappings into docs).
+/data/ib_data/pickle/
+
+/data/ib_data/labels/*
+!/data/ib_data/labels/.gitkeep
+!/data/ib_data/labels/*_labels.json
+
+/data/ib_data/predictions/*
+!/data/ib_data/predictions/.gitkeep
+!/data/ib_data/predictions/*_omnianomaly.json
+!/data/ib_data/predictions/*_omnianomaly_*.json
+!/data/ib_data/predictions/*_anomalytransformer.json
+!/data/ib_data/predictions/*_anomalytransformer_*.json
+
+# Public benchmarks: data/{SMD,SMAP,MSL}/{raw,pickle}
+/data/SMD/
+/data/SMAP/
+/data/MSL/
+
+graph/
+analysis/
+results/
+cache/
+labeling/cache/
+
+# OmniAnomaly runtime artifacts (keep source)
+OmniAnomaly/.venv/
+OmniAnomaly/model/
+OmniAnomaly/result/
+OmniAnomaly/log/*
+!OmniAnomaly/log/.gitkeep

@@ -1,0 +1,3 @@
+# Same as OmniAnomaly — use the paperib venv.
+# torch, numpy, pandas, scikit-learn
+-r ../OmniAnomaly/requirements.txt
