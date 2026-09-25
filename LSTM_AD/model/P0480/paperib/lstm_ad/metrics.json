@@ -1,0 +1,27 @@
+{
+  "valid-precision": 0.1553398058252427,
+  "valid-recall": 0.43243243243243246,
+  "valid-f1": 0.22857142857142856,
+  "valid-TP": 16,
+  "valid-FP": 87,
+  "valid-FN": 21,
+  "point": {
+    "tp": 16,
+    "fp": 87,
+    "fn": 21,
+    "tn": 7420,
+    "precision": 0.1553398058252427,
+    "recall": 0.43243243243243246,
+    "f1": 0.22857142857142856
+  },
+  "event": {
+    "n_gt_events": 6,
+    "n_hit_events": 2,
+    "event_recall": 0.3333333333333333,
+    "n_pred_events": 83
+  },
+  "anomaly_ratio": 1.0,
+  "threshold": -0.015306420810520645,
+  "window": 32,
+  "epochs": 10
+}

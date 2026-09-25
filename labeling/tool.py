@@ -187,9 +187,20 @@ REF_LINE = dict(width=REF_LINE_WIDTH, dash=REF_LINE_DASH)
 RATE_METRICS = frozenset({S_RATE_KEY, A_RATE_KEY})
 RATE_Y_RANGE = (0.0, 1.0)
 
+# Dropped from *all* model training / Argos axes (still shown in labeling UI).
+# Almost absent on train, sparse on valid/test, not operationally meaningful.
+EXCLUDED_TRAIN_METRICS: frozenset[str] = frozenset({"M688"})
+
 
 def is_rate_metric(metric: str) -> bool:
     return metric in RATE_METRICS
+
+
+def filter_train_metrics(metrics: list[str] | tuple[str, ...] | None) -> list[str]:
+    """Drop ``EXCLUDED_TRAIN_METRICS`` while preserving order."""
+    if not metrics:
+        return []
+    return [m for m in metrics if m not in EXCLUDED_TRAIN_METRICS]
 
 
 def rate_metrics_available(
@@ -702,49 +713,115 @@ def list_prediction_sources(plmn: str) -> list[dict[str, str]]:
         is_at = source.startswith("anomalytransformer") or doc.get(
             "model"
         ) == "anomalytransformer"
-        model_name = "Anomaly Transformer" if is_at else "OmniAnomaly"
-        run = doc.get("run_name")
-        if not run:
-            stem = source
-            if stem.startswith("anomalytransformer_"):
-                stem = stem[len("anomalytransformer_") :]
-            elif stem == "anomalytransformer":
-                stem = "paperib"
-            elif stem.startswith("omnianomaly_"):
-                stem = stem[len("omnianomaly_") :]
-            elif stem == "omnianomaly":
-                stem = "paperib"
-            # Strip non-default window suffix: comb_w200 → comb
-            run = re.sub(r"_w\d+$", "", stem) or "paperib"
-        cols = doc.get("feature_columns") or []
-        mode = doc.get("feature_mode") or (
-            "all"
-            if run == "paperib"
-            else "selected"
+        is_argos = (
+            source.startswith("argos")
+            or str(doc.get("source") or "").startswith("argos")
+            or str(doc.get("model") or "") == "argos"
         )
-        # Existing exports used window_length=100; default so older JSON still shows it.
-        try:
-            win = int(doc["window_length"]) if doc.get("window_length") is not None else 100
-        except (TypeError, ValueError):
-            win = 100
+        is_classical = (
+            source.startswith("classical")
+            or doc.get("model") == "classical"
+        )
+        is_lstm = (
+            source.startswith("lstm_ad")
+            or doc.get("model") == "lstm_ad"
+        )
         n_seg = len(doc.get("labels") or [])
-        if mode == "all" or run == "paperib":
-            feat = "전체 raw metrics"
-        elif mode == "comb_share" or run == "comb_share":
-            feat = "M971 + other÷M971"
-        elif mode == "comb" or run == "comb":
-            feat = "selected counters + S_RATE/A_RATE"
+
+        if is_argos:
+            # Independent of OmniAnomaly / AT — rule-based overlay.
+            mode_tag = "heuristic" if "heuristic" in source else (
+                str((doc.get("metrics") or {}).get("mode") or doc.get("mode") or "rule")
+            )
+            is_ens = (
+                "ensemble" in source
+                or doc.get("feature_mode") == "argos_ensemble"
+                or (doc.get("metrics") or {}).get("ensemble")
+            )
+            if is_ens:
+                axes = doc.get("ensemble_metrics") or (
+                    (doc.get("metrics") or {}).get("ensemble_metrics") or []
+                )
+                fuse = (doc.get("metrics") or {}).get("fuse") or "or"
+                n_axes = len(axes) if axes else "?"
+                label = (
+                    f"Argos · {mode_tag} · ensemble[{fuse} · {n_axes} axes] "
+                    f"({n_seg}구간)"
+                )
+            else:
+                metric = doc.get("metric") or "metric?"
+                label = f"Argos · {mode_tag} · {metric} ({n_seg}구간)"
+            family = 2
+            view_ord = 0 if is_ens else 1
+            win = 0
+        elif is_classical or is_lstm:
+            run = doc.get("run_name") or "paperib"
+            if is_classical:
+                label = f"Classical · IQR+EWMA · {run} ({n_seg}구간)"
+                family = 3
+            else:
+                try:
+                    win = int(doc["window"]) if doc.get("window") is not None else int(
+                        (doc.get("metrics") or {}).get("window") or 32
+                    )
+                except (TypeError, ValueError):
+                    win = 32
+                label = f"LSTM-AD · forecast residual · {run} · win={win} ({n_seg}구간)"
+                family = 4
+            view_ord = {"paperib": 0, "comb": 1, "comb_share": 2}.get(str(run), 9)
+            if is_classical:
+                win = 0
         else:
-            preview = ",".join(str(c) for c in cols[:4])
-            if len(cols) > 4:
-                preview = f"{preview},…"
-            feat = f"선별 ({preview})"
-        label = (
-            f"{model_name} · {run} · {feat} · win={win} "
-            f"({len(cols)}d, {n_seg}구간)"
-        )
-        family = 0 if not is_at else 1
-        view_ord = {"paperib": 0, "comb": 1, "comb_share": 2}.get(str(run), 9)
+            # OmniAnomaly (default) or Anomaly Transformer only.
+            model_name = "Anomaly Transformer" if is_at else "OmniAnomaly"
+            if not is_at and not (
+                source.startswith("omnianomaly")
+                or source == "omnianomaly"
+                or doc.get("model") in (None, "", "omnianomaly")
+            ):
+                # Unknown model file — show its model/source id, never fake OA.
+                model_name = str(doc.get("model") or source)
+            run = doc.get("run_name")
+            if not run:
+                stem = source
+                if stem.startswith("anomalytransformer_"):
+                    stem = stem[len("anomalytransformer_") :]
+                elif stem == "anomalytransformer":
+                    stem = "paperib"
+                elif stem.startswith("omnianomaly_"):
+                    stem = stem[len("omnianomaly_") :]
+                elif stem == "omnianomaly":
+                    stem = "paperib"
+                # Strip non-default window suffix: comb_w200 → comb
+                run = re.sub(r"_w\d+$", "", stem) or "paperib"
+            cols = doc.get("feature_columns") or []
+            mode = doc.get("feature_mode") or (
+                "all"
+                if run == "paperib"
+                else "selected"
+            )
+            # Existing exports used window_length=100; default so older JSON still shows it.
+            try:
+                win = int(doc["window_length"]) if doc.get("window_length") is not None else 100
+            except (TypeError, ValueError):
+                win = 100
+            if mode == "all" or run == "paperib":
+                feat = "전체 raw metrics"
+            elif mode == "comb_share" or run == "comb_share":
+                feat = "M971 + other÷M971"
+            elif mode == "comb" or run == "comb":
+                feat = "selected counters + S_RATE/A_RATE"
+            else:
+                preview = ",".join(str(c) for c in cols[:4])
+                if len(cols) > 4:
+                    preview = f"{preview},…"
+                feat = f"선별 ({preview})"
+            label = (
+                f"{model_name} · {run} · {feat} · win={win} "
+                f"({len(cols)}d, {n_seg}구간)"
+            )
+            family = 0 if not is_at else 1
+            view_ord = {"paperib": 0, "comb": 1, "comb_share": 2}.get(str(run), 9)
         options.append(
             {
                 "label": label,
@@ -947,6 +1024,147 @@ def best_f1_threshold(
     return best_thr, best_live
 
 
+def is_argos_prediction(predictions: dict[str, Any] | None) -> bool:
+    """True for Argos / IB heuristic rule overlays (not OA/AT score models)."""
+    if not predictions:
+        return False
+    src = str(predictions.get("source") or "")
+    model = str(predictions.get("model") or "")
+    method = str(predictions.get("threshold_method") or "")
+    return (
+        src.startswith("argos")
+        or model == "argos"
+        or method == "argos_rule"
+    )
+
+
+def is_anomalytransformer_prediction(
+    predictions: dict[str, Any] | None,
+    *,
+    source: str | None = None,
+) -> bool:
+    """True for Anomaly Transformer overlays (percentile threshold, not POT)."""
+    src = str(source or (predictions or {}).get("source") or "")
+    model = str((predictions or {}).get("model") or "")
+    method = str((predictions or {}).get("threshold_method") or "")
+    return (
+        src.startswith("anomalytransformer")
+        or model == "anomalytransformer"
+    )
+
+
+def is_baseline_percentile_prediction(
+    predictions: dict[str, Any] | None,
+    *,
+    source: str | None = None,
+) -> bool:
+    """Classical / LSTM-AD (train percentile thr, not POT)."""
+    src = str(source or (predictions or {}).get("source") or "")
+    model = str((predictions or {}).get("model") or "")
+    return (
+        src.startswith("classical")
+        or src.startswith("lstm_ad")
+        or model in ("classical", "lstm_ad")
+    )
+
+
+def primary_threshold_label(
+    predictions: dict[str, Any] | None,
+    *,
+    source: str | None = None,
+) -> dict[str, str]:
+    """UI copy for the primary (``pot``-slot) threshold mode."""
+    src = source or (predictions or {}).get("source")
+    if is_baseline_percentile_prediction(predictions, source=src):
+        model = str((predictions or {}).get("model") or "")
+        if str(src).startswith("classical") or model == "classical":
+            return {
+                "short": "percentile",
+                "title": "[percentile]",
+                "radio": "percentile (train · classical)",
+                "note": (
+                    "primary · train score percentile on −#fires; "
+                    "binary overlay = OR(IQR,EWMA) (not POT)"
+                ),
+                "heading": "Detection metrics — classical IQR+EWMA (valid)",
+                "overlay": "percentile / OR",
+            }
+        return {
+            "short": "percentile",
+            "title": "[percentile]",
+            "radio": "percentile (train residual)",
+            "note": (
+                "primary · LSTM-AD train residual percentile on −MSE (not POT)"
+            ),
+            "heading": "Detection metrics — LSTM-AD percentile vs best-F1 (valid, PA)",
+            "overlay": "percentile",
+        }
+    if is_anomalytransformer_prediction(predictions, source=src):
+        ratio = (predictions or {}).get("anormly_ratio")
+        if ratio is None:
+            ratio = ((predictions or {}).get("metrics") or {}).get("anormly_ratio")
+        try:
+            ratio_s = f"{float(ratio):g}%"
+        except (TypeError, ValueError):
+            ratio_s = "1%"
+        return {
+            "short": "percentile",
+            "title": "[percentile]",
+            "radio": f"percentile (train energy · {ratio_s})",
+            "note": (
+                f"primary · train energy percentile "
+                f"(100 − anormly_ratio={ratio_s}; not POT)"
+            ),
+            "heading": "Detection metrics — percentile vs best-F1 (valid, PA)",
+            "overlay": "percentile",
+        }
+    return {
+        "short": "POT",
+        "title": "[POT]",
+        "radio": "POT (논문 primary)",
+        "note": "primary · POT on train scores (SPOT; 오버레이 기본)",
+        "heading": "Detection metrics — POT vs best-F1 (valid, PA)",
+        "overlay": "POT",
+    }
+
+
+def paper_metrics_from_argos(
+    metrics: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Map Argos ``metrics`` (point / event) for the labeling UI."""
+    m = metrics or {}
+    point = m.get("point") if isinstance(m.get("point"), dict) else None
+    event = m.get("event") if isinstance(m.get("event"), dict) else None
+    if point is None and _as_float(m.get("f1")) is not None:
+        point = m
+    out: dict[str, Any] = {
+        "mode": m.get("mode"),
+        "metric": m.get("metric"),
+        "eval_split": m.get("eval_split") or "valid",
+        "ensemble": bool(m.get("ensemble")),
+        "fuse": m.get("fuse"),
+        "ensemble_metrics": m.get("ensemble_metrics"),
+    }
+    if point:
+        out["point"] = {
+            "precision": _as_float(point.get("precision")),
+            "recall": _as_float(point.get("recall")),
+            "f1": _as_float(point.get("f1")),
+            "TP": point.get("tp", point.get("TP")),
+            "FP": point.get("fp", point.get("FP")),
+            "FN": point.get("fn", point.get("FN")),
+            "TN": point.get("tn", point.get("TN")),
+        }
+    if event:
+        out["event"] = {
+            "event_recall": _as_float(event.get("event_recall")),
+            "n_gt_events": event.get("n_gt_events"),
+            "n_hit_events": event.get("n_hit_events"),
+            "n_pred_events": event.get("n_pred_events"),
+        }
+    return out
+
+
 def paper_metrics_from_ib_saved(metrics: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
     """Map Omni/AT ``metrics`` block → pot / best_f1 UI blocks."""
     m = metrics or {}
@@ -972,39 +1190,54 @@ def paper_metrics_from_ib_saved(metrics: dict[str, Any] | None) -> dict[str, dic
             "threshold": _as_float(m.get("valid-bf-threshold")),
             "note": "oracle · best-F1 on valid labels",
         }
-    # AnomalyTransformer: single valid-f1 (treat as primary / pot slot)
+    # AnomalyTransformer: single valid-f1 → primary (``pot``) slot; UI labels it percentile.
     if "pot" not in out and _as_float(m.get("valid-f1")) is not None:
+        ratio = m.get("anormly_ratio")
+        try:
+            ratio_note = f"anormly_ratio={float(ratio):g}%"
+        except (TypeError, ValueError):
+            ratio_note = "train energy percentile"
         out["pot"] = {
             "precision": _as_float(m.get("valid-precision")),
             "recall": _as_float(m.get("valid-recall")),
             "f1": _as_float(m.get("valid-f1")),
             "threshold": _as_float(m.get("energy_threshold") or m.get("threshold")),
-            "note": "AnomalyTransformer valid metrics",
+            "note": f"AnomalyTransformer · {ratio_note} (not POT)",
         }
     return out
 
 
 def thresholds_from_pred_doc(predictions: dict[str, Any]) -> dict[str, float | None]:
-    """Resolve pot / best_f1 thresholds from a prediction JSON."""
+    """Resolve primary / best_f1 thresholds from a prediction JSON.
+
+    Primary is stored under the ``pot`` key for both OA (POT) and AT (percentile).
+    """
     m = predictions.get("metrics") or {}
     ss = predictions.get("score_series") or {}
+    method = str(predictions.get("threshold_method") or "pot")
     pot = (
         _as_float(m.get("pot-threshold"))
         or _as_float(m.get("valid-pot-threshold"))
         or (
             _as_float(predictions.get("threshold"))
-            if (predictions.get("threshold_method") or "pot") == "pot"
+            if method in ("pot", "percentile", "energy_percentile")
             else None
         )
         or _as_float(ss.get("threshold"))
         or _as_float(predictions.get("threshold"))
     )
-    best = _as_float(m.get("valid-bf-threshold")) or _as_float(m.get("threshold"))
-    # AT energy-scale: display thr is often 0.0 — still treat as pot.
+    best = _as_float(m.get("valid-bf-threshold"))
+    # AT energy-scale: display thr is often 0.0 — still treat as primary.
     if pot is None and predictions.get("score_scale") == "log10_thr_over_energy":
         pot = _as_float(predictions.get("threshold"))
         if pot is None:
             pot = 0.0
+    if pot is None and method in ("percentile", "energy_percentile"):
+        pot = _as_float(m.get("energy_threshold"))
+        if pot is None:
+            pot = _as_float(predictions.get("threshold"))
+            if pot is None:
+                pot = 0.0
     return {"pot": pot, "best_f1": best}
 
 
@@ -1084,8 +1317,40 @@ def enrich_predictions_for_ui(
 
     Keeps original file labels (with attribution) for POT when the export used POT.
     Rebuilds best-F1 segments from the score series; searches thr if missing.
+    Argos rule overlays skip score thresholds and expose point/event metrics.
     """
     doc = dict(predictions)
+    if is_argos_prediction(doc):
+        file_labels = list(doc.get("labels") or [])
+        paper = paper_metrics_from_argos(doc.get("metrics") or {})
+        doc["threshold"] = None
+        doc["threshold_mode"] = "rule"
+        doc["thresholds"] = {"pot": None, "best_f1": None}
+        doc["paper_metrics"] = paper
+        doc["live_by_mode"] = {}
+        doc["labels_by_mode"] = {"rule": file_labels, "pot": file_labels, "best_f1": []}
+        doc["labels"] = file_labels
+        doc["n_pred_segments"] = len(file_labels)
+        doc["n_pred_points"] = int(
+            sum(
+                1
+                if it.get("kind") == "point"
+                else max(
+                    1,
+                    int(
+                        (
+                            pd.to_datetime(it.get("end"), utc=True)
+                            - pd.to_datetime(it.get("start"), utc=True)
+                        ).total_seconds()
+                        / 60
+                    )
+                    + 1,
+                )
+                for it in file_labels
+            )
+        ) if file_labels else 0
+        return doc
+
     mode = threshold_mode if threshold_mode in ("pot", "best_f1") else "pot"
     thresholds = thresholds_from_pred_doc(doc)
     paper = paper_metrics_from_ib_saved(doc.get("metrics") or {})
@@ -1118,7 +1383,11 @@ def enrich_predictions_for_ui(
     pot_thr = thresholds.get("pot")
     method = str(doc.get("threshold_method") or "pot")
     file_labels = list(doc.get("labels") or [])
-    if pot_thr is not None and method == "pot" and file_labels:
+    if pot_thr is not None and method in (
+        "pot",
+        "percentile",
+        "energy_percentile",
+    ) and file_labels:
         labels_by_mode["pot"] = file_labels
     elif pot_thr is not None:
         labels_by_mode["pot"] = rebuild_pred_labels_for_threshold(
@@ -1189,6 +1458,13 @@ def apply_threshold_mode(
 ) -> dict[str, Any]:
     """Switch active overlay labels / threshold without re-searching best-F1."""
     doc = dict(predictions)
+    if is_argos_prediction(doc):
+        labels = list(doc.get("labels") or (doc.get("labels_by_mode") or {}).get("rule") or [])
+        doc["threshold_mode"] = "rule"
+        doc["threshold"] = None
+        doc["labels"] = labels
+        doc["n_pred_segments"] = len(labels)
+        return doc
     mode = threshold_mode if threshold_mode in ("pot", "best_f1") else "pot"
     thresholds = dict(doc.get("thresholds") or thresholds_from_pred_doc(doc))
     labels_by_mode = dict(doc.get("labels_by_mode") or {})

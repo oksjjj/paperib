@@ -1,0 +1,14 @@
+{
+  "eval_split": "valid",
+  "test_held_out": 1,
+  "model": "anomalytransformer",
+  "train_loss": -48.105178256999395,
+  "vali_loss": -30.18286387125651,
+  "valid-n-pred": 192,
+  "valid-n-human": 37,
+  "energy_threshold": 0.00024369590394989504,
+  "anormly_ratio": 1.0,
+  "valid-precision": 0.046875,
+  "valid-recall": 0.24324324324324326,
+  "valid-f1": 0.07860262008733625
+}

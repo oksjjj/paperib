@@ -47,6 +47,9 @@ from tool import (  # noqa: E402
     display_metric,
     display_plmn,
     enrich_predictions_for_ui,
+    is_anomalytransformer_prediction,
+    is_argos_prediction,
+    primary_threshold_label,
     format_kst,
     freeze_shape_editing,
     label_highlight_overlays,
@@ -427,6 +430,97 @@ def _mode_block(
     )
 
 
+def _argos_metrics_children(pred: dict) -> list[Any]:
+    paper = pred.get("paper_metrics") or {}
+    point = paper.get("point") or {}
+    event = paper.get("event") or {}
+    mode = paper.get("mode") or pred.get("source") or "argos"
+    metric = paper.get("metric") or pred.get("metric") or "?"
+    split = paper.get("eval_split") or pred.get("eval_split") or "valid"
+    ens = bool(paper.get("ensemble") or "ensemble" in str(pred.get("source") or ""))
+    title = (
+        f"Detection metrics — Argos ensemble ({mode} · fuse={paper.get('fuse') or '?'} · {split})"
+        if ens
+        else f"Detection metrics — Argos rule ({mode} · {metric} · {split})"
+    )
+    rows: list[Any] = [
+        html.Div(
+            title,
+            style={
+                "fontWeight": "700",
+                "color": "#5b21b6",
+                "marginBottom": "6px",
+            },
+        ),
+        html.Div(
+            (
+                "multi-metric rules → fused score (−#axes); binary thr ≈ OR"
+                if ens
+                else "이진 규칙 출력 · continuous score / POT·best-F1 없음"
+            ),
+            style={"fontSize": "11px", "color": "#64748b", "marginBottom": "6px"},
+        ),
+    ]
+    if ens and paper.get("ensemble_metrics"):
+        rows.append(
+            html.Div(
+                "axes: " + ", ".join(str(x) for x in paper.get("ensemble_metrics") or []),
+                style={"fontSize": "11px", "color": "#475569", "marginBottom": "4px"},
+            )
+        )
+    if point:
+        rows.append(
+            html.Div(
+                "Point-wise: "
+                + _fmt_prf(
+                    point.get("precision"),
+                    point.get("recall"),
+                    point.get("f1"),
+                    tp=point.get("TP"),
+                    fp=point.get("FP"),
+                    fn=point.get("FN"),
+                ),
+                style={"fontFamily": "monospace", "fontSize": "12px", "marginBottom": "2px"},
+            )
+        )
+    else:
+        rows.append(html.I("저장된 point metrics가 없습니다."))
+    if event:
+        er = event.get("event_recall")
+        er_s = f"{er:.4f}" if isinstance(er, (int, float)) else "—"
+        rows.append(
+            html.Div(
+                f"Event: recall={er_s}  "
+                f"hit={event.get('n_hit_events')} / gt={event.get('n_gt_events')}  "
+                f"pred_events={event.get('n_pred_events')}",
+                style={"fontFamily": "monospace", "fontSize": "12px"},
+            )
+        )
+    rows.append(
+        html.Div(
+            f"예측 구간 {len(pred.get('labels') or [])}개"
+            + (
+                f" · rule={os.path.basename(str(pred.get('rule_path')))}"
+                if pred.get("rule_path")
+                else ""
+            ),
+            style={"fontSize": "12px", "marginTop": "6px", "color": "#334155"},
+        )
+    )
+    return rows
+
+
+def _threshold_mode_options(pred: dict | None = None, source: str | None = None) -> list[dict]:
+    """Radio labels for primary thr — POT (OA) vs percentile (AT)."""
+    pred = pred if pred is not None else (state.get("predictions") or {})
+    src = source if source is not None else state.get("pred_source")
+    primary = primary_threshold_label(pred, source=src)
+    return [
+        {"label": primary["radio"], "value": "pot"},
+        {"label": "best-F1 (oracle)", "value": "best_f1"},
+    ]
+
+
 def _detection_metrics_children() -> list[Any]:
     pred = state.get("predictions") or {}
     if not pred.get("labels") and not pred.get("thresholds") and not state.get("pred_source"):
@@ -436,13 +530,21 @@ def _detection_metrics_children() -> list[Any]:
                 "`run_plmn.py`로 학습·export 후 다시 로드하세요."
             )
         ]
+    if is_argos_prediction(pred) or str(state.get("pred_source") or "").startswith(
+        "argos"
+    ):
+        return _argos_metrics_children(pred)
     mode = state.get("threshold_mode") or pred.get("threshold_mode") or "pot"
     thresholds = pred.get("thresholds") or {}
     paper = pred.get("paper_metrics") or {}
     live_by = pred.get("live_by_mode") or {}
+    primary = primary_threshold_label(pred, source=state.get("pred_source"))
+    # Prefer note from saved paper block when present.
+    pot_paper = paper.get("pot") or None
+    pot_note = (pot_paper or {}).get("note") or primary["note"]
     rows: list[Any] = [
         html.Div(
-            "Detection metrics — POT vs best-F1 (valid, PA)",
+            primary["heading"],
             style={
                 "fontWeight": "700",
                 "color": "#5b21b6",
@@ -452,12 +554,12 @@ def _detection_metrics_children() -> list[Any]:
     ]
     rows.append(
         _mode_block(
-            "[POT]",
+            primary["title"],
             active=(mode == "pot"),
             thr=thresholds.get("pot"),
-            paper=paper.get("pot") or None,
+            paper=pot_paper,
             live=live_by.get("pot"),
-            note="primary · train score로 threshold (오버레이 기본)",
+            note=pot_note,
         )
     )
     rows.append(
@@ -470,9 +572,10 @@ def _detection_metrics_children() -> list[Any]:
             note="oracle · valid 사람 라벨로 threshold 탐색",
         )
     )
+    overlay_name = primary["overlay"] if mode == "pot" else "best-F1"
     rows.append(
         html.Div(
-            f"현재 그래프 오버레이 = {'POT' if mode == 'pot' else 'best-F1'} "
+            f"현재 그래프 오버레이 = {overlay_name} "
             f"· 예측 구간 {len(pred.get('labels') or [])}개",
             style={"fontSize": "12px", "marginTop": "4px", "color": "#334155"},
         )
@@ -861,6 +964,11 @@ def _zoom_to_label_item(item: dict) -> None:
     state["x_full_view"] = False
     state.pop("_offscreen_cleared", None)
     _reset_y()
+    # Same as 줌인/전체: bump layout uirevision so Plotly.react accepts the
+    # new x window and the Y-auto ranges from `_reset_y` (stable uirevision
+    # otherwise keeps the previous metrics/rate/score y ranges).
+    state["x_gen"] = int(state.get("x_gen") or 0) + 1
+    state["_force_ui_rev"] = time.time()
     _arm_select_guard()
 
 
@@ -887,6 +995,8 @@ def _zoom_to_model_pred_item(item: dict) -> None:
     state["x_full_view"] = False
     state.pop("_offscreen_cleared", None)
     _reset_y()
+    state["x_gen"] = int(state.get("x_gen") or 0) + 1
+    state["_force_ui_rev"] = time.time()
     _arm_select_guard()
 
 
@@ -1043,6 +1153,7 @@ def _edit_label_shape_meta(
 
 
 def _has_score_panel() -> bool:
+    """Predictions include an anomaly-score series (may still be empty in-window)."""
     preds = state.get("predictions") or {}
     if not state.get("show_model_preds", True):
         return False
@@ -1050,12 +1161,24 @@ def _has_score_panel() -> bool:
     return bool(ss.get("times") and ss.get("scores"))
 
 
+def _score_subplot_active() -> bool:
+    """Match ``build_figure``: score row only when this x-window has finite scores.
+
+    If we assume a 3-row layout while the figure is 2-row (train / no-score
+    zoom), metrics Y-auto is written to a missing yaxis3 and the metrics panel
+    (yaxis2) gets the rate scale instead — Y 자동 looks broken after anomaly zoom.
+    """
+    if not _has_score_panel():
+        return False
+    return _visible_score_y_bounds() is not None
+
+
 def _metric_axis_row() -> int:
-    return 3 if _has_score_panel() else 2
+    return 3 if _score_subplot_active() else 2
 
 
 def _rate_axis_row() -> int:
-    return 2 if _has_score_panel() else 1
+    return 2 if _score_subplot_active() else 1
 
 
 def _build_graph(click_mode: str):
@@ -1096,6 +1219,8 @@ def _build_graph(click_mode: str):
     prev = state.get("zoom_rendered")
     if prev is not None and not _same_time_window(rendered, prev):
         state["zoom_rendered_prev"] = prev
+        # Accept new x (and Y-auto) on figure replace — same need as axis-cmd.
+        state["x_gen"] = int(state.get("x_gen") or 0) + 1
     state["zoom_rendered"] = rendered
     # Keep layout.uirevision stable across zoom (PLMN + metric_rev). Bumping
     # metric_rev on filter changes forces Scattergl to drop removed series —
@@ -1120,7 +1245,7 @@ def _build_graph(click_mode: str):
         ),
         # Match dcc.Graph style height so select/redraw never shrinks the plot.
         # autosize stays True so width keeps filling the host.
-        height=480 if _has_score_panel() else 420,
+        height=480 if _score_subplot_active() else 420,
         autosize=True,
     )
 
@@ -1141,7 +1266,8 @@ def _build_graph(click_mode: str):
     y_locked = True
     y_bounds = _effective_y_bounds()
     rate_bounds = _visible_rate_y_bounds()
-    score_bounds = _visible_score_y_bounds() if _has_score_panel() else None
+    score_active = _score_subplot_active()
+    score_bounds = _visible_score_y_bounds() if score_active else None
     state["y_rendered"] = y_bounds
     state["rate_y_rendered"] = rate_bounds
     state["score_y_rendered"] = score_bounds
@@ -1149,7 +1275,7 @@ def _build_graph(click_mode: str):
     metric_row = _metric_axis_row()
     # Include score in y_gen uirevision so Y 자동 / zoom refresh the score panel.
     score_rev = f"ys:{state.get('y_gen', 0)}"
-    if _has_score_panel():
+    if score_active:
         if score_bounds is None:
             fig.update_yaxes(
                 title_text="score",
@@ -1300,6 +1426,8 @@ def _build_graph(click_mode: str):
         # tip shows "(없음)" even on valid.
         # edit_range always gets sample_ms so edge drag can snap to samples.
         meta["hover_cache_seq"] = int(state.get("hover_cache_seq") or 0)
+        # Clientside tip: only the real score subplot may show score text.
+        meta["score_panel"] = bool(_score_subplot_active())
         if not state.get("_hover_arrays_pushed") or click_mode == "edit_range":
             meta["sample_ms"] = samples
             state["_hover_arrays_pushed"] = True
@@ -2114,7 +2242,7 @@ def _make_axis_cmd(
         rb = _visible_rate_y_bounds()
         state["rate_y_rendered"] = rb
         rate_payload = [float(rb[0]), float(rb[1])] if rb else None
-        if _has_score_panel():
+        if _score_subplot_active():
             sb = _visible_score_y_bounds()
             state["score_y_rendered"] = sb
             score_payload = [float(sb[0]), float(sb[1])] if sb else None
@@ -2456,6 +2584,10 @@ _START_METRIC_VALS: list = []
 _START_MODEL_PRED_OPTS: list = []
 _START_MODEL_SRC_OPTS: list = []
 _START_MODEL_SRC_VALUE = "omnianomaly"
+_START_THR_OPTS: list = [
+    {"label": "POT (논문 primary)", "value": "pot"},
+    {"label": "best-F1 (oracle)", "value": "best_f1"},
+]
 if _START_PLMN:
     _do_load(_START_PLMN, "zoom")
     _START_FIGURE = _build_graph("zoom")
@@ -2465,6 +2597,7 @@ if _START_PLMN:
     _START_MODEL_PRED_OPTS = _model_pred_options()
     _START_MODEL_SRC_OPTS = _model_pred_source_options()
     _START_MODEL_SRC_VALUE = _default_pred_source(_START_MODEL_SRC_OPTS)
+    _START_THR_OPTS = _threshold_mode_options()
 else:
     _START_FIGURE = _empty_figure()
 
@@ -2790,10 +2923,7 @@ app.layout = html.Div(
                 html.B("Threshold", style={"marginLeft": "8px", "marginRight": "6px"}),
                 dcc.RadioItems(
                     id="threshold-mode",
-                    options=[
-                        {"label": "POT (논문 primary)", "value": "pot"},
-                        {"label": "best-F1 (oracle)", "value": "best_f1"},
-                    ],
+                    options=_START_THR_OPTS,
                     value="pot",
                     inline=True,
                     style={"fontSize": "13px"},
@@ -3039,6 +3169,8 @@ def _sync_model_pred_source(plmn):
     Output("detection-metrics", "children", allow_duplicate=True),
     Output("metric-filter", "options", allow_duplicate=True),
     Output("metric-filter", "value", allow_duplicate=True),
+    Output("threshold-mode", "style"),
+    Output("threshold-mode", "options"),
     Input("model-pred-source", "value"),
     State("click-mode", "value"),
     prevent_initial_call=True,
@@ -3046,7 +3178,7 @@ def _sync_model_pred_source(plmn):
 def _switch_model_pred_source(source, click_mode):
     plmn = state.get("plmn")
     if not plmn or not source:
-        return (no_update,) * 7
+        return (no_update,) * 9
     state["pred_source"] = source
     preds = load_predictions(plmn, source=source)
     state["selected_pred_id"] = None
@@ -3073,6 +3205,15 @@ def _switch_model_pred_source(source, click_mode):
     _apply_pred_metric_visibility(state["predictions"])
     opts = _model_pred_options()
     m_opts, m_vals = _metric_filter_ui()
+    is_argos = is_argos_prediction(state.get("predictions")) or str(source).startswith(
+        "argos"
+    )
+    thr_style = (
+        {"fontSize": "13px", "opacity": "0.35", "pointerEvents": "none"}
+        if is_argos
+        else {"fontSize": "13px"}
+    )
+    thr_opts = _threshold_mode_options(state.get("predictions"), source)
     return (
         _build_graph(click_mode or "zoom"),
         opts,
@@ -3081,6 +3222,8 @@ def _switch_model_pred_source(source, click_mode):
         _detection_metrics_children(),
         m_opts,
         m_vals,
+        thr_style,
+        thr_opts,
     )
 
 
@@ -6156,15 +6299,26 @@ app.clientside_callback(
                     return layout;
                 };
 
+                function scorePanelVisible() {
+                    // 3-row layout: yaxis=score, yaxis2=rate, yaxis3=metrics.
+                    // 2-row (no score subplot): never treat the top drag as score —
+                    // otherwise the tip covers S_RATE hover with "Anomaly score".
+                    var fl = gd._fullLayout;
+                    if (fl && fl.yaxis3) return true;
+                    var meta = (gd.layout && gd.layout.meta) || {};
+                    return meta.score_panel === true;
+                }
+
                 function inScorePanel(clientY) {
                     try {
+                        if (!scorePanelVisible()) return false;
                         var meta = (gd.layout && gd.layout.meta) || {};
                         var cache = ingestHoverMeta(meta);
                         var hasScore = (cache.score_ms && cache.score_ms.length)
                             || cache.score_threshold != null
                             || meta.score_threshold != null;
                         if (!hasScore) return false;
-                        // Prefer drag layers (reliable DOM); score is the topmost.
+                        // Score is the topmost nsewdrag only when the score row exists.
                         var drags = gd.querySelectorAll('.nsewdrag');
                         var best = null;
                         var bestTop = Infinity;
@@ -6457,6 +6611,34 @@ app.clientside_callback(
                     window.__ingestHoverMeta(layout.meta);
                 }
                 window.Plotly.react(gd, figure.data, layout, cfg).then(function() {
+                    // Re-apply server axis ranges after react. Stable/layout races
+                    // (e.g. anomaly select→줌) can leave the previous Y scale even
+                    // when the figure JSON already has Y-auto bounds for the window.
+                    try {
+                        var patch = {};
+                        var meta = layout.meta || {};
+                        var zx = meta.zoom_x;
+                        if (zx && zx.length === 2) {
+                            patch['xaxis.autorange'] = false;
+                            patch['xaxis.range'] = [zx[0], zx[1]];
+                            patch['xaxis2.autorange'] = false;
+                            patch['xaxis2.range'] = [zx[0], zx[1]];
+                            patch['xaxis3.autorange'] = false;
+                            patch['xaxis3.range'] = [zx[0], zx[1]];
+                        }
+                        ['yaxis', 'yaxis2', 'yaxis3'].forEach(function(key) {
+                            var ax = layout[key];
+                            if (!ax || !ax.range || ax.range.length !== 2) return;
+                            if (ax.autorange) return;
+                            patch[key + '.autorange'] = false;
+                            patch[key + '.range'] = [ax.range[0], ax.range[1]];
+                            patch[key + '.fixedrange'] = true;
+                        });
+                        if (Object.keys(patch).length) {
+                            return window.Plotly.relayout(gd, patch);
+                        }
+                    } catch (err) {}
+                }).then(function() {
                     try { window.Plotly.Plots.resize(gd); } catch (err) {}
                     afterGraphReady();
                 });

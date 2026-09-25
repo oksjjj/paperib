@@ -1,5 +1,8 @@
 .venv/
 .DS_Store
+.env
+.env.*
+!.env.example
 __pycache__/
 *.py[cod]
 *$py.class
@@ -33,6 +36,11 @@ __pycache__/
 !/data/ib_data/predictions/*_omnianomaly_*.json
 !/data/ib_data/predictions/*_anomalytransformer.json
 !/data/ib_data/predictions/*_anomalytransformer_*.json
+!/data/ib_data/predictions/*_argos*.json
+
+# Argos upstream clone + IB export/runtime artifacts
+/Argos/
+/data/ib_data/argos/
 
 # Public benchmarks: data/{SMD,SMAP,MSL}/{raw,pickle}
 /data/SMD/

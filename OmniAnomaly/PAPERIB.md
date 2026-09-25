@@ -2,6 +2,8 @@
 
 PyTorch OmniAnomaly (KDD'19 port) vendored for paperib PLMN timeseries.
 
+**논문용 관찰 (mild vs severe, POT, baseline 실익):** [docs/OmniAnomaly-관찰.md](../docs/OmniAnomaly-관찰.md) (한국어).
+
 ## Setup
 
 From the paperib repo root:

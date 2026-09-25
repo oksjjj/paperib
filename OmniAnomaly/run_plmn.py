@@ -68,9 +68,11 @@ from omni_anomaly.utils import (  # noqa: E402
 
 from tool import (  # noqa: E402
     A_RATE_KEY,
+    EXCLUDED_TRAIN_METRICS,
     M971_COL,
     S_RATE_KEY,
     ensure_score_column,
+    filter_train_metrics,
     is_rate_metric,
     load_labels,
     load_plmn,
@@ -82,10 +84,7 @@ from tool import (  # noqa: E402
 
 PRED_DIR = os.path.join(PAPERIB_ROOT, "data", "ib_data", "predictions")
 
-# paperib (all-raw) training defaults: drop metrics that are almost never seen on
-# train but appear sparsely on valid/test and are not operationally meaningful.
-EXCLUDED_TRAIN_METRICS: frozenset[str] = frozenset({"M688"})
-
+# Re-export: single source is labeling/tool.EXCLUDED_TRAIN_METRICS (e.g. M688).
 # --- COMB runs (see COMB_RUNS.md) ---
 COMB_RUN_NAME = "comb"
 COMB_SHARE_RUN_NAME = "comb_share"
@@ -111,6 +110,9 @@ COMB_LEGACY_COLUMNS: list[str] = list(COMB_RAW_COUNTERS) + [S_RATE_KEY, A_RATE_K
 COMB_ENGINEERED_COLUMNS: list[str] = [M971_COL] + [
     c for c in COMB_RAW_COUNTERS if c != M971_COL
 ]
+_bad = EXCLUDED_TRAIN_METRICS.intersection(COMB_RAW_COUNTERS)
+if _bad:
+    raise RuntimeError(f"COMB_RAW_COUNTERS includes excluded metrics: {sorted(_bad)}")
 KNOWN_RUN_NAMES = frozenset({"paperib", COMB_RUN_NAME, COMB_SHARE_RUN_NAME})
 DEFAULT_WINDOW_LENGTH = 100
 
@@ -372,6 +374,12 @@ def prepare_arrays(
         values = np.nan_to_num(values, nan=0.0, posinf=0.0, neginf=0.0)
     else:
         cols = list(feature_columns) if feature_columns else available_raw
+        cols = filter_train_metrics(cols)
+        if not cols:
+            raise SystemExit(
+                f"no feature columns left for {plmn} after excluding "
+                f"{sorted(EXCLUDED_TRAIN_METRICS)}"
+            )
         missing = [c for c in cols if c not in available_all]
         if missing:
             raise SystemExit(f"features not in {plmn}: {missing}")
