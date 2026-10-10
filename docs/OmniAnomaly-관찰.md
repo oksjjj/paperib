@@ -105,7 +105,7 @@ OmniAnomaly는 재구성 능력이 좋아 **mild한 운영 이상을 정상처�
 
 ## 7. 다음에 검증할 것 (체크리스트)
 
-- [ ] severe ∩ OA 탐지 vs **규칙 baseline** overlap (P/R, event)
+- [ ] severe ∩ OA 탐지 vs **Argos heuristic / 축 규칙** overlap (P/R, event)
 - [ ] mild 구간 score 분포 vs 정상 (PLMN 여러 개)
 - [ ] `comb_share`에서 mild score가 thr 쪽으로 움직이는지
 - [ ] reason별 (`fail_surge` vs `attempt_drop` only) strata 표

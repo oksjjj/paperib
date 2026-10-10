@@ -2,7 +2,9 @@
 
 PyTorch OmniAnomaly (KDD'19 port) vendored for paperib PLMN timeseries.
 
-**논문용 관찰 (mild vs severe, POT, baseline 실익):** [docs/OmniAnomaly-관찰.md](../docs/OmniAnomaly-관찰.md) (한국어).
+**논문용 관찰 (mild vs severe, POT, baseline 실익):** [docs/OmniAnomaly-관찰.md](../docs/OmniAnomaly-관찰.md) (한국어).  
+**하이퍼 · 학습 명령:** [docs/baseline-하이퍼파라미터.md](../docs/baseline-하이퍼파라미터.md) §3.  
+**참고 논문:** Su et al., KDD 2019 — [docs/baseline-참고논문.md](../docs/baseline-참고논문.md).
 
 ## Setup
 
@@ -18,12 +20,15 @@ pip install -r OmniAnomaly/requirements.txt
 ```bash
 cd OmniAnomaly
 ../.venv/bin/python run_plmn.py --plmn P0480 --max_epoch 10 --stable_train
+# 최종 표: ... --with_test
 ```
 
 Default chronological split: **train 60% / valid 20% / test 20%**.
 
-- Detection metrics + UI overlay use **valid only**
-- **test is held out** (not scored) until you intentionally evaluate it
+- Thr from **train** (POT); runner default = **valid only** (HP tuning)
+- Pass `--with_test` to also score/export test for the final table
+- Labeling UI keeps valid|test Metrics controls
+- Oracle best-F1 (UI) still searches on **valid** labels only
 - Change ratios with `--train_ratio` / `--valid_ratio`
 - **`paperib` features:** all raw counters except `EXCLUDED_TRAIN_METRICS` (default: `M688`). See `docs/논문-설계-노트.md`.
 

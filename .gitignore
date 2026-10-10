@@ -1,30 +1,44 @@
-.venv/
+# --- OS / editor ---
 .DS_Store
+.idea/
+*.swp
+
+# --- Secrets ---
 .env
 .env.*
 !.env.example
+
+# --- Python ---
+.venv/
+venv/
 __pycache__/
 *.py[cod]
 *$py.class
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
 
-# data/ib_data — paperib; track labels + predictions only
+# --- Model weights / serialized arrays (anywhere) ---
+*.pt
+*.pth
+*.ckpt
+*.pkl
+events.out.tfevents.*
+*.log
+
+# --- Data: track only README / labels / predictions ---
 /data/*
 !/data/.gitkeep
 !/data/README.md
 !/data/ib_data/
-!/data/ib_data/README.md
-!/data/ib_data/labels/
-!/data/ib_data/predictions/
 
 /data/ib_data/*
+!/data/ib_data/.gitkeep
 !/data/ib_data/README.md
 !/data/ib_data/labels/
 !/data/ib_data/predictions/
-!/data/ib_data/.gitkeep
-
-/data/ib_data/raw/
-# Never commit PLMN/metric de-identification maps (or paste mappings into docs).
-/data/ib_data/pickle/
 
 /data/ib_data/labels/*
 !/data/ib_data/labels/.gitkeep
@@ -32,30 +46,27 @@ __pycache__/
 
 /data/ib_data/predictions/*
 !/data/ib_data/predictions/.gitkeep
-!/data/ib_data/predictions/*_omnianomaly.json
-!/data/ib_data/predictions/*_omnianomaly_*.json
-!/data/ib_data/predictions/*_anomalytransformer.json
-!/data/ib_data/predictions/*_anomalytransformer_*.json
-!/data/ib_data/predictions/*_argos*.json
+!/data/ib_data/predictions/*.json
 
-# Argos upstream clone + IB export/runtime artifacts
+# Never commit PLMN/metric de-identification maps (or paste mappings into docs).
+
+# --- Upstream clones ---
 /Argos/
-/data/ib_data/argos/
 
-# Public benchmarks: data/{SMD,SMAP,MSL}/{raw,pickle}
-/data/SMD/
-/data/SMAP/
-/data/MSL/
+# --- Experiment artifacts (keep source) ---
+/OmniAnomaly/model/
+/OmniAnomaly/result/
+/OmniAnomaly/log/*
+!/OmniAnomaly/log/.gitkeep
 
+# AnomalyTransformer/model/ also holds source (attn.py, …); ignore run subdirs only.
+/AnomalyTransformer/model/*/
+/AnomalyTransformer/result/
+
+/LSTM_AD/model/
+
+# --- Local outputs / caches ---
 graph/
 analysis/
 results/
 cache/
-labeling/cache/
-
-# OmniAnomaly runtime artifacts (keep source)
-OmniAnomaly/.venv/
-OmniAnomaly/model/
-OmniAnomaly/result/
-OmniAnomaly/log/*
-!OmniAnomaly/log/.gitkeep

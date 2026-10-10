@@ -896,25 +896,140 @@ def human_anomaly_mask(
     return mask
 
 
-def _eval_region_mask(df: pd.DataFrame, predictions: dict[str, Any]) -> np.ndarray:
-    """Mask for the scored eval split (valid window from export, else finite scores)."""
+def _eval_region_mask(
+    df: pd.DataFrame,
+    predictions: dict[str, Any],
+    *,
+    metrics_split: str = "valid",
+) -> np.ndarray:
+    """Mask for metrics eval window (``valid`` or ``test``) ∩ finite scores."""
     n = len(df)
     if n == 0:
         return np.zeros(0, dtype=bool)
     times = pd.to_datetime(df["time"], utc=True)
     split = predictions.get("split") or {}
-    v0 = split.get("valid_time_start")
-    v1 = split.get("valid_time_end")
-    if v0 and v1:
-        t0 = pd.to_datetime(v0, utc=True)
-        t1 = pd.to_datetime(v1, utc=True)
-        region = (times >= t0) & (times <= t1)
+    which = "test" if metrics_split == "test" else "valid"
+    if which == "test":
+        t0 = split.get("test_time_start")
+        t1 = split.get("test_time_end") or split.get("time_end")
     else:
-        region = np.ones(n, dtype=bool)
+        t0 = split.get("valid_time_start")
+        t1 = split.get("valid_time_end")
+    if t0 and t1:
+        a = pd.to_datetime(t0, utc=True)
+        b = pd.to_datetime(t1, utc=True)
+        region = (times >= a) & (times <= b)
+    elif which == "valid" and split.get("valid_time_start") and split.get("valid_time_end"):
+        a = pd.to_datetime(split["valid_time_start"], utc=True)
+        b = pd.to_datetime(split["valid_time_end"], utc=True)
+        region = (times >= a) & (times <= b)
+    else:
+        region = np.ones(n, dtype=bool) if which == "valid" else np.zeros(n, dtype=bool)
     if ANOMALY_SCORE_KEY in df.columns:
         scored = np.isfinite(df[ANOMALY_SCORE_KEY].to_numpy(dtype=np.float64))
         region = region & scored
     return np.asarray(region, dtype=bool)
+
+
+def available_metrics_splits(predictions: dict[str, Any] | None) -> list[str]:
+    """Which eval windows the UI can show metrics for."""
+    if not predictions:
+        return ["valid"]
+    out = ["valid"]
+    m = predictions.get("metrics") or {}
+    es = str(predictions.get("eval_split") or "")
+    split = predictions.get("split") or {}
+    has_test_meta = (
+        "test" in es
+        or m.get("test-f1") is not None
+        or m.get("test-precision") is not None
+        or m.get("test-n-pred") is not None
+        or (split.get("test_time_start") and split.get("test_time_end"))
+    )
+    if has_test_meta:
+        out.append("test")
+    return out
+
+
+def paper_metrics_from_ib_saved(
+    metrics: dict[str, Any] | None,
+    *,
+    metrics_split: str = "valid",
+) -> dict[str, dict[str, Any]]:
+    """Map Omni/AT/baseline ``metrics`` → pot / best_f1 UI blocks for one split."""
+    m = metrics or {}
+    out: dict[str, dict[str, Any]] = {}
+    split = "test" if metrics_split == "test" else "valid"
+
+    if split == "valid":
+        if (
+            _as_float(m.get("valid-pot-f1")) is not None
+            or _as_float(m.get("pot-threshold")) is not None
+        ):
+            out["pot"] = {
+                "precision": _as_float(m.get("valid-pot-precision")),
+                "recall": _as_float(m.get("valid-pot-recall")),
+                "f1": _as_float(m.get("valid-pot-f1")),
+                "TP": m.get("valid-pot-TP"),
+                "FP": m.get("valid-pot-FP"),
+                "FN": m.get("valid-pot-FN"),
+                "threshold": _as_float(
+                    m.get("valid-pot-threshold") or m.get("pot-threshold")
+                ),
+                "note": "primary · POT from train scores (valid eval, PA)",
+            }
+        if (
+            _as_float(m.get("valid-bf-f1")) is not None
+            or _as_float(m.get("valid-bf-threshold")) is not None
+        ):
+            out["best_f1"] = {
+                "precision": _as_float(m.get("valid-bf-precision")),
+                "recall": _as_float(m.get("valid-bf-recall")),
+                "f1": _as_float(m.get("valid-bf-f1")),
+                "threshold": _as_float(m.get("valid-bf-threshold")),
+                "note": "oracle · best-F1 PA on valid labels (saved)",
+            }
+        if "pot" not in out and _as_float(m.get("valid-f1")) is not None:
+            ratio = m.get("anormly_ratio")
+            try:
+                ratio_note = f"anormly_ratio={float(ratio):g}%"
+            except (TypeError, ValueError):
+                ratio_note = "train energy / residual percentile"
+            out["pot"] = {
+                "precision": _as_float(m.get("valid-precision")),
+                "recall": _as_float(m.get("valid-recall")),
+                "f1": _as_float(m.get("valid-f1")),
+                "threshold": _as_float(
+                    m.get("energy_threshold") or m.get("threshold")
+                ),
+                "note": f"primary thr on valid · {ratio_note}",
+            }
+    else:
+        # test: primary thr applied on test (point metrics from export when present)
+        if _as_float(m.get("test-f1")) is not None:
+            out["pot"] = {
+                "precision": _as_float(m.get("test-precision")),
+                "recall": _as_float(m.get("test-recall")),
+                "f1": _as_float(m.get("test-f1")),
+                "TP": m.get("test-TP"),
+                "FP": m.get("test-FP"),
+                "FN": m.get("test-FN"),
+                "threshold": _as_float(
+                    m.get("pot-threshold")
+                    or m.get("energy_threshold")
+                    or m.get("threshold")
+                ),
+                "note": (
+                    "primary thr (train) applied on **test** · point-wise "
+                    "(not re-fit on test)"
+                ),
+            }
+            if _as_float(m.get("test-pa-f1")) is not None:
+                out["pot"]["note"] += (
+                    f"; saved PA F1={float(m['test-pa-f1']):.4f}"
+                )
+
+    return out
 
 
 def _point_metrics(pred: np.ndarray, actual: np.ndarray) -> dict[str, float]:
@@ -990,13 +1105,22 @@ def compute_detection_metrics(
     return out
 
 
+SCORE_THRESHOLD_MODES = ("pot", "best_f1_point", "best_f1")
+
+
 def best_f1_threshold(
     score: np.ndarray,
     y_true: np.ndarray,
     *,
     n_steps: int = 200,
+    objective: str = "point_adjust",
 ) -> tuple[float | None, dict[str, Any] | None]:
-    """Oracle threshold maximizing point-adjusted F1 on the given window."""
+    """Oracle threshold maximizing F1 on the given window.
+
+    ``objective``:
+      - ``point`` — raw point-wise F1 (no PA)
+      - ``point_adjust`` — point-adjusted F1 (default; OmniAnomaly-style)
+    """
     score = np.asarray(score, dtype=np.float64).reshape(-1)
     y = np.asarray(y_true, dtype=bool).reshape(-1)
     n = min(len(score), len(y))
@@ -1006,6 +1130,7 @@ def best_f1_threshold(
         return None, None
     s = score[ok]
     yy = y[ok]
+    metric_key = "point" if objective == "point" else "point_adjust"
     lo, hi = float(np.min(s)), float(np.max(s))
     if not np.isfinite(lo) or lo >= hi:
         thr = lo if np.isfinite(lo) else None
@@ -1016,7 +1141,7 @@ def best_f1_threshold(
     best_live: dict[str, Any] | None = None
     for thr in np.linspace(lo, hi, max(2, int(n_steps))):
         live = compute_detection_metrics(s, yy, float(thr))
-        f1 = float((live.get("point_adjust") or {}).get("f1") or -1.0)
+        f1 = float((live.get(metric_key) or {}).get("f1") or -1.0)
         if f1 > best_f1:
             best_f1 = f1
             best_thr = float(thr)
@@ -1075,6 +1200,36 @@ def primary_threshold_label(
 ) -> dict[str, str]:
     """UI copy for the primary (``pot``-slot) threshold mode."""
     src = source or (predictions or {}).get("source")
+    if is_argos_prediction(predictions) or str(src or "").startswith("argos"):
+        paper = (predictions or {}).get("paper_metrics") or {}
+        metrics = (predictions or {}).get("metrics") or {}
+        fuse = paper.get("fuse") or metrics.get("fuse") or "or"
+        thr = paper.get("score_threshold")
+        if thr is None:
+            thr = metrics.get("score_threshold")
+        thr_s = f"≥{thr}" if thr is not None else "rule"
+        ens = bool(
+            paper.get("ensemble")
+            or metrics.get("ensemble")
+            or "ensemble" in str(src or "")
+        )
+        if ens:
+            radio = f"rule / fuse={fuse} ({thr_s})"
+            note = (
+                f"Argos multi-metric rules · fuse={fuse} · "
+                f"score_threshold={thr_s} (not POT / percentile)"
+            )
+        else:
+            radio = "rule (Argos binary)"
+            note = "Argos per-metric rule output · binary (not POT / percentile)"
+        return {
+            "short": "rule",
+            "title": "[rule]",
+            "radio": radio,
+            "note": note,
+            "heading": "Detection metrics — Argos rule / fuse (not POT)",
+            "overlay": "rule",
+        }
     if is_baseline_percentile_prediction(predictions, source=src):
         model = str((predictions or {}).get("model") or "")
         if str(src).startswith("classical") or model == "classical":
@@ -1086,7 +1241,10 @@ def primary_threshold_label(
                     "primary · train score percentile on −#fires; "
                     "binary overlay = OR(IQR,EWMA) (not POT)"
                 ),
-                "heading": "Detection metrics — classical IQR+EWMA (valid)",
+                "heading": (
+                    "Detection metrics — classical IQR+EWMA vs best-F1 "
+                    "point / PA (valid)"
+                ),
                 "overlay": "percentile / OR",
             }
         return {
@@ -1096,7 +1254,10 @@ def primary_threshold_label(
             "note": (
                 "primary · LSTM-AD train residual percentile on −MSE (not POT)"
             ),
-            "heading": "Detection metrics — LSTM-AD percentile vs best-F1 (valid, PA)",
+            "heading": (
+                "Detection metrics — LSTM-AD percentile vs best-F1 "
+                "point / PA (valid)"
+            ),
             "overlay": "percentile",
         }
     if is_anomalytransformer_prediction(predictions, source=src):
@@ -1115,7 +1276,9 @@ def primary_threshold_label(
                 f"primary · train energy percentile "
                 f"(100 − anormly_ratio={ratio_s}; not POT)"
             ),
-            "heading": "Detection metrics — percentile vs best-F1 (valid, PA)",
+            "heading": (
+                "Detection metrics — percentile vs best-F1 point / PA (valid)"
+            ),
             "overlay": "percentile",
         }
     return {
@@ -1123,7 +1286,7 @@ def primary_threshold_label(
         "title": "[POT]",
         "radio": "POT (논문 primary)",
         "note": "primary · POT on train scores (SPOT; 오버레이 기본)",
-        "heading": "Detection metrics — POT vs best-F1 (valid, PA)",
+        "heading": "Detection metrics — POT vs best-F1 point / PA (valid)",
         "overlay": "POT",
     }
 
@@ -1143,6 +1306,8 @@ def paper_metrics_from_argos(
         "eval_split": m.get("eval_split") or "valid",
         "ensemble": bool(m.get("ensemble")),
         "fuse": m.get("fuse"),
+        "score_threshold": m.get("score_threshold"),
+        "fuse_detail": m.get("fuse_detail"),
         "ensemble_metrics": m.get("ensemble_metrics"),
     }
     if point:
@@ -1165,80 +1330,49 @@ def paper_metrics_from_argos(
     return out
 
 
-def paper_metrics_from_ib_saved(metrics: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
-    """Map Omni/AT ``metrics`` block → pot / best_f1 UI blocks."""
-    m = metrics or {}
-    out: dict[str, dict[str, Any]] = {}
-    # OmniAnomaly IB export: valid-pot-*
-    if _as_float(m.get("valid-pot-f1")) is not None or _as_float(m.get("pot-threshold")) is not None:
-        out["pot"] = {
-            "precision": _as_float(m.get("valid-pot-precision")),
-            "recall": _as_float(m.get("valid-pot-recall")),
-            "f1": _as_float(m.get("valid-pot-f1")),
-            "TP": m.get("valid-pot-TP"),
-            "FP": m.get("valid-pot-FP"),
-            "FN": m.get("valid-pot-FN"),
-            "threshold": _as_float(m.get("valid-pot-threshold") or m.get("pot-threshold")),
-            "note": "primary · POT from train scores (valid eval)",
-        }
-    # OmniAnomaly optional best-F1 (bf_search)
-    if _as_float(m.get("valid-bf-f1")) is not None or _as_float(m.get("valid-bf-threshold")) is not None:
-        out["best_f1"] = {
-            "precision": _as_float(m.get("valid-bf-precision")),
-            "recall": _as_float(m.get("valid-bf-recall")),
-            "f1": _as_float(m.get("valid-bf-f1")),
-            "threshold": _as_float(m.get("valid-bf-threshold")),
-            "note": "oracle · best-F1 on valid labels",
-        }
-    # AnomalyTransformer: single valid-f1 → primary (``pot``) slot; UI labels it percentile.
-    if "pot" not in out and _as_float(m.get("valid-f1")) is not None:
-        ratio = m.get("anormly_ratio")
-        try:
-            ratio_note = f"anormly_ratio={float(ratio):g}%"
-        except (TypeError, ValueError):
-            ratio_note = "train energy percentile"
-        out["pot"] = {
-            "precision": _as_float(m.get("valid-precision")),
-            "recall": _as_float(m.get("valid-recall")),
-            "f1": _as_float(m.get("valid-f1")),
-            "threshold": _as_float(m.get("energy_threshold") or m.get("threshold")),
-            "note": f"AnomalyTransformer · {ratio_note} (not POT)",
-        }
-    return out
-
-
 def thresholds_from_pred_doc(predictions: dict[str, Any]) -> dict[str, float | None]:
-    """Resolve primary / best_f1 thresholds from a prediction JSON.
+    """Resolve primary / oracle thresholds from a prediction JSON.
 
-    Primary is stored under the ``pot`` key for both OA (POT) and AT (percentile).
+    Keys (UI order): ``pot`` (primary), ``best_f1_point``, ``best_f1`` (PA).
+    Primary is under ``pot`` for both OA (POT) and AT/baselines (percentile).
+    Saved ``valid-bf-*`` is PA (OmniAnomaly ``bf_search``); point oracle is live-only.
+
+    Important: do **not** treat ``predictions["threshold"]`` / ``score_series.threshold``
+    as the primary thr after a UI mode switch — those track the *active* overlay thr.
+    Prefer metrics / cached ``thresholds["pot"]``.
     """
     m = predictions.get("metrics") or {}
     ss = predictions.get("score_series") or {}
     method = str(predictions.get("threshold_method") or "pot")
+    cached = predictions.get("thresholds") or {}
+
+    # Primary (label-free) thr from export metrics first.
     pot = (
         _as_float(m.get("pot-threshold"))
         or _as_float(m.get("valid-pot-threshold"))
-        or (
-            _as_float(predictions.get("threshold"))
-            if method in ("pot", "percentile", "energy_percentile")
-            else None
-        )
-        or _as_float(ss.get("threshold"))
-        or _as_float(predictions.get("threshold"))
     )
-    best = _as_float(m.get("valid-bf-threshold"))
-    # AT energy-scale: display thr is often 0.0 — still treat as primary.
+    if pot is None and method in ("percentile", "energy_percentile", "pot"):
+        # Classical / LSTM store train percentile under metrics.threshold.
+        pot = _as_float(m.get("threshold"))
     if pot is None and predictions.get("score_scale") == "log10_thr_over_energy":
-        pot = _as_float(predictions.get("threshold"))
-        if pot is None:
-            pot = 0.0
+        pot = 0.0
     if pot is None and method in ("percentile", "energy_percentile"):
         pot = _as_float(m.get("energy_threshold"))
-        if pot is None:
-            pot = _as_float(predictions.get("threshold"))
-            if pot is None:
-                pot = 0.0
-    return {"pot": pot, "best_f1": best}
+    # Cached primary from a prior enrich (stable across mode switches).
+    if pot is None:
+        pot = _as_float(cached.get("pot"))
+    # Fresh file load only: fall back to top-level / score_series thr.
+    if pot is None and not cached:
+        pot = _as_float(ss.get("threshold")) or _as_float(predictions.get("threshold"))
+
+    best_pa = _as_float(m.get("valid-bf-threshold"))
+    if best_pa is None:
+        best_pa = _as_float(cached.get("best_f1"))
+    return {
+        "pot": pot,
+        "best_f1_point": _as_float(cached.get("best_f1_point")),
+        "best_f1": best_pa,
+    }
 
 
 def mask_to_pred_labels(
@@ -1312,23 +1446,40 @@ def enrich_predictions_for_ui(
     human_labels: list[dict[str, Any]] | None,
     *,
     threshold_mode: str = "pot",
+    metrics_split: str = "valid",
 ) -> dict[str, Any]:
     """Attach dual-threshold metrics + mode-specific labels for the labeling UI.
 
     Keeps original file labels (with attribution) for POT when the export used POT.
-    Rebuilds best-F1 segments from the score series; searches thr if missing.
+    Rebuilds oracle segments from the score series; searches thr if missing.
+    Modes (score models): ``pot`` → ``best_f1_point`` → ``best_f1`` (PA).
+    ``metrics_split`` selects valid vs test for live P/R/F1 (thr still train/valid-oracle).
     Argos rule overlays skip score thresholds and expose point/event metrics.
     """
     doc = dict(predictions)
+    split_choice = "test" if metrics_split == "test" else "valid"
+    if split_choice == "test" and "test" not in available_metrics_splits(doc):
+        split_choice = "valid"
+    doc["metrics_eval_split"] = split_choice
+
     if is_argos_prediction(doc):
         file_labels = list(doc.get("labels") or [])
         paper = paper_metrics_from_argos(doc.get("metrics") or {})
         doc["threshold"] = None
         doc["threshold_mode"] = "rule"
-        doc["thresholds"] = {"pot": None, "best_f1": None}
+        doc["thresholds"] = {
+            "pot": None,
+            "best_f1_point": None,
+            "best_f1": None,
+        }
         doc["paper_metrics"] = paper
         doc["live_by_mode"] = {}
-        doc["labels_by_mode"] = {"rule": file_labels, "pot": file_labels, "best_f1": []}
+        doc["labels_by_mode"] = {
+            "rule": file_labels,
+            "pot": file_labels,
+            "best_f1_point": [],
+            "best_f1": [],
+        }
         doc["labels"] = file_labels
         doc["n_pred_segments"] = len(file_labels)
         doc["n_pred_points"] = int(
@@ -1351,69 +1502,114 @@ def enrich_predictions_for_ui(
         ) if file_labels else 0
         return doc
 
-    mode = threshold_mode if threshold_mode in ("pot", "best_f1") else "pot"
+    mode = (
+        threshold_mode
+        if threshold_mode in SCORE_THRESHOLD_MODES
+        else "pot"
+    )
     thresholds = thresholds_from_pred_doc(doc)
-    paper = paper_metrics_from_ib_saved(doc.get("metrics") or {})
+    paper = paper_metrics_from_ib_saved(
+        doc.get("metrics") or {}, metrics_split=split_choice
+    )
 
-    region = _eval_region_mask(df, doc)
+    # Oracle thr always fit on **valid** (never on test).
+    region_valid = _eval_region_mask(df, doc, metrics_split="valid")
+    region = _eval_region_mask(df, doc, metrics_split=split_choice)
     y_full = human_anomaly_mask(df, human_labels)
     if ANOMALY_SCORE_KEY in df.columns and region.any():
         score = df[ANOMALY_SCORE_KEY].to_numpy(dtype=np.float64)
         score_e = np.where(region, score, np.nan)
-        y_e = y_full & region
     else:
         score_e = np.array([], dtype=np.float64)
-        y_e = np.array([], dtype=bool)
 
-    # Resolve best-F1 thr: saved → live search.
-    if thresholds.get("best_f1") is None and len(score_e) and y_e.any():
-        bf_thr, _ = best_f1_threshold(score_e[region], y_full[region])
-        thresholds["best_f1"] = bf_thr
+    if ANOMALY_SCORE_KEY in df.columns and region_valid.any() and y_full[region_valid].any():
+        score_all = df[ANOMALY_SCORE_KEY].to_numpy(dtype=np.float64)
+        s_val = score_all[region_valid]
+        y_val = y_full[region_valid]
+        # Point oracle always live on valid; PA uses saved thr when present.
+        bf_pt, _ = best_f1_threshold(s_val, y_val, objective="point")
+        thresholds["best_f1_point"] = bf_pt
+        if thresholds.get("best_f1") is None:
+            bf_pa, _ = best_f1_threshold(s_val, y_val, objective="point_adjust")
+            thresholds["best_f1"] = bf_pa
 
     live_by_mode: dict[str, Any] = {}
-    for mkey, mthr in thresholds.items():
-        if mthr is None or not len(score_e):
-            continue
-        live_by_mode[mkey] = compute_detection_metrics(
-            score_e[region], y_full[region], mthr
-        )
+    if region.any() and len(score_e):
+        for mkey, mthr in thresholds.items():
+            if mthr is None:
+                continue
+            live_by_mode[mkey] = compute_detection_metrics(
+                score_e[region], y_full[region], mthr
+            )
 
-    # Labels per mode
+    # Labels per mode (full series — overlay not clipped to metrics_split)
     labels_by_mode: dict[str, list] = {}
     pot_thr = thresholds.get("pot")
     method = str(doc.get("threshold_method") or "pot")
-    file_labels = list(doc.get("labels") or [])
+    prev_by_mode = doc.get("labels_by_mode") or {}
+    # Freeze export-file labels once so mode switches cannot overwrite pot overlays
+    # with the currently active (e.g. best-F1) segment list.
+    export_labels = doc.get("export_labels")
+    if export_labels is None:
+        if prev_by_mode.get("pot") is not None and doc.get("threshold_mode") in (
+            None,
+            "pot",
+        ):
+            export_labels = list(prev_by_mode.get("pot") or [])
+        elif not prev_by_mode:
+            export_labels = list(doc.get("labels") or [])
+        else:
+            export_labels = list(prev_by_mode.get("pot") or [])
+        doc["export_labels"] = export_labels
+    else:
+        export_labels = list(export_labels)
+
     if pot_thr is not None and method in (
         "pot",
         "percentile",
         "energy_percentile",
-    ) and file_labels:
-        labels_by_mode["pot"] = file_labels
+    ) and export_labels and split_choice == "valid":
+        # Prefer attribution-bearing export labels when viewing valid.
+        labels_by_mode["pot"] = export_labels
     elif pot_thr is not None:
         labels_by_mode["pot"] = rebuild_pred_labels_for_threshold(
             df, doc, float(pot_thr), id_prefix="pot"
         )
     else:
-        labels_by_mode["pot"] = file_labels
+        labels_by_mode["pot"] = export_labels
 
-    bf_thr = thresholds.get("best_f1")
-    if bf_thr is not None:
-        labels_by_mode["best_f1"] = rebuild_pred_labels_for_threshold(
-            df, doc, float(bf_thr), id_prefix="bf"
-        )
-    else:
-        labels_by_mode["best_f1"] = []
+    for mode_key, prefix in (
+        ("best_f1_point", "bfpt"),
+        ("best_f1", "bf"),
+    ):
+        mthr = thresholds.get(mode_key)
+        if mthr is not None:
+            labels_by_mode[mode_key] = rebuild_pred_labels_for_threshold(
+                df, doc, float(mthr), id_prefix=prefix
+            )
+        else:
+            labels_by_mode[mode_key] = []
 
     if mode not in labels_by_mode or (
-        mode == "best_f1" and not labels_by_mode.get("best_f1") and labels_by_mode.get("pot")
+        mode in ("best_f1", "best_f1_point")
+        and not labels_by_mode.get(mode)
+        and labels_by_mode.get("pot")
     ):
         if thresholds.get(mode) is None:
             mode = "pot" if thresholds.get("pot") is not None else mode
 
     thr = thresholds.get(mode)
     if thr is None:
-        thr = thresholds.get("pot") or thresholds.get("best_f1")
-        if thr is not None and mode == "best_f1" and thresholds.get("best_f1") is None:
+        thr = (
+            thresholds.get("pot")
+            or thresholds.get("best_f1_point")
+            or thresholds.get("best_f1")
+        )
+        if (
+            thr is not None
+            and mode in ("best_f1", "best_f1_point")
+            and thresholds.get(mode) is None
+        ):
             mode = "pot"
 
     active_labels = labels_by_mode.get(mode) or []
@@ -1465,7 +1661,11 @@ def apply_threshold_mode(
         doc["labels"] = labels
         doc["n_pred_segments"] = len(labels)
         return doc
-    mode = threshold_mode if threshold_mode in ("pot", "best_f1") else "pot"
+    mode = (
+        threshold_mode
+        if threshold_mode in SCORE_THRESHOLD_MODES
+        else "pot"
+    )
     thresholds = dict(doc.get("thresholds") or thresholds_from_pred_doc(doc))
     labels_by_mode = dict(doc.get("labels_by_mode") or {})
     if not labels_by_mode:
@@ -1476,11 +1676,12 @@ def apply_threshold_mode(
             None,
             threshold_mode=mode,
         )
-    if mode == "best_f1" and not labels_by_mode.get("best_f1"):
-        thr = thresholds.get("best_f1")
+    prefix = {"best_f1_point": "bfpt", "best_f1": "bf"}.get(mode, "pred")
+    if mode in ("best_f1", "best_f1_point") and not labels_by_mode.get(mode):
+        thr = thresholds.get(mode)
         if thr is not None and ANOMALY_SCORE_KEY in df.columns:
-            labels_by_mode["best_f1"] = rebuild_pred_labels_for_threshold(
-                df, doc, float(thr), id_prefix="bf"
+            labels_by_mode[mode] = rebuild_pred_labels_for_threshold(
+                df, doc, float(thr), id_prefix=prefix
             )
         else:
             mode = "pot"
@@ -2728,11 +2929,37 @@ def label_line(item: dict[str, Any]) -> str:
     return f"{text}  ({item.get('id')})"
 
 
+def pred_chrono_split_tag(
+    item: dict[str, Any],
+    predictions: dict[str, Any] | None,
+) -> str:
+    """``VALID`` / ``TEST`` / ``TRAIN`` for a pred segment (by start time)."""
+    if not item:
+        return ""
+    split = (predictions or {}).get("split") or {}
+    v0 = split.get("valid_time_start")
+    t0 = split.get("test_time_start")
+    if not v0 or not t0:
+        return ""
+    try:
+        start = pd.to_datetime(item.get("start"), utc=True)
+        valid_start = pd.to_datetime(v0, utc=True)
+        test_start = pd.to_datetime(t0, utc=True)
+    except (TypeError, ValueError):
+        return ""
+    if start >= test_start:
+        return "TEST"
+    if start >= valid_start:
+        return "VALID"
+    return "TRAIN"
+
+
 def pred_line(
     item: dict[str, Any],
     *,
     feature_mode: str | None = None,
     with_contrib: bool = True,
+    predictions: dict[str, Any] | None = None,
 ) -> str:
     """One-line description of a model prediction (with top contributing metrics)."""
     kind = (item.get("kind") or "point").lower()
@@ -2742,6 +2969,9 @@ def pred_line(
         text = f"[점] model · {start}"
     else:
         text = f"[구간] model · {start} → {end}"
+    split_tag = pred_chrono_split_tag(item, predictions)
+    if split_tag:
+        text = f"[{split_tag}] {text}"
     if with_contrib:
         tops = item.get("top_metrics") or []
         if tops:

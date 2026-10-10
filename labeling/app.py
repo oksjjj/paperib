@@ -47,6 +47,7 @@ from tool import (  # noqa: E402
     display_metric,
     display_plmn,
     enrich_predictions_for_ui,
+    available_metrics_splits,
     is_anomalytransformer_prediction,
     is_argos_prediction,
     primary_threshold_label,
@@ -68,6 +69,7 @@ from tool import (  # noqa: E402
     is_rate_metric,
     overlay_metrics_available,
     pred_line,
+    pred_chrono_split_tag,
     rate_metrics_available,
     A_RATE_KEY,
     M971_COL,
@@ -138,7 +140,8 @@ state: dict = {
     "predictions": None,
     "pred_source": "omnianomaly",
     "selected_pred_id": None,
-    "threshold_mode": "pot",  # "pot" | "best_f1"
+    "threshold_mode": "pot",  # "pot" | "best_f1_point" | "best_f1" (PA)
+    "metrics_eval_split": "valid",  # "valid" | "test"
     # Draft label reasons (applied to new placements; mirrored from selected label).
     "draft_reasons": [],
     "draft_fail_metrics": [],
@@ -280,25 +283,92 @@ def _ui_feature_mode_for_display(preds: dict | None = None) -> str | None:
     return mode
 
 
+def _metrics_split_wanted() -> str:
+    """Current Metrics radio: ``valid`` or ``test``."""
+    return (
+        state.get("metrics_eval_split")
+        or (state.get("predictions") or {}).get("metrics_eval_split")
+        or "valid"
+    )
+
+
+def _pred_matches_metrics_split(
+    item: dict,
+    pred_doc: dict | None = None,
+    *,
+    metrics_split: str | None = None,
+) -> bool:
+    """True if pred segment belongs to the Metrics valid/test window."""
+    wanted = (metrics_split or _metrics_split_wanted()).lower()
+    tag = pred_chrono_split_tag(item, pred_doc or state.get("predictions"))
+    if not tag:
+        # No split meta → keep (legacy exports).
+        return True
+    if wanted == "test":
+        return tag == "TEST"
+    return tag == "VALID"
+
+
+def _model_pred_items(*, metrics_split: str | None = None) -> list[dict]:
+    pred = state.get("predictions") or {}
+    wanted = metrics_split or _metrics_split_wanted()
+    return [
+        x
+        for x in (pred.get("labels") or [])
+        if _pred_matches_metrics_split(x, pred, metrics_split=wanted)
+    ]
+
+
+def _predictions_for_display() -> dict | None:
+    """Predictions doc with labels filtered to Metrics valid/test selection."""
+    pred = state.get("predictions")
+    if not pred:
+        return None
+    items = _model_pred_items()
+    if len(items) == len(pred.get("labels") or []):
+        return pred
+    out = dict(pred)
+    out["labels"] = items
+    out["n_pred_segments"] = len(items)
+    return out
+
+
 def _model_pred_options():
     pred = state.get("predictions") or {}
-    items = pred.get("labels") or []
+    items = _model_pred_items()
     mode = state.get("threshold_mode") or pred.get("threshold_mode") or "pot"
-    mode_tag = "POT" if mode == "pot" else "best-F1"
+    primary = primary_threshold_label(pred, source=state.get("pred_source"))
+    if mode in ("rule", "argos_rule") or is_argos_prediction(pred):
+        mode_tag = "rule"
+    elif mode == "pot":
+        mode_tag = primary["short"]
+    elif mode == "best_f1_point":
+        mode_tag = "best-F1·point"
+    elif mode == "best_f1":
+        mode_tag = "best-F1·PA"
+    else:
+        mode_tag = str(mode)
     # Short labels — full attribution is shown in the panel below (keeps
     # dropdown usable when Anomaly Transformer emits hundreds of segments).
-    return [
-        {
-            "label": f"[{mode_tag}] {pred_line(x, with_contrib=False)}",
-            "value": x["id"],
-        }
-        for x in items
-    ]
+    opts = []
+    for x in items:
+        split_tag = pred_chrono_split_tag(x, pred)
+        line = pred_line(x, with_contrib=False, predictions=None)
+        if split_tag:
+            label = f"[{split_tag}] [{mode_tag}] {line}"
+        else:
+            label = f"[{mode_tag}] {line}"
+        opts.append({"label": label, "value": x["id"]})
+    return opts
 
 
 def _pred_by_id(pred_id: str | None) -> dict | None:
     if not pred_id:
         return None
+    for item in _model_pred_items():
+        if item.get("id") == pred_id:
+            return item
+    # Fall back to full list (e.g. selection from before a Metrics switch).
     for item in (state.get("predictions") or {}).get("labels") or []:
         if item.get("id") == pred_id:
             return item
@@ -437,9 +507,13 @@ def _argos_metrics_children(pred: dict) -> list[Any]:
     mode = paper.get("mode") or pred.get("source") or "argos"
     metric = paper.get("metric") or pred.get("metric") or "?"
     split = paper.get("eval_split") or pred.get("eval_split") or "valid"
+    fuse = paper.get("fuse") or "?"
+    score_thr = paper.get("score_threshold")
+    thr_s = f"≥{score_thr}" if score_thr is not None else "—"
     ens = bool(paper.get("ensemble") or "ensemble" in str(pred.get("source") or ""))
     title = (
-        f"Detection metrics — Argos ensemble ({mode} · fuse={paper.get('fuse') or '?'} · {split})"
+        f"Detection metrics — Argos ensemble "
+        f"({mode} · fuse={fuse} · thr {thr_s} · {split})"
         if ens
         else f"Detection metrics — Argos rule ({mode} · {metric} · {split})"
     )
@@ -454,9 +528,10 @@ def _argos_metrics_children(pred: dict) -> list[Any]:
         ),
         html.Div(
             (
-                "multi-metric rules → fused score (−#axes); binary thr ≈ OR"
+                f"준지도 규칙 · fuse={fuse} · score_threshold {thr_s} "
+                f"(−#axes UI score) · POT/percentile/best-F1 해당 없음"
                 if ens
-                else "이진 규칙 출력 · continuous score / POT·best-F1 없음"
+                else "준지도 이진 규칙 출력 · POT/percentile/best-F1 해당 없음"
             ),
             style={"fontSize": "11px", "color": "#64748b", "marginBottom": "6px"},
         ),
@@ -511,14 +586,34 @@ def _argos_metrics_children(pred: dict) -> list[Any]:
 
 
 def _threshold_mode_options(pred: dict | None = None, source: str | None = None) -> list[dict]:
-    """Radio labels for primary thr — POT (OA) vs percentile (AT)."""
+    """Radio: primary thr → best-F1 point → best-F1 PA (Argos: rule only)."""
     pred = pred if pred is not None else (state.get("predictions") or {})
     src = source if source is not None else state.get("pred_source")
+    if is_argos_prediction(pred) or str(src or "").startswith("argos"):
+        primary = primary_threshold_label(pred, source=src)
+        return [{"label": primary["radio"], "value": "rule"}]
     primary = primary_threshold_label(pred, source=src)
     return [
         {"label": primary["radio"], "value": "pot"},
-        {"label": "best-F1 (oracle)", "value": "best_f1"},
+        {"label": "best-F1 point (oracle)", "value": "best_f1_point"},
+        {"label": "best-F1 PA (oracle)", "value": "best_f1"},
     ]
+
+
+def _threshold_mode_value_for_pred(
+    pred: dict | None = None, source: str | None = None
+) -> str:
+    """Selected radio value for the current model (Argos → rule, else pot-slot)."""
+    pred = pred if pred is not None else (state.get("predictions") or {})
+    src = source if source is not None else state.get("pred_source")
+    if is_argos_prediction(pred) or str(src or "").startswith("argos"):
+        return "rule"
+    mode = state.get("threshold_mode") or pred.get("threshold_mode") or "pot"
+    if mode in ("rule", "argos_rule"):
+        return "pot"
+    if mode in ("pot", "best_f1_point", "best_f1"):
+        return mode
+    return "pot"
 
 
 def _detection_metrics_children() -> list[Any]:
@@ -535,22 +630,37 @@ def _detection_metrics_children() -> list[Any]:
     ):
         return _argos_metrics_children(pred)
     mode = state.get("threshold_mode") or pred.get("threshold_mode") or "pot"
+    metrics_split = (
+        state.get("metrics_eval_split")
+        or pred.get("metrics_eval_split")
+        or "valid"
+    )
     thresholds = pred.get("thresholds") or {}
     paper = pred.get("paper_metrics") or {}
     live_by = pred.get("live_by_mode") or {}
     primary = primary_threshold_label(pred, source=state.get("pred_source"))
-    # Prefer note from saved paper block when present.
     pot_paper = paper.get("pot") or None
     pot_note = (pot_paper or {}).get("note") or primary["note"]
+    split_tag = "test" if metrics_split == "test" else "valid"
     rows: list[Any] = [
         html.Div(
-            primary["heading"],
+            f"{primary['heading']} · metrics on {split_tag}",
             style={
                 "fontWeight": "700",
                 "color": "#5b21b6",
                 "marginBottom": "6px",
             },
-        )
+        ),
+        html.Div(
+            (
+                f"표시 구간 = {split_tag}. "
+                "primary thr는 train에서 고정 · oracle thr는 valid 라벨로만 탐색 "
+                "(test에 재적합하지 않음)."
+                if split_tag == "test"
+                else "표시 구간 = valid. primary thr = train · oracle = valid 라벨."
+            ),
+            style={"fontSize": "11px", "color": "#64748b", "marginBottom": "6px"},
+        ),
     ]
     rows.append(
         _mode_block(
@@ -564,19 +674,40 @@ def _detection_metrics_children() -> list[Any]:
     )
     rows.append(
         _mode_block(
-            "[best-F1]",
+            "[best-F1 point]",
+            active=(mode == "best_f1_point"),
+            thr=thresholds.get("best_f1_point"),
+            paper=paper.get("best_f1_point") or None,
+            live=live_by.get("best_f1_point"),
+            note=(
+                f"oracle thr · valid 라벨 point-F1 최대 "
+                f"→ metrics on {split_tag} (PA 없음)"
+            ),
+        )
+    )
+    rows.append(
+        _mode_block(
+            "[best-F1 PA]",
             active=(mode == "best_f1"),
             thr=thresholds.get("best_f1"),
             paper=paper.get("best_f1") or None,
             live=live_by.get("best_f1"),
-            note="oracle · valid 사람 라벨로 threshold 탐색",
+            note=(
+                f"oracle thr · valid 라벨 PA-F1 최대 "
+                f"→ metrics on {split_tag}"
+            ),
         )
     )
-    overlay_name = primary["overlay"] if mode == "pot" else "best-F1"
+    if mode == "pot":
+        overlay_name = primary["overlay"]
+    elif mode == "best_f1_point":
+        overlay_name = "best-F1 point"
+    else:
+        overlay_name = "best-F1 PA"
     rows.append(
         html.Div(
-            f"현재 그래프 오버레이 = {overlay_name} "
-            f"· 예측 구간 {len(pred.get('labels') or [])}개",
+            f"· 예측 구간 {len(_model_pred_items())}개 ({split_tag}) "
+            f"· metrics={split_tag}",
             style={"fontSize": "12px", "marginTop": "4px", "color": "#334155"},
         )
     )
@@ -590,24 +721,40 @@ def _enrich_current_predictions(*, threshold_mode: str | None = None) -> None:
     if df is None or not preds:
         return
     mode = threshold_mode or state.get("threshold_mode") or "pot"
+    msplit = state.get("metrics_eval_split") or "valid"
     human = ((state.get("doc") or {}).get("labels")) or []
     state["predictions"] = enrich_predictions_for_ui(
-        df, preds, human, threshold_mode=mode
+        df,
+        preds,
+        human,
+        threshold_mode=mode,
+        metrics_split=msplit,
     )
     state["threshold_mode"] = state["predictions"].get("threshold_mode") or mode
+    state["metrics_eval_split"] = (
+        state["predictions"].get("metrics_eval_split") or msplit
+    )
+
+
+def _metrics_split_options(pred: dict | None = None) -> list[dict]:
+    splits = available_metrics_splits(
+        pred if pred is not None else state.get("predictions")
+    )
+    return [{"label": s, "value": s} for s in splits]
 
 
 def _model_attr_children(item: dict | None):
     if item is None:
-        n = len((state.get("predictions") or {}).get("labels") or [])
+        n = len(_model_pred_items())
+        split_tag = _metrics_split_wanted()
         if n == 0:
             return html.I(
-                "모델 예측 파일이 없거나 구간이 없습니다. "
+                f"모델 예측 파일이 없거나 {split_tag} 구간이 없습니다. "
                 "`run_plmn.py`로 학습·export 후 다시 로드하세요."
             )
         return html.I(
-            f"모델 예측 {n}개 — 보라색 구간/점을 클릭하거나 목록에서 고르면 "
-            "이상으로 본 기여 metric(상위)이 표시됩니다."
+            f"모델 예측 {n}개 ({split_tag}) — 보라색 구간/점을 클릭하거나 "
+            "목록에서 고르면 이상으로 본 기여 metric(상위)이 표시됩니다."
         )
 
     pred_doc = state.get("predictions") or {}
@@ -616,12 +763,18 @@ def _model_attr_children(item: dict | None):
     if not tops:
         return html.Span(
             [
-                html.B(pred_line(item, feature_mode=feat_mode)),
+                html.B(
+                    pred_line(
+                        item,
+                        feature_mode=feat_mode,
+                        predictions=state.get("predictions"),
+                    )
+                ),
                 html.Br(),
                 html.I(
                     "기여 metric 정보가 없습니다. "
-                    "(POT export 구간만 attribution이 포함됩니다. "
-                    "best-F1은 점수·threshold로 재구성한 구간입니다.)"
+                    "(POT/percentile export 구간만 attribution이 포함됩니다. "
+                    "best-F1 point·PA는 점수·threshold로 재구성한 구간입니다.)"
                 ),
             ]
         )
@@ -656,7 +809,14 @@ def _model_attr_children(item: dict | None):
                     "marginBottom": "4px",
                 },
             ),
-            html.Div(pred_line(item, feature_mode=feat_mode), style={"marginBottom": "4px"}),
+            html.Div(
+                pred_line(
+                    item,
+                    feature_mode=feat_mode,
+                    predictions=state.get("predictions"),
+                ),
+                style={"marginBottom": "4px"},
+            ),
             html.Ul(rows, style={"margin": "0 0 4px 18px", "padding": 0}),
             html.Div(note, style={"fontSize": "11px", "color": "#64748b"}),
         ]
@@ -830,9 +990,8 @@ def _pred_at_time(ts, *, point_tol_seconds: float | None = None):
     """Return the best model-prediction segment at `ts` (same hit rules as labels)."""
     if not state.get("show_model_preds", True):
         return None
-    preds = state.get("predictions") or {}
     return _interval_hit_at_time(
-        preds.get("labels") or [],
+        _model_pred_items(),
         ts,
         point_tol_seconds=point_tol_seconds,
     )
@@ -1031,11 +1190,7 @@ def _zoom_to_chrono_split(which: str) -> bool:
 
 
 def _model_pred_ids() -> list[str]:
-    return [
-        str(x["id"])
-        for x in (state.get("predictions") or {}).get("labels") or []
-        if x.get("id")
-    ]
+    return [str(x["id"]) for x in _model_pred_items() if x.get("id")]
 
 
 def _neighbor_model_pred_id(current: str | None, delta: int) -> str | None:
@@ -1202,7 +1357,7 @@ def _build_graph(click_mode: str):
         max_points=MAX_POINTS,
         show_labels=bool(state.get("show_anomalies", True)),
         highlight_id=state.get("highlight_id"),
-        predictions=state.get("predictions"),
+        predictions=_predictions_for_display(),
         show_predictions=bool(state.get("show_model_preds", True)),
         highlight_pred_id=state.get("selected_pred_id"),
     )
@@ -2525,8 +2680,13 @@ def _do_load(plmn: str, click_mode: str):
     metrics = metric_columns(df)
     tmin, tmax = data_time_bounds(df)
     mode = state.get("threshold_mode") or "pot"
+    msplit = state.get("metrics_eval_split") or "valid"
     preds = enrich_predictions_for_ui(
-        df, preds, doc.get("labels") or [], threshold_mode=mode
+        df,
+        preds,
+        doc.get("labels") or [],
+        threshold_mode=mode,
+        metrics_split=msplit,
     )
     state.update(
         df=df,
@@ -2534,6 +2694,7 @@ def _do_load(plmn: str, click_mode: str):
         predictions=preds,
         pred_source=pred_source,
         threshold_mode=preds.get("threshold_mode") or mode,
+        metrics_eval_split=preds.get("metrics_eval_split") or msplit,
         plmn=plmn,
         rank=rank,
         metrics=metrics,
@@ -2586,7 +2747,8 @@ _START_MODEL_SRC_OPTS: list = []
 _START_MODEL_SRC_VALUE = "omnianomaly"
 _START_THR_OPTS: list = [
     {"label": "POT (논문 primary)", "value": "pot"},
-    {"label": "best-F1 (oracle)", "value": "best_f1"},
+    {"label": "best-F1 point (oracle)", "value": "best_f1_point"},
+    {"label": "best-F1 PA (oracle)", "value": "best_f1"},
 ]
 if _START_PLMN:
     _do_load(_START_PLMN, "zoom")
@@ -2928,6 +3090,14 @@ app.layout = html.Div(
                     inline=True,
                     style={"fontSize": "13px"},
                 ),
+                html.B("Metrics", style={"marginLeft": "12px", "marginRight": "6px"}),
+                dcc.RadioItems(
+                    id="metrics-eval-split",
+                    options=[{"label": "valid", "value": "valid"}],
+                    value="valid",
+                    inline=True,
+                    style={"fontSize": "13px"},
+                ),
             ],
             style={
                 "display": "flex",
@@ -3171,6 +3341,10 @@ def _sync_model_pred_source(plmn):
     Output("metric-filter", "value", allow_duplicate=True),
     Output("threshold-mode", "style"),
     Output("threshold-mode", "options"),
+    Output("threshold-mode", "value"),
+    Output("metrics-eval-split", "options"),
+    Output("metrics-eval-split", "value"),
+    Output("metrics-eval-split", "style"),
     Input("model-pred-source", "value"),
     State("click-mode", "value"),
     prevent_initial_call=True,
@@ -3178,10 +3352,11 @@ def _sync_model_pred_source(plmn):
 def _switch_model_pred_source(source, click_mode):
     plmn = state.get("plmn")
     if not plmn or not source:
-        return (no_update,) * 9
+        return (no_update,) * 13
     state["pred_source"] = source
     preds = load_predictions(plmn, source=source)
     state["selected_pred_id"] = None
+    is_argos = is_argos_prediction(preds) or str(source).startswith("argos")
     if state.get("df") is not None:
         state["df"] = ensure_score_column(
             state["df"],
@@ -3190,30 +3365,50 @@ def _switch_model_pred_source(source, click_mode):
             plmn=plmn,
         )
         human = ((state.get("doc") or {}).get("labels")) or []
-        mode = state.get("threshold_mode") or "pot"
+        mode = "rule" if is_argos else (state.get("threshold_mode") or "pot")
+        if not is_argos and mode in ("rule", "argos_rule"):
+            mode = "pot"
+        msplit = state.get("metrics_eval_split") or "valid"
+        if msplit not in available_metrics_splits(preds):
+            msplit = "valid"
         state["predictions"] = enrich_predictions_for_ui(
-            state["df"], preds, human, threshold_mode=mode
+            state["df"],
+            preds,
+            human,
+            threshold_mode=mode,
+            metrics_split=msplit,
         )
         state["threshold_mode"] = (
             state["predictions"].get("threshold_mode") or mode
         )
+        state["metrics_eval_split"] = (
+            state["predictions"].get("metrics_eval_split") or msplit
+        )
     else:
         state["predictions"] = preds
+        state["threshold_mode"] = "rule" if is_argos else (state.get("threshold_mode") or "pot")
     state["_score_hover"] = None
     state["_hover_arrays_pushed"] = False
     state["hover_cache_seq"] = int(state.get("hover_cache_seq") or 0) + 1
     _apply_pred_metric_visibility(state["predictions"])
     opts = _model_pred_options()
     m_opts, m_vals = _metric_filter_ui()
-    is_argos = is_argos_prediction(state.get("predictions")) or str(source).startswith(
-        "argos"
-    )
-    thr_style = (
+    thr_style = {"fontSize": "13px"}
+    thr_opts = _threshold_mode_options(state.get("predictions"), source)
+    thr_val = _threshold_mode_value_for_pred(state.get("predictions"), source)
+    state["threshold_mode"] = thr_val
+    split_opts = _metrics_split_options(state.get("predictions"))
+    split_vals = {o["value"] for o in split_opts}
+    split_val = state.get("metrics_eval_split") or "valid"
+    if split_val not in split_vals:
+        split_val = "valid"
+    state["metrics_eval_split"] = split_val
+    # Argos exports valid only today; grey Metrics split when <2 options.
+    split_style = (
         {"fontSize": "13px", "opacity": "0.35", "pointerEvents": "none"}
-        if is_argos
+        if len(split_opts) < 2
         else {"fontSize": "13px"}
     )
-    thr_opts = _threshold_mode_options(state.get("predictions"), source)
     return (
         _build_graph(click_mode or "zoom"),
         opts,
@@ -3224,7 +3419,34 @@ def _switch_model_pred_source(source, click_mode):
         m_vals,
         thr_style,
         thr_opts,
+        thr_val,
+        split_opts,
+        split_val,
+        split_style,
     )
+
+
+@app.callback(
+    Output("metrics-eval-split", "options", allow_duplicate=True),
+    Output("metrics-eval-split", "value", allow_duplicate=True),
+    Output("metrics-eval-split", "style", allow_duplicate=True),
+    Input("dd-plmn", "value"),
+    prevent_initial_call=True,
+)
+def _sync_metrics_split_on_plmn(_plmn):
+    pred = state.get("predictions") or {}
+    opts = _metrics_split_options(pred)
+    vals = {o["value"] for o in opts}
+    cur = state.get("metrics_eval_split") or "valid"
+    if cur not in vals:
+        cur = "valid"
+    state["metrics_eval_split"] = cur
+    style = (
+        {"fontSize": "13px", "opacity": "0.35", "pointerEvents": "none"}
+        if len(opts) < 2
+        else {"fontSize": "13px"}
+    )
+    return opts, cur, style
 
 
 @app.callback(
@@ -3249,28 +3471,90 @@ def _sync_model_pred_list(plmn):
     prevent_initial_call=True,
 )
 def _switch_threshold_mode(mode, click_mode):
-    mode = mode or "pot"
+    preds = state.get("predictions") or {}
+    src = state.get("pred_source")
+    if is_argos_prediction(preds) or str(src or "").startswith("argos"):
+        mode = "rule"
+    else:
+        mode = mode or "pot"
+        if mode in ("rule", "argos_rule"):
+            mode = "pot"
     state["threshold_mode"] = mode
     df = state.get("df")
-    preds = state.get("predictions")
     if df is None or not preds:
         return (no_update,) * 5
-    if preds.get("labels_by_mode"):
+    msplit = state.get("metrics_eval_split") or "valid"
+    if preds.get("labels_by_mode") and preds.get("thresholds"):
         state["predictions"] = apply_threshold_mode(
             df, preds, threshold_mode=mode
+        )
+        # Recompute live metrics for current metrics_split (thr switch).
+        human = ((state.get("doc") or {}).get("labels")) or []
+        state["predictions"] = enrich_predictions_for_ui(
+            df,
+            state["predictions"],
+            human,
+            threshold_mode=mode,
+            metrics_split=msplit,
         )
     else:
         human = ((state.get("doc") or {}).get("labels")) or []
         state["predictions"] = enrich_predictions_for_ui(
-            df, preds, human, threshold_mode=mode
+            df,
+            preds,
+            human,
+            threshold_mode=mode,
+            metrics_split=msplit,
         )
     state["threshold_mode"] = (
         state["predictions"].get("threshold_mode") or mode
+    )
+    state["metrics_eval_split"] = (
+        state["predictions"].get("metrics_eval_split") or msplit
     )
     state["selected_pred_id"] = None
     state["_score_hover"] = None
     state["_hover_arrays_pushed"] = False
     state["hover_cache_seq"] = int(state.get("hover_cache_seq") or 0) + 1
+    return (
+        _build_graph(click_mode or "zoom"),
+        _model_pred_options(),
+        None,
+        _model_attr_children(None),
+        _detection_metrics_children(),
+    )
+
+
+@app.callback(
+    Output("graph", "figure", allow_duplicate=True),
+    Output("model-pred-list", "options", allow_duplicate=True),
+    Output("model-pred-list", "value", allow_duplicate=True),
+    Output("model-pred-attr", "children", allow_duplicate=True),
+    Output("detection-metrics", "children", allow_duplicate=True),
+    Input("metrics-eval-split", "value"),
+    State("click-mode", "value"),
+    prevent_initial_call=True,
+)
+def _switch_metrics_eval_split(msplit, click_mode):
+    msplit = msplit or "valid"
+    state["metrics_eval_split"] = msplit
+    df = state.get("df")
+    preds = state.get("predictions")
+    if df is None or not preds:
+        return (no_update,) * 5
+    human = ((state.get("doc") or {}).get("labels")) or []
+    mode = state.get("threshold_mode") or "pot"
+    state["predictions"] = enrich_predictions_for_ui(
+        df,
+        preds,
+        human,
+        threshold_mode=mode,
+        metrics_split=msplit,
+    )
+    state["metrics_eval_split"] = (
+        state["predictions"].get("metrics_eval_split") or msplit
+    )
+    state["selected_pred_id"] = None
     return (
         _build_graph(click_mode or "zoom"),
         _model_pred_options(),
@@ -3350,7 +3634,7 @@ def _on_model_pred_selected(pred_id, click_mode):
     )
     status = (
         f"모델 예측 선택·줌: "
-        f"{pred_line(item, feature_mode=_ui_feature_mode_for_display())}"
+        f"{pred_line(item, feature_mode=_ui_feature_mode_for_display(), predictions=state.get('predictions'))}"
     )
     return _build_graph("inspect"), status, "inspect", panel
 
@@ -3428,7 +3712,7 @@ def _zoom_model_pred(n_clicks, pred_id):
     )
     status = (
         f"모델 구간으로 줌: "
-        f"{pred_line(item, feature_mode=_ui_feature_mode_for_display())}"
+        f"{pred_line(item, feature_mode=_ui_feature_mode_for_display(), predictions=state.get('predictions'))}"
     )
     return _build_graph("inspect"), "inspect", panel, status
 
@@ -3969,12 +4253,13 @@ def _main_body(
         mode = anomaly_overlay_mode or "both"
         state["_hover_arrays_pushed"] = False
         state["hover_cache_seq"] = int(state.get("hover_cache_seq") or 0) + 1
-        n_model = len((state.get("predictions") or {}).get("labels") or [])
+        n_model = len(_model_pred_items())
+        split_tag = _metrics_split_wanted()
         return (
             _build_graph(click_mode),
             no_update,
             no_update,
-            f"오버레이: {mode} (모델 구간 {n_model}개)",
+            f"오버레이: {mode} (모델 구간 {n_model}개 · {split_tag})",
             _cancel_style(click_mode),
             no_update,
             no_update,
@@ -6362,6 +6647,15 @@ app.clientside_callback(
                         + pad(d.getUTCMinutes());
                 }
 
+                function formatScoreNumber(v) {
+                    if (v == null || !isFinite(v)) return String(v);
+                    var a = Math.abs(v);
+                    // LSTM-AD residuals are often |s| << 1; toFixed(2) shows as 0.00.
+                    if (a !== 0 && a < 0.01) return v.toPrecision(3);
+                    if (a >= 1000) return v.toFixed(1);
+                    return v.toFixed(4);
+                }
+
                 function formatScoreTip(snapped, cache, wantScore) {
                     var text = formatHoverTime(snapped);
                     if (!wantScore) return text;
@@ -6371,12 +6665,12 @@ app.clientside_callback(
                         ? cache.score_threshold : null;
                     if (score == null) {
                         text += '\\nAnomaly score = (없음)';
-                        if (thr != null) text += '\\nthreshold = ' + thr.toFixed(2);
+                        if (thr != null) text += '\\nthreshold = ' + formatScoreNumber(thr);
                         return text;
                     }
-                    text += '\\nAnomaly score = ' + score.toFixed(2);
+                    text += '\\nAnomaly score = ' + formatScoreNumber(score);
                     if (thr != null) {
-                        text += '\\nthreshold = ' + thr.toFixed(2);
+                        text += '\\nthreshold = ' + formatScoreNumber(thr);
                         if (score < thr) text += ' · anomaly';
                     }
                     return text;

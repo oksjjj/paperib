@@ -154,6 +154,33 @@ def mask_to_labels(
     return items
 
 
+def pack_split_metrics(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    *,
+    prefix: str,
+) -> dict[str, Any]:
+    """Point + event metrics with flat ``{prefix}-*`` keys for metrics.json / UI."""
+    point = point_metrics(y_true, y_pred)
+    event = event_metrics(y_true, y_pred)
+    out: dict[str, Any] = {
+        f"{prefix}-precision": point["precision"],
+        f"{prefix}-recall": point["recall"],
+        f"{prefix}-f1": point["f1"],
+        f"{prefix}-TP": point["tp"],
+        f"{prefix}-FP": point["fp"],
+        f"{prefix}-FN": point["fn"],
+        f"{prefix}-event_recall": event["event_recall"],
+        f"{prefix}-n_gt_events": event["n_gt_events"],
+        f"{prefix}-n_hit_events": event["n_hit_events"],
+        f"{prefix}-n_pred_events": event["n_pred_events"],
+        f"{prefix}-n_pred": int(np.asarray(y_pred).astype(bool).sum()),
+        f"{prefix}-n_human": int(np.asarray(y_true).astype(bool).sum()),
+        prefix: {"point": point, "event": event},
+    }
+    return out
+
+
 def export_score_predictions(
     plmn: str,
     *,
@@ -167,8 +194,13 @@ def export_score_predictions(
     threshold_method: str,
     score_note: str,
     pred_mask: np.ndarray | None = None,
+    eval_split: str = "valid+test",
 ) -> Path:
-    """Export UI JSON. Convention: **lower score = more anomalous** (``score < thr``)."""
+    """Export UI JSON. Convention: **lower score = more anomalous** (``score < thr``).
+
+    Default ``eval_split=valid+test`` (baselines score held-out test too).
+    UI oracle thr search still uses the valid time window from ``split``.
+    """
     scores = np.asarray(scores, dtype=np.float64).reshape(-1)
     times = np.asarray(times)
     n = min(len(scores), len(times))
@@ -187,7 +219,7 @@ def export_score_predictions(
         "source": source,
         "model": model,
         "run_name": meta.get("run_name"),
-        "eval_split": "valid",
+        "eval_split": eval_split,
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "threshold": float(threshold),
         "threshold_method": threshold_method,
@@ -215,6 +247,7 @@ def export_score_predictions(
             "valid_time_start": meta.get("valid_time_start"),
             "valid_time_end": meta.get("valid_time_end"),
             "test_time_start": meta.get("test_time_start"),
+            "test_time_end": meta.get("test_time_end") or meta.get("time_end"),
         },
         "metrics": metrics,
         "labels": labels,

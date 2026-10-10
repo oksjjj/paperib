@@ -5,6 +5,9 @@ Official model: https://github.com/thuml/Anomaly-Transformer
 (ICLR 2022 — association discrepancy). Same chronological split and
 ``--run_name`` views as OmniAnomaly (`paperib` / `comb` / `comb_share`).
 
+Default: score / metrics / UI on **valid only** (HP tuning). Pass ``--with_test``
+for the final paper table.
+
 Example:
     cd AnomalyTransformer
     ../.venv/bin/python run_plmn.py --plmn P0480 --num_epochs 10
@@ -310,6 +313,7 @@ def export_ui_predictions(
             "valid_time_start": meta.get("valid_time_start"),
             "valid_time_end": meta.get("valid_time_end"),
             "test_time_start": meta.get("test_time_start"),
+            "test_time_end": meta.get("test_time_end") or meta.get("time_end"),
         },
         "metrics": metrics or {},
         "labels": labels,
@@ -319,7 +323,7 @@ def export_ui_predictions(
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(_jsonable(payload), f, ensure_ascii=False, indent=2)
     print(
-        f"wrote UI predictions ({eval_split} only) → {out_path} "
+        f"wrote UI predictions ({eval_split}) → {out_path} "
         f"({len(labels)} segments)",
         flush=True,
     )
@@ -368,8 +372,11 @@ def run(plmn: str, args: argparse.Namespace) -> None:
 
     train = np.asarray(prepared["train"], dtype=np.float32)
     valid = np.asarray(prepared["valid"], dtype=np.float32)
+    test = np.asarray(prepared["test"], dtype=np.float32)
     times_valid = prepared["times_valid"]
+    times_test = prepared["times_test"]
     y_valid = np.asarray(prepared["y_valid"], dtype=bool)
+    y_test = np.asarray(prepared["y_test"], dtype=bool)
     meta = dict(prepared["meta"])
     x_dim = int(meta["x_dim"])
     wl = int(args.win_size)
@@ -407,8 +414,9 @@ def run(plmn: str, args: argparse.Namespace) -> None:
     )
 
     metrics: dict[str, Any] = {
-        "eval_split": "valid",
-        "test_held_out": True,
+        "eval_splits": ["valid", "test"] if args.with_test else ["valid"],
+        "eval_split": "valid+test" if args.with_test else "valid",
+        "test_held_out": not args.with_test,
         "model": "anomalytransformer",
     }
 
@@ -424,46 +432,61 @@ def run(plmn: str, args: argparse.Namespace) -> None:
         engine.load(ckpt_path)
         print(f"restored from {ckpt_path}", flush=True)
 
-    print("scoring train (threshold) + valid (UI) ...", flush=True)
+    eval_label = "valid+test" if args.with_test else "valid"
+    print(f"scoring train (threshold) + {eval_label} (UI) ...", flush=True)
     train_energy, train_dim = engine.energy_series(
         train, step=args.score_step, with_dim_mse=True
     )
-    valid_energy, valid_dim = engine.energy_series(
-        valid, step=args.score_step, with_dim_mse=True
+    if args.with_test:
+        eval_block = np.vstack([valid, test])
+    else:
+        eval_block = valid
+    eval_energy, eval_dim = engine.energy_series(
+        eval_block, step=args.score_step, with_dim_mse=True
     )
+    n_v = len(valid)
+    if args.with_test:
+        valid_energy = eval_energy[:n_v]
+        test_energy = eval_energy[n_v:]
+        valid_dim = eval_dim[:n_v] if eval_dim is not None else None
+    else:
+        valid_energy = eval_energy
+        test_energy = None
+        valid_dim = eval_dim
     energy_thr = engine.threshold_from_train(train_energy)
     print(f"energy threshold (train p{100 - args.anormly_ratio}): {energy_thr:.6g}", flush=True)
 
-    pred_valid = (valid_energy > energy_thr) & np.isfinite(valid_energy)
-    metrics["valid-n-pred"] = int(pred_valid.sum())
-    metrics["valid-n-human"] = int(y_valid.sum())
+    def _point_block(y, energy, prefix: str) -> None:
+        pred = (energy > energy_thr) & np.isfinite(energy)
+        metrics[f"{prefix}-n-pred"] = int(pred.sum())
+        metrics[f"{prefix}-n-human"] = int(np.asarray(y).sum())
+        yt = np.asarray(y, dtype=bool).reshape(-1)
+        yp = pred.astype(bool).reshape(-1)
+        m = min(len(yt), len(yp))
+        yt, yp = yt[:m], yp[:m]
+        tp = int((yt & yp).sum())
+        fp = int((~yt & yp).sum())
+        fn = int((yt & ~yp).sum())
+        prec = tp / (tp + fp) if (tp + fp) else 0.0
+        rec = tp / (tp + fn) if (tp + fn) else 0.0
+        f1 = (2 * prec * rec / (prec + rec)) if (prec + rec) else 0.0
+        metrics[f"{prefix}-precision"] = float(prec)
+        metrics[f"{prefix}-recall"] = float(rec)
+        metrics[f"{prefix}-f1"] = float(f1)
+        metrics[f"{prefix}-TP"] = tp
+        metrics[f"{prefix}-FP"] = fp
+        metrics[f"{prefix}-FN"] = fn
+        print(
+            f"{prefix}: human={int(yt.sum())}  pred={int(yp.sum())}  "
+            f"P={prec:.3f} R={rec:.3f} F1={f1:.3f}",
+            flush=True,
+        )
+
     metrics["energy_threshold"] = float(energy_thr)
     metrics["anormly_ratio"] = float(args.anormly_ratio)
-
-    if y_valid.any() and pred_valid.any():
-        from sklearn.metrics import precision_recall_fscore_support
-
-        # Point-level vs human labels on valid (no point-adjust — honest).
-        yt = y_valid.astype(int)
-        yp = pred_valid.astype(int)
-        # Align lengths if energy shorter (shouldn't be).
-        m = min(len(yt), len(yp))
-        precision, recall, f1, _ = precision_recall_fscore_support(
-            yt[:m], yp[:m], average="binary", zero_division=0
-        )
-        metrics["valid-precision"] = float(precision)
-        metrics["valid-recall"] = float(recall)
-        metrics["valid-f1"] = float(f1)
-        print(
-            f"valid: human={int(y_valid.sum())}  pred={int(pred_valid.sum())}  "
-            f"P={precision:.3f} R={recall:.3f} F1={f1:.3f}",
-            flush=True,
-        )
-    else:
-        print(
-            f"valid: human={int(y_valid.sum())}  pred={int(pred_valid.sum())}",
-            flush=True,
-        )
+    _point_block(y_valid, valid_energy, "valid")
+    if args.with_test:
+        _point_block(y_test, test_energy, "test")
 
     baseline = None
     if train_dim is not None:
@@ -493,23 +516,29 @@ def run(plmn: str, args: argparse.Namespace) -> None:
             indent=2,
         )
 
+    if args.with_test:
+        times_eval = np.concatenate([times_valid, times_test])
+        export_split = "valid+test"
+    else:
+        times_eval = times_valid
+        export_split = "valid"
     export_ui_predictions(
         plmn,
-        times=times_valid,
-        energy=valid_energy,
+        times=times_eval,
+        energy=eval_energy,
         energy_threshold=float(energy_thr),
         window_length=wl,
         meta=meta,
         metrics=metrics,
-        eval_split="valid",
-        dim_mse=valid_dim,
+        eval_split=export_split,
+        dim_mse=eval_dim,
         feature_columns=list(meta.get("feature_columns") or []),
         baseline=baseline,
         top_k=int(args.attr_top_k),
         source=pred_source_for_run(args.run_name, wl),
         anormly_ratio=float(args.anormly_ratio),
     )
-    print("done. (test split held out)", flush=True)
+    print(f"done. ({export_split} scored; thr from train percentile)", flush=True)
 
 
 def parse_args() -> argparse.Namespace:
@@ -545,6 +574,11 @@ def parse_args() -> argparse.Namespace:
         help="Sliding-window step when scoring (1 = densest, slower)",
     )
     p.add_argument("--attr_top_k", type=int, default=5)
+    p.add_argument(
+        "--with_test",
+        action="store_true",
+        help="Also score/export test (default: valid only for HP tuning)",
+    )
     p.add_argument(
         "--keep_labeled_in_train",
         action="store_true",

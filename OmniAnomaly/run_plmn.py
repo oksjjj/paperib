@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Train / score OmniAnomaly on a paperib PLMN (train / valid / test).
 
-Chronological split; human labels never tune on **test**.
-By default only **valid** is scored for detection metrics + UI overlay.
+Chronological split; human labels never tune thresholds on **test**.
+Default: score / metrics / UI on **valid only** (HP tuning). Pass ``--with_test``
+for the final paper table.
 
 Example (all metrics — run ``paperib``):
     cd OmniAnomaly
@@ -56,7 +57,7 @@ import torch  # noqa: E402
 
 from omni_anomaly.checkpoint import load_checkpoint, save_checkpoint  # noqa: E402
 from omni_anomaly.device import get_device  # noqa: E402
-from omni_anomaly.eval_methods import bf_search, pot_eval  # noqa: E402
+from omni_anomaly.eval_methods import bf_search, calc_seq, pot_eval  # noqa: E402
 from omni_anomaly.model import OmniAnomaly  # noqa: E402
 from omni_anomaly.prediction import Predictor  # noqa: E402
 from omni_anomaly.spot import SPOT  # noqa: E402
@@ -474,6 +475,7 @@ def prepare_arrays(
         "valid_time_start": str(times[train_end]),
         "valid_time_end": str(times[valid_end - 1]),
         "test_time_start": str(times[valid_end]),
+        "test_time_end": str(times[-1]),
         "eval_split": "valid",
     }
     with open(os.path.join(data_dir, f"{plmn}_meta.json"), "w", encoding="utf-8") as f:
@@ -502,6 +504,7 @@ def prepare_arrays(
         "y_test": y_test,
         "times": times,
         "times_valid": times[train_end:valid_end],
+        "times_test": times[valid_end:],
         "meta": meta,
         "cols": cols,
         "train_end": train_end,
@@ -639,6 +642,62 @@ def _preds_to_label_items(
     return items
 
 
+def _point_prf(y_true: np.ndarray, y_pred: np.ndarray) -> dict[str, float]:
+    y_true = np.asarray(y_true, dtype=bool).reshape(-1)
+    y_pred = np.asarray(y_pred, dtype=bool).reshape(-1)
+    m = min(len(y_true), len(y_pred))
+    y_true, y_pred = y_true[:m], y_pred[:m]
+    tp = int((y_true & y_pred).sum())
+    fp = int((~y_true & y_pred).sum())
+    fn = int((y_true & ~y_pred).sum())
+    prec = tp / (tp + fp) if (tp + fp) else 0.0
+    rec = tp / (tp + fn) if (tp + fn) else 0.0
+    f1 = (2 * prec * rec / (prec + rec)) if (prec + rec) else 0.0
+    return {
+        "precision": float(prec),
+        "recall": float(rec),
+        "f1": float(f1),
+        "TP": tp,
+        "FP": fp,
+        "FN": fn,
+    }
+
+
+def _pack_fixed_thr_metrics(
+    score: np.ndarray,
+    y: np.ndarray,
+    threshold: float,
+    *,
+    prefix: str,
+) -> dict:
+    """Point + PA metrics at a fixed thr (train POT); no re-fitting on this split."""
+    score = np.asarray(score, dtype=np.float64).reshape(-1)
+    y = np.asarray(y, dtype=bool).reshape(-1)
+    m = min(len(score), len(y))
+    score, y = score[:m], y[:m]
+    pred = score < float(threshold)
+    point = _point_prf(y, pred)
+    out = {
+        f"{prefix}-n-pred": int(pred.sum()),
+        f"{prefix}-n-human": int(y.sum()),
+        f"{prefix}-precision": point["precision"],
+        f"{prefix}-recall": point["recall"],
+        f"{prefix}-f1": point["f1"],
+        f"{prefix}-TP": point["TP"],
+        f"{prefix}-FP": point["FP"],
+        f"{prefix}-FN": point["FN"],
+    }
+    if y.any():
+        try:
+            pa = calc_seq(score, y, float(threshold), calc_latency=True)
+            out[f"{prefix}-pa-f1"] = float(pa[0])
+            out[f"{prefix}-pa-precision"] = float(pa[1])
+            out[f"{prefix}-pa-recall"] = float(pa[2])
+        except Exception:
+            pass
+    return out
+
+
 def export_ui_predictions(
     plmn: str,
     *,
@@ -711,6 +770,7 @@ def export_ui_predictions(
             "valid_time_start": meta.get("valid_time_start"),
             "valid_time_end": meta.get("valid_time_end"),
             "test_time_start": meta.get("test_time_start"),
+            "test_time_end": meta.get("test_time_end") or meta.get("time_end"),
         },
         "metrics": metrics or {},
         "labels": labels,
@@ -720,7 +780,7 @@ def export_ui_predictions(
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(_jsonable(payload), f, ensure_ascii=False, indent=2)
     print(
-        f"wrote UI predictions ({eval_split} only) → {out_path} "
+        f"wrote UI predictions ({eval_split}) → {out_path} "
         f"({len(labels)} segments)",
         flush=True,
     )
@@ -797,7 +857,12 @@ def run(plmn: str, args: argparse.Namespace) -> None:
     print(f"device={device}  x_dim={config.x_dim}  epochs={config.max_epoch}", flush=True)
 
     model = OmniAnomaly(config).to(device)
-    metrics: dict = {"eval_split": "valid", "test_held_out": True}
+    with_test = bool(args.with_test)
+    metrics: dict = {
+        "eval_splits": ["valid", "test"] if with_test else ["valid"],
+        "eval_split": "valid+test" if with_test else "valid",
+        "test_held_out": not with_test,
+    }
 
     if config.restore_dir and config.max_epoch <= 0:
         load_checkpoint(model, config.restore_dir, device=device)
@@ -865,23 +930,47 @@ def run(plmn: str, args: argparse.Namespace) -> None:
     # Per-dimension reconstruction log-probs for attribution; total = sum(dims).
     config.get_score_on_dim = True
     train_score_raw, _, _ = predictor.get_score(prepared["train"])
-    valid_score_raw, _, pred_time = predictor.get_score(prepared["valid"])
+    wl = config.window_length
+    n_v = int(prepared["valid"].shape[0])
+    if with_test:
+        # Contiguous valid→test so windows near the split use prior valid context.
+        eval_x = np.vstack([prepared["valid"], prepared["test"]])
+    else:
+        eval_x = prepared["valid"]
+    eval_score_raw, _, pred_time = predictor.get_score(eval_x)
     metrics["pred_total_time"] = pred_time
     train_score = _total_score(train_score_raw)
-    valid_score = _total_score(valid_score_raw)
+    eval_score = _total_score(eval_score_raw)
     train_score_dim = (
         np.asarray(train_score_raw)
         if np.asarray(train_score_raw).ndim == 2
         else None
     )
-    valid_score_dim = (
-        np.asarray(valid_score_raw)
-        if np.asarray(valid_score_raw).ndim == 2
+    eval_score_dim = (
+        np.asarray(eval_score_raw)
+        if np.asarray(eval_score_raw).ndim == 2
         else None
     )
+    # score[i] ↔ eval time index i + wl - 1
+    n_valid_scored = max(0, n_v - wl + 1)
+    if with_test:
+        valid_score = np.asarray(eval_score[:n_valid_scored]).reshape(-1)
+        test_score = np.asarray(eval_score[n_valid_scored:]).reshape(-1)
+        valid_score_dim = (
+            eval_score_dim[:n_valid_scored] if eval_score_dim is not None else None
+        )
+        test_score_dim = (
+            eval_score_dim[n_valid_scored:] if eval_score_dim is not None else None
+        )
+    else:
+        valid_score = np.asarray(eval_score).reshape(-1)
+        test_score = np.asarray([], dtype=np.float64)
+        valid_score_dim = eval_score_dim
+        test_score_dim = None
     print(
-        "scored train + valid (per-dim attribution on); test left untouched "
-        "(hold out until hyperparameters are fixed)",
+        f"scored train + {'valid+test' if with_test else 'valid'} "
+        f"(per-dim attribution on); "
+        f"n_valid_scores={len(valid_score)} n_test_scores={len(test_score)}",
         flush=True,
     )
 
@@ -889,15 +978,28 @@ def run(plmn: str, args: argparse.Namespace) -> None:
         pickle.dump(train_score, f)
     with open(os.path.join(config.result_dir, config.valid_score_filename), "wb") as f:
         pickle.dump(valid_score, f)
+    if with_test:
+        with open(os.path.join(config.result_dir, config.test_score_filename), "wb") as f:
+            pickle.dump(test_score, f)
     if train_score_dim is not None:
         with open(os.path.join(config.result_dir, "train_score_dim.pkl"), "wb") as f:
             pickle.dump(train_score_dim, f)
     if valid_score_dim is not None:
         with open(os.path.join(config.result_dir, "valid_score_dim.pkl"), "wb") as f:
             pickle.dump(valid_score_dim, f)
+    if with_test and test_score_dim is not None:
+        with open(os.path.join(config.result_dir, "test_score_dim.pkl"), "wb") as f:
+            pickle.dump(test_score_dim, f)
 
-    wl = config.window_length
     y_valid = _align_labels(prepared["y_valid"], len(valid_score), wl)
+    y_test = np.asarray([], dtype=bool)
+    if with_test:
+        # Concat scoring: first test score aligns with times_test[0] (no extra wl gap).
+        y_test_full = np.asarray(prepared["y_test"], dtype=bool).reshape(-1)
+        y_test = y_test_full[: len(test_score)]
+        if len(y_test) < len(test_score):
+            pad = np.zeros(len(test_score) - len(y_test), dtype=bool)
+            y_test = np.concatenate([y_test, pad])
 
     try:
         threshold = _pot_threshold(
@@ -971,19 +1073,35 @@ def run(plmn: str, args: argparse.Namespace) -> None:
     else:
         print("no human labels in valid split; skipping labeled POT/F1", flush=True)
 
-    pred_valid = valid_score.reshape(-1) < float(threshold)
-    metrics["valid-n-pred"] = int(pred_valid.sum())
-    metrics["valid-n-human"] = int(y_valid.sum())
+    metrics.update(
+        _pack_fixed_thr_metrics(valid_score, y_valid, float(threshold), prefix="valid")
+    )
+    if with_test:
+        metrics.update(
+            _pack_fixed_thr_metrics(
+                test_score, y_test, float(threshold), prefix="test"
+            )
+        )
     print(
-        f"valid: human={int(y_valid.sum())}  pred={int(pred_valid.sum())}  "
-        f"threshold={threshold:.4f}",
+        f"valid: human={metrics.get('valid-n-human')}  "
+        f"pred={metrics.get('valid-n-pred')}  threshold={threshold:.4f}",
         flush=True,
     )
+    if with_test:
+        print(
+            f"test:  human={metrics.get('test-n-human')}  "
+            f"pred={metrics.get('test-n-pred')}  "
+            f"P={metrics.get('test-precision')} R={metrics.get('test-recall')} "
+            f"F1={metrics.get('test-f1')}",
+            flush=True,
+        )
     for key in (
         "valid-pot-f1",
         "valid-pot-precision",
         "valid-pot-recall",
         "valid-bf-f1",
+        "test-f1",
+        "test-pa-f1",
     ):
         if key in metrics:
             print(f"  {key}={metrics[key]}", flush=True)
@@ -996,22 +1114,33 @@ def run(plmn: str, args: argparse.Namespace) -> None:
     baseline = (
         _dim_baseline(train_score_dim) if train_score_dim is not None else None
     )
+    if with_test:
+        times_eval = np.concatenate(
+            [prepared["times_valid"], prepared["times_test"]]
+        )
+        export_split = "valid+test"
+    else:
+        times_eval = prepared["times_valid"]
+        export_split = "valid"
     export_ui_predictions(
         plmn,
-        times=prepared["times_valid"],
-        scores=valid_score.reshape(-1),
+        times=times_eval,
+        scores=np.asarray(eval_score).reshape(-1),
         threshold=float(threshold),
         window_length=wl,
         meta=prepared["meta"],
         metrics={k: metrics[k] for k in metrics if "curve" not in str(k)},
-        eval_split="valid",
-        score_dim=valid_score_dim,
+        eval_split=export_split,
+        score_dim=eval_score_dim,
         feature_columns=list(prepared["cols"]),
         baseline=baseline,
         top_k=int(args.attr_top_k),
         source=pred_source_for_run(args.run_name, wl),
     )
-    print("done. (test split held out)", flush=True)
+    print(
+        f"done. ({export_split} scored; thr from train/POT on valid)",
+        flush=True,
+    )
 
 
 def parse_args() -> argparse.Namespace:
@@ -1033,6 +1162,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--device", default=None)
     p.add_argument("--restore_dir", default=None)
     p.add_argument("--stable_train", action="store_true")
+    p.add_argument(
+        "--with_test",
+        action="store_true",
+        help="Also score/export test (default: valid only for HP tuning)",
+    )
     p.add_argument(
         "--no_tensorboard",
         action="store_true",

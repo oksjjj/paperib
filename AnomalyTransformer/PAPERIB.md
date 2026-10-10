@@ -3,6 +3,9 @@
 Vendored from the official [Anomaly-Transformer](https://github.com/thuml/Anomaly-Transformer)
 (ICLR 2022 Spotlight) and wired like OmniAnomaly for PLMN runs.
 
+**하이퍼 · 학습 명령:** [docs/baseline-하이퍼파라미터.md](../docs/baseline-하이퍼파라미터.md) §4.  
+**참고 논문:** Xu et al., ICLR 2022 — [docs/baseline-참고논문.md](../docs/baseline-참고논문.md).
+
 ## Setup
 
 ```bash
@@ -18,10 +21,12 @@ cd AnomalyTransformer
 ../.venv/bin/python run_plmn.py --plmn P0480 --num_epochs 10
 ../.venv/bin/python run_plmn.py --plmn P0480 --num_epochs 10 --run_name comb
 ../.venv/bin/python run_plmn.py --plmn P0480 --num_epochs 10 --run_name comb_share
+# 최종 표: ... --with_test
 ```
 
 Chronological split matches OmniAnomaly: **train 60% / valid 20% / test 20%**.
-Detection + UI overlay use **valid only**; test is held out.
+Thr from **train**; runner default = **valid only** (HP tuning). Pass `--with_test` for valid+test.
+Labeling UI keeps valid|test Metrics controls.
 
 ### Outputs
 
