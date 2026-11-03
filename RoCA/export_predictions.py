@@ -74,7 +74,7 @@ def write_roca_prediction(
     labels = _mask_to_labels(times_valid, pred, scores, source=source)
 
     eval_bundle = evaluate_valid(
-        y_valid, scores, threshold, window=window, sample_minutes=5.0
+        y_valid, scores, threshold, vus_window=None, sample_minutes=5.0
     )
     point = eval_bundle["point"]
     event = eval_bundle["event"]
@@ -122,7 +122,11 @@ def write_roca_prediction(
             "score_polarity": "higher_is_anomaly",
             "vus_pr": eval_bundle["primary"]["vus_pr"],
             "pr_auc": eval_bundle["pr_auc"],
+            "vus_window": eval_bundle.get("vus_window"),
             "r_auc_pr": vus.get("r_auc_pr"),
+            "vus_window": eval_bundle.get("vus_window"),
+            "score_distribution": eval_bundle.get("score_distribution"),
+            "event_score_diagnostics": eval_bundle.get("event_score_diagnostics"),
             "event_f1": event.get("f1"),
             "event_precision": event.get("precision"),
             "event_recall": event.get("recall"),
@@ -166,6 +170,8 @@ def write_roca_prediction(
                 "FP": point.get("fp"),
                 "FN": point.get("fn"),
             },
+            "score_distribution": eval_bundle.get("score_distribution"),
+            "event_score_diagnostics": eval_bundle.get("event_score_diagnostics"),
             "operational": {
                 "false_alarms_per_day": op.get("false_alarms_per_day"),
                 "mean_detection_delay_min": op.get("mean_detection_delay_min"),
