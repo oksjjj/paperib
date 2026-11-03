@@ -208,7 +208,7 @@ def train_and_eval(
     thr = train_percentile_threshold(train_scores, cfg.anomaly_ratio)
     y_valid = prep["y_valid"]
     eval_bundle = evaluate_valid(
-        y_valid, valid_scores, thr, window=cfg.window_size, sample_minutes=5.0
+        y_valid, valid_scores, thr, vus_window=None, sample_minutes=5.0
     )
 
     out: dict[str, Any] = {
@@ -264,6 +264,9 @@ def train_and_eval(
             split=prep["split"],
             metrics_extra={
                 "model": "roca",
+                "vus_window": eval_bundle.get("vus_window"),
+                "score_distribution": eval_bundle.get("score_distribution"),
+                "event_score_diagnostics": eval_bundle.get("event_score_diagnostics"),
                 "upstream": "ruiking04/RoCA",
                 "train_method": cfg.train_method,
                 "nu": cfg.nu,
@@ -278,8 +281,14 @@ def train_and_eval(
             print(f"exported {path}", flush=True)
             m = out["metrics"]
             print(
-                f"VUS-PR={m['vus_pr']:.4f} Event-F1={m['event_f1']} "
-                f"FA/day={m['false_alarms_per_day']}",
+                f"VUS-PR={m['vus_pr']:.4f} (vus_window={eval_bundle.get('vus_window')}) "
+                f"Event-F1={m['event_f1']} FA/day={m['false_alarms_per_day']}",
+                flush=True,
+            )
+            sd = eval_bundle.get("score_distribution") or {}
+            print(
+                f"valid score>thr fraction={sd.get('fraction_above_threshold')} "
+                f"q95={sd.get('q95')} max={sd.get('max')}",
                 flush=True,
             )
     return out
