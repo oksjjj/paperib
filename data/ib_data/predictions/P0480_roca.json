@@ -4,7 +4,7 @@
   "model": "roca",
   "run_name": "paperib",
   "eval_split": "valid",
-  "updated_at": "2026-11-03T07:05:08.560274+00:00",
+  "updated_at": "2026-11-03T08:11:36.905655+00:00",
   "threshold": 0.08472365140914917,
   "threshold_method": "percentile",
   "window_length": 32,
@@ -15515,9 +15515,92 @@
     "test_held_out": true,
     "primary_metric": "vus_pr",
     "score_polarity": "higher_is_anomaly",
-    "vus_pr": 0.07557519228898758,
+    "vus_pr": 0.051747668839825456,
     "pr_auc": 0.4047621459680913,
-    "r_auc_pr": 0.05960785888920262,
+    "vus_window": 5,
+    "r_auc_pr": 0.05996017130991641,
+    "score_distribution": {
+      "fraction_above_threshold": 0.008651670437907627,
+      "q50": 0.07815593481063843,
+      "q90": 0.08159713745117188,
+      "q95": 0.08258262872695922,
+      "q99": 0.08448632717132569,
+      "max": 0.1697622537612915
+    },
+    "event_score_diagnostics": [
+      {
+        "event_id": 1,
+        "start_index": 1539,
+        "end_index": 1544,
+        "length_points": 6,
+        "detected": false,
+        "n_pred_points": 0,
+        "max_score": 0.08130908012390137,
+        "mean_score": 0.0784769852956136,
+        "max_score_percentile": 0.8791428191135365,
+        "mean_score_percentile": 0.5465193664315187
+      },
+      {
+        "event_id": 2,
+        "start_index": 2017,
+        "end_index": 2031,
+        "length_points": 15,
+        "detected": true,
+        "n_pred_points": 15,
+        "max_score": 0.1697622537612915,
+        "mean_score": 0.1252211332321167,
+        "max_score_percentile": 1.0,
+        "mean_score_percentile": 0.9990682816451484
+      },
+      {
+        "event_id": 3,
+        "start_index": 2749,
+        "end_index": 2749,
+        "length_points": 1,
+        "detected": false,
+        "n_pred_points": 0,
+        "max_score": 0.07161134481430054,
+        "mean_score": 0.07161134481430054,
+        "max_score_percentile": 0.04858245707440437,
+        "mean_score_percentile": 0.04858245707440437
+      },
+      {
+        "event_id": 4,
+        "start_index": 3544,
+        "end_index": 3547,
+        "length_points": 4,
+        "detected": false,
+        "n_pred_points": 0,
+        "max_score": 0.08212447166442871,
+        "mean_score": 0.07789923250675201,
+        "max_score_percentile": 0.9297218155197657,
+        "mean_score_percentile": 0.4634633302276055
+      },
+      {
+        "event_id": 5,
+        "start_index": 4672,
+        "end_index": 4680,
+        "length_points": 9,
+        "detected": false,
+        "n_pred_points": 0,
+        "max_score": 0.07970094680786133,
+        "mean_score": 0.07610629664527045,
+        "max_score_percentile": 0.7115666178623719,
+        "mean_score_percentile": 0.24970051910022628
+      },
+      {
+        "event_id": 6,
+        "start_index": 6038,
+        "end_index": 6039,
+        "length_points": 2,
+        "detected": false,
+        "n_pred_points": 0,
+        "max_score": 0.08183562755584717,
+        "mean_score": 0.08102422952651978,
+        "max_score_percentile": 0.9125515772660722,
+        "mean_score_percentile": 0.8553174497537601
+      }
+    ],
     "event_f1": 0.04081632653061224,
     "event_precision": 0.023255813953488372,
     "event_recall": 0.16666666666666666,
@@ -15553,7 +15636,7 @@
   },
   "paper_metrics": {
     "primary_metric": "vus_pr",
-    "vus_pr": 0.07557519228898758,
+    "vus_pr": 0.051747668839825456,
     "pr_auc": 0.4047621459680913,
     "event": {
       "f1": 0.04081632653061224,
@@ -15571,6 +15654,88 @@
       "FP": 50,
       "FN": 22
     },
+    "score_distribution": {
+      "fraction_above_threshold": 0.008651670437907627,
+      "q50": 0.07815593481063843,
+      "q90": 0.08159713745117188,
+      "q95": 0.08258262872695922,
+      "q99": 0.08448632717132569,
+      "max": 0.1697622537612915
+    },
+    "event_score_diagnostics": [
+      {
+        "event_id": 1,
+        "start_index": 1539,
+        "end_index": 1544,
+        "length_points": 6,
+        "detected": false,
+        "n_pred_points": 0,
+        "max_score": 0.08130908012390137,
+        "mean_score": 0.0784769852956136,
+        "max_score_percentile": 0.8791428191135365,
+        "mean_score_percentile": 0.5465193664315187
+      },
+      {
+        "event_id": 2,
+        "start_index": 2017,
+        "end_index": 2031,
+        "length_points": 15,
+        "detected": true,
+        "n_pred_points": 15,
+        "max_score": 0.1697622537612915,
+        "mean_score": 0.1252211332321167,
+        "max_score_percentile": 1.0,
+        "mean_score_percentile": 0.9990682816451484
+      },
+      {
+        "event_id": 3,
+        "start_index": 2749,
+        "end_index": 2749,
+        "length_points": 1,
+        "detected": false,
+        "n_pred_points": 0,
+        "max_score": 0.07161134481430054,
+        "mean_score": 0.07161134481430054,
+        "max_score_percentile": 0.04858245707440437,
+        "mean_score_percentile": 0.04858245707440437
+      },
+      {
+        "event_id": 4,
+        "start_index": 3544,
+        "end_index": 3547,
+        "length_points": 4,
+        "detected": false,
+        "n_pred_points": 0,
+        "max_score": 0.08212447166442871,
+        "mean_score": 0.07789923250675201,
+        "max_score_percentile": 0.9297218155197657,
+        "mean_score_percentile": 0.4634633302276055
+      },
+      {
+        "event_id": 5,
+        "start_index": 4672,
+        "end_index": 4680,
+        "length_points": 9,
+        "detected": false,
+        "n_pred_points": 0,
+        "max_score": 0.07970094680786133,
+        "mean_score": 0.07610629664527045,
+        "max_score_percentile": 0.7115666178623719,
+        "mean_score_percentile": 0.24970051910022628
+      },
+      {
+        "event_id": 6,
+        "start_index": 6038,
+        "end_index": 6039,
+        "length_points": 2,
+        "detected": false,
+        "n_pred_points": 0,
+        "max_score": 0.08183562755584717,
+        "mean_score": 0.08102422952651978,
+        "max_score_percentile": 0.9125515772660722,
+        "mean_score_percentile": 0.8553174497537601
+      }
+    ],
     "operational": {
       "false_alarms_per_day": 1.6100093171835483,
       "mean_detection_delay_min": 0.0,

@@ -4,7 +4,7 @@
   "model": "riad",
   "run_name": "paperib",
   "eval_split": "valid",
-  "updated_at": "2026-11-03T06:25:33.728964+00:00",
+  "updated_at": "2026-11-03T08:12:52.941912+00:00",
   "threshold": 0.0007585595780983567,
   "threshold_method": "percentile",
   "window_length": 100,
@@ -16659,9 +16659,92 @@
     "test_held_out": true,
     "primary_metric": "vus_pr",
     "score_polarity": "higher_is_anomaly",
-    "vus_pr": 0.030919990793950216,
+    "vus_pr": 0.011775920239202242,
     "pr_auc": 0.00914273821220151,
-    "r_auc_pr": 0.0785121376417595,
+    "vus_window": 5,
+    "r_auc_pr": 0.013458940647600715,
+    "score_distribution": {
+      "fraction_above_threshold": 0.8116856950973808,
+      "q50": 0.0008555171662010252,
+      "q90": 0.02709676325321201,
+      "q95": 35.91572723388672,
+      "q99": 61.47190078735155,
+      "max": 85.95209503173828
+    },
+    "event_score_diagnostics": [
+      {
+        "event_id": 1,
+        "start_index": 1471,
+        "end_index": 1476,
+        "length_points": 6,
+        "detected": true,
+        "n_pred_points": 6,
+        "max_score": 0.0009766377042979002,
+        "mean_score": 0.0009363761055283248,
+        "max_score_percentile": 0.7751511081262592,
+        "mean_score_percentile": 0.7139019476158496
+      },
+      {
+        "event_id": 2,
+        "start_index": 1949,
+        "end_index": 1963,
+        "length_points": 15,
+        "detected": true,
+        "n_pred_points": 15,
+        "max_score": 0.0010328202042728662,
+        "mean_score": 0.0009981773366841177,
+        "max_score_percentile": 0.8401611820013432,
+        "mean_score_percentile": 0.8036265950302216
+      },
+      {
+        "event_id": 3,
+        "start_index": 2681,
+        "end_index": 2681,
+        "length_points": 1,
+        "detected": true,
+        "n_pred_points": 1,
+        "max_score": 0.0007711768266744912,
+        "mean_score": 0.0007711768266744912,
+        "max_score_percentile": 0.2315648085963734,
+        "mean_score_percentile": 0.2315648085963734
+      },
+      {
+        "event_id": 4,
+        "start_index": 3476,
+        "end_index": 3479,
+        "length_points": 4,
+        "detected": true,
+        "n_pred_points": 4,
+        "max_score": 0.0009709678706713021,
+        "mean_score": 0.0009610553825041279,
+        "max_score_percentile": 0.7666890530557421,
+        "mean_score_percentile": 0.7517797179314977
+      },
+      {
+        "event_id": 5,
+        "start_index": 4604,
+        "end_index": 4612,
+        "length_points": 9,
+        "detected": true,
+        "n_pred_points": 9,
+        "max_score": 0.0010270708007737994,
+        "mean_score": 0.0009480532413969437,
+        "max_score_percentile": 0.8358629952988583,
+        "mean_score_percentile": 0.7341840161182002
+      },
+      {
+        "event_id": 6,
+        "start_index": 5970,
+        "end_index": 5971,
+        "length_points": 2,
+        "detected": true,
+        "n_pred_points": 2,
+        "max_score": 0.000885452376678586,
+        "mean_score": 0.000884765264345333,
+        "max_score_percentile": 0.5965077233042311,
+        "mean_score_percentile": 0.5944929482874413
+      }
+    ],
     "event_f1": 0.0625,
     "event_precision": 0.03225806451612903,
     "event_recall": 1.0,
@@ -16686,7 +16769,7 @@
       "accuracy"
     ],
     "auroc_policy": "auxiliary_only",
-    "train_time": 48.656752824783325,
+    "train_time": 47.322234869003296,
     "anomaly_ratio": 0.5,
     "threshold": 0.0007585595780983567,
     "checkpoint": "RiAD/model/P0480/paperib/riad.pt",
@@ -16701,7 +16784,7 @@
   },
   "paper_metrics": {
     "primary_metric": "vus_pr",
-    "vus_pr": 0.030919990793950216,
+    "vus_pr": 0.011775920239202242,
     "pr_auc": 0.00914273821220151,
     "event": {
       "f1": 0.0625,
@@ -16719,6 +16802,88 @@
       "FP": 6006,
       "FN": 0
     },
+    "score_distribution": {
+      "fraction_above_threshold": 0.8116856950973808,
+      "q50": 0.0008555171662010252,
+      "q90": 0.02709676325321201,
+      "q95": 35.91572723388672,
+      "q99": 61.47190078735155,
+      "max": 85.95209503173828
+    },
+    "event_score_diagnostics": [
+      {
+        "event_id": 1,
+        "start_index": 1471,
+        "end_index": 1476,
+        "length_points": 6,
+        "detected": true,
+        "n_pred_points": 6,
+        "max_score": 0.0009766377042979002,
+        "mean_score": 0.0009363761055283248,
+        "max_score_percentile": 0.7751511081262592,
+        "mean_score_percentile": 0.7139019476158496
+      },
+      {
+        "event_id": 2,
+        "start_index": 1949,
+        "end_index": 1963,
+        "length_points": 15,
+        "detected": true,
+        "n_pred_points": 15,
+        "max_score": 0.0010328202042728662,
+        "mean_score": 0.0009981773366841177,
+        "max_score_percentile": 0.8401611820013432,
+        "mean_score_percentile": 0.8036265950302216
+      },
+      {
+        "event_id": 3,
+        "start_index": 2681,
+        "end_index": 2681,
+        "length_points": 1,
+        "detected": true,
+        "n_pred_points": 1,
+        "max_score": 0.0007711768266744912,
+        "mean_score": 0.0007711768266744912,
+        "max_score_percentile": 0.2315648085963734,
+        "mean_score_percentile": 0.2315648085963734
+      },
+      {
+        "event_id": 4,
+        "start_index": 3476,
+        "end_index": 3479,
+        "length_points": 4,
+        "detected": true,
+        "n_pred_points": 4,
+        "max_score": 0.0009709678706713021,
+        "mean_score": 0.0009610553825041279,
+        "max_score_percentile": 0.7666890530557421,
+        "mean_score_percentile": 0.7517797179314977
+      },
+      {
+        "event_id": 5,
+        "start_index": 4604,
+        "end_index": 4612,
+        "length_points": 9,
+        "detected": true,
+        "n_pred_points": 9,
+        "max_score": 0.0010270708007737994,
+        "mean_score": 0.0009480532413969437,
+        "max_score_percentile": 0.8358629952988583,
+        "mean_score_percentile": 0.7341840161182002
+      },
+      {
+        "event_id": 6,
+        "start_index": 5970,
+        "end_index": 5971,
+        "length_points": 2,
+        "detected": true,
+        "n_pred_points": 2,
+        "max_score": 0.000885452376678586,
+        "mean_score": 0.000884765264345333,
+        "max_score_percentile": 0.5965077233042311,
+        "mean_score_percentile": 0.5944929482874413
+      }
+    ],
     "operational": {
       "false_alarms_per_day": 6.9630624580255205,
       "mean_detection_delay_min": 0.0,
