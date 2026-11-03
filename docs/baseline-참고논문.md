@@ -4,25 +4,53 @@
 스토리·역할: [논문-스토리라인.md](./논문-스토리라인.md).  
 하이퍼·명령: [baseline-하이퍼파라미터.md](./baseline-하이퍼파라미터.md).
 
-> **논문 스토리:** baseline = **딥러닝 비지도 TSAD**, 분류는 **탐지 원리(inductive bias) 3종**  
-> (예측 잔차 · 재구성·우도 · 시간 연관성 괴리) — “Transformer”를 동급 카테고리로 두지 않음.  
-> 통신 IB에서 한계를 보이고 **준지도 rule Argos**가 더 적합함을 주장.  
-> (SOTA 레이스가 아니라 **적합성·설명·운영 GT 정합**이 전면.)
+> **논문 스토리 (2026-11-03 재개정):** contamination은 기존 robust TSAD로 흡수 → **RiAD backbone** → Shared multi-operator → expert operational calibration.  
+> Contamination 신규 해법·RiAD vs 다른 robust bake-off는 **비기여**.  
+> 상세: [논문-스토리라인.md](./논문-스토리라인.md).
 
 ---
 
-## 1. 실험 비교군 (권고)
+## 1. Backbone (메인)
 
-1차 축 = **이상이 score로 번역되는 방식**. 아키텍처는 괄호/비고.
+| 역할 | 방법 | 참고 논문 | Venue | 비고 |
+|------|------|-----------|-------|------|
+| **Contamination-robust backbone** | RiAD | *Rectifying inaccurate unsupervised learning for robust time series anomaly detection* (Rectified Inaccurate Anomaly Detection) | Information Sciences, 2024 | 선정 기준 충족; SOTA/bake-off 주장 없음 |
+| **비교 backbone (코드 공개)** | RoCA | *RoCA: Robust Contrastive One-class Time Series Anomaly Detection with Contaminated Data* | arXiv:2503.18385, 2025 | [ruiking04/RoCA](https://github.com/ruiking04/RoCA); paperib `RoCA/` · 기여≠bake-off |
+
+```bibtex
+@article{chen2024riad,
+  title={Rectifying inaccurate unsupervised learning for robust time series anomaly detection},
+  author={Chen, Zejian and Li, Zuoyong and Chen, Xinwei and Chen, Xiaobo and Fan, Haoyi and Hu, Rong},
+  journal={Information Sciences},
+  volume={662},
+  pages={120222},
+  year={2024},
+  doi={10.1016/j.ins.2024.120222},
+  note={RiAD}
+}
+
+@article{mou2025roca,
+  title={RoCA: Robust Contrastive One-class Time Series Anomaly Detection with Contaminated Data},
+  author={Mou, Xudong and Wang, Rui and Li, Bo and Wo, Tianyu and Sun, Jie and Wang, Hui and Liu, Xudong},
+  journal={arXiv preprint arXiv:2503.18385},
+  year={2025},
+  note={RoCA; code https://github.com/ruiking04/RoCA}
+}
+```
+
+---
+
+## 2. 참고 비교군 · 사전 관찰 (선택)
+
+사전 관찰·동기·(선택) 비robust 대비. 메인 실험의 필수 bake-off가 아님.  
+1차 축 = 탐지 원리. “Transformer”를 동급 카테고리로 두지 않음.
 
 | 탐지 원리 | 방법 | 참고 논문 | Venue | 코드 |
 |-----------|------|-----------|-------|------|
 | **예측 잔차** | LSTM-AD | Malhotra et al., *Long Short Term Memory Networks for Anomaly Detection in Time Series* | ESANN 2015 | `LSTM_AD/` |
 | **재구성·우도** | OmniAnomaly | Su et al., *Robust Anomaly Detection for Multivariate Time Series through Stochastic Recurrent Neural Network* | KDD 2019 | `OmniAnomaly/` |
 | **시간 연관성 괴리** | Anomaly Transformer | Xu et al., *Anomaly Transformer: Time Series Anomaly Detection with Association Discrepancy* | ICLR 2022 | `AnomalyTransformer/` |
-| **준지도 KPI 규칙** (제안) | Argos (+ multi-metric IB) | Gu et al., *Argos: Agentic Time-Series Anomaly Detection with Autonomous Rule Generation via Large Language Models* | arXiv:2501.14170 | `Argos_ib/` |
-
-비권장 라벨링: “Forecasting / Reconstruction / **Transformer**” — Transformer만 아키텍처 축이라 MECE가 깨짐.
+| **Operational calibration 옵션** | Argos (+ multi-metric IB) | Gu et al., *Argos: Agentic Time-Series Anomaly Detection with Autonomous Rule Generation via Large Language Models* | arXiv:2501.14170 | `Argos_ib/` |
 
 ### BibTeX 스케치
 
@@ -60,7 +88,7 @@
 
 ---
 
-## 2. 완전 지도 · 약지도 — **실험 제외, 포지셔닝용 인용**
+## 3. 완전 지도 · 약지도 — **실험 제외, 포지셔닝용 인용**
 
 완전 지도 윈도우 분류기는 **실험군이 아니다.**  
 스토리에서 “비지도 한계 → 지도가 답” 비약을 막는 데 쓴다. 상세 논증: [논문-스토리라인.md](./논문-스토리라인.md) §2.
@@ -100,7 +128,7 @@
 
 ---
 
-## 3. Classical (IQR + EWMA) — **삭제됨**
+## 4. Classical (IQR + EWMA) — **삭제됨**
 
 ### 왜 넣지 않았나
 
@@ -116,7 +144,7 @@ TSAD 벤치에서 “Classical = 이 조합”으로 고정된 **단일 방법 �
 
 ---
 
-## 4. 구현 vs 원논문 차이 (공정 서술용)
+## 5. 구현 vs 원논문 차이 (공정 서술용)
 
 | 방법 | paperib에서 맞춘 것 | 의도적/실용 차이 |
 |------|---------------------|------------------|
@@ -127,7 +155,7 @@ TSAD 벤치에서 “Classical = 이 조합”으로 고정된 **단일 방법 �
 
 ---
 
-## 5. 여유 시 ablation (아직 비권고)
+## 6. 여유 시 ablation (아직 비권고)
 
 | 방법 | 논문 | 비고 |
 |------|------|------|
@@ -139,7 +167,7 @@ TSAD 벤치에서 “Classical = 이 조합”으로 고정된 **단일 방법 �
 
 ---
 
-## 6. 변경 이력
+## 7. 변경 이력
 
 | 날짜 | 내용 |
 |------|------|
@@ -148,3 +176,7 @@ TSAD 벤치에서 “Classical = 이 조합”으로 고정된 **단일 방법 �
 | 2026-09-26 | §2 추가: 완전 지도·약지도 포지셔닝 인용 (실험 제외) |
 | 2026-09-26 | `Classical/` 코드 삭제 |
 | 2026-09-26 | 비교군 축을 탐지 원리 3종으로 MECE 정리 (Transformer ≠ 동급 카테고리) |
+| 2026-11-03 | (구) baseline=3단계 백본; Argos=옵션 |
+| 2026-11-03 | 재개정: **RiAD**=메인 backbone; LSTM/OA/AT=참고·관찰; Argos=operational 옵션 |
+| 2026-11-03 | 평가: VUS-PR primary · Event-F1 · operational; PA-F1 제외 |
+| 2026-11-03 | 비교 backbone **RoCA** (`RoCA/`, 공식 코드 발췌) 추가 |

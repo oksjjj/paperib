@@ -19,8 +19,10 @@ CSV = train+valid만 export하고, `train_test_split = n_train/(n_train+n_valid)
 Argos의 test fold = paperib valid가 되게 맞춘다.
 
 다변량 PLMN은 Argos가 한 시계열씩 다루므로, paperib 기본은 **multi-metric ensemble**:
-핵심 축(`A_RATE`, `M971`, fail 후보)마다 단변량 규칙을 두고 **OR/sum/two_stage**로 융합한다
-([논문-스토리라인.md](./논문-스토리라인.md) §3).
+핵심 축(`A_RATE`, `M971`, fail 후보)마다 단변량 규칙을 두고 **OR/sum/two_stage**로 융합한다.
+
+논문 스토리에서 Argos는 **3단계(operational calibration)** 의 구현 옵션일 수 있다.  
+전면 제안·필수 아님 — [논문-스토리라인.md](./논문-스토리라인.md).
 
 ---
 

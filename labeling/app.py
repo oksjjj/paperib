@@ -50,6 +50,7 @@ from tool import (  # noqa: E402
     available_metrics_splits,
     is_anomalytransformer_prediction,
     is_argos_prediction,
+    is_paper_backbone_prediction,
     primary_threshold_label,
     format_kst,
     freeze_shape_editing,
@@ -58,6 +59,7 @@ from tool import (  # noqa: E402
     labels_missing_reasons,
     load_labels,
     load_or_build_ranking,
+    PAPER_PLMNS,
     load_plmn,
     load_predictions,
     list_prediction_sources,
@@ -91,7 +93,8 @@ MAX_POINTS = 1500
 HOST = "127.0.0.1"
 PORT = 8050
 
-rank_df = load_or_build_ranking(top_n=None)
+# Paper evaluation: only these PLMNs are visible/selectable in the UI.
+rank_df = load_or_build_ranking(top_n=None, paper_only=True)
 plmn_options = [
     {
         "label": f"#{int(r.rank):03d}  {display_plmn(r.PLMN)}  ({int(r.M971_sum):,})",
@@ -100,6 +103,11 @@ plmn_options = [
     for r in rank_df.itertuples(index=False)
 ]
 plmn_ids = [o["value"] for o in plmn_options]
+_missing_paper = [p for p in PAPER_PLMNS if p not in plmn_ids]
+if _missing_paper:
+    raise RuntimeError(
+        "paper PLMNs missing from ranking cache: " + ", ".join(_missing_paper)
+    )
 
 state: dict = {
     "df": None,
@@ -138,7 +146,7 @@ state: dict = {
     "show_anomalies": True,
     "show_model_preds": True,
     "predictions": None,
-    "pred_source": "omnianomaly",
+    "pred_source": "riad",
     "selected_pred_id": None,
     "threshold_mode": "pot",  # "pot" | "best_f1_point" | "best_f1" (PA)
     "metrics_eval_split": "valid",  # "valid" | "test"
@@ -378,17 +386,17 @@ def _pred_by_id(pred_id: str | None) -> dict | None:
 def _model_pred_source_options():
     plmn = state.get("plmn")
     if not plmn:
-        return [{"label": "전체 메트릭", "value": "omnianomaly"}]
+        return [{"label": "전체 메트릭", "value": "riad"}]
     return list_prediction_sources(plmn)
 
 
 def _default_pred_source(options: list[dict] | None = None) -> str:
     opts = options if options is not None else _model_pred_source_options()
     values = [o["value"] for o in opts]
-    cur = state.get("pred_source") or "omnianomaly"
+    cur = state.get("pred_source") or "riad"
     if cur in values:
         return cur
-    return values[0] if values else "omnianomaly"
+    return values[0] if values else "riad"
 
 
 def _fmt_prf(
@@ -500,6 +508,124 @@ def _mode_block(
     )
 
 
+def _fmt_opt(v: Any, *, digits: int = 4) -> str:
+    if isinstance(v, (int, float)) and v == v:
+        return f"{float(v):.{digits}f}"
+    return "—"
+
+
+def _riad_metrics_children(pred: dict) -> list[Any]:
+    """Paper metrics: VUS-PR primary · Event-F1 · P/R/F1 · FA/day · delay (RiAD/RoCA)."""
+    paper = pred.get("paper_metrics") or {}
+    m = pred.get("metrics") or {}
+    split = (
+        paper.get("eval_split")
+        or m.get("eval_split")
+        or pred.get("eval_split")
+        or "valid"
+    )
+    point = dict(paper.get("point") or {})
+    if not point:
+        point = {
+            "precision": m.get("precision"),
+            "recall": m.get("recall"),
+            "f1": m.get("f1"),
+            "TP": m.get("tp") if m.get("tp") is not None else m.get("TP"),
+            "FP": m.get("fp") if m.get("fp") is not None else m.get("FP"),
+            "FN": m.get("fn") if m.get("fn") is not None else m.get("FN"),
+        }
+    event = dict(paper.get("event") or {})
+    if not event:
+        event = {
+            "f1": m.get("event_f1"),
+            "precision": m.get("event_precision"),
+            "recall": m.get("event_recall"),
+            "n_gt_events": m.get("n_gt_events"),
+            "n_pred_events": m.get("n_pred_events"),
+            "n_hit_gt": m.get("n_hit_gt"),
+        }
+    op = dict(paper.get("operational") or {})
+    if not op:
+        op = {
+            "false_alarms_per_day": m.get("false_alarms_per_day"),
+            "n_false_alarm_events": m.get("n_false_alarm_events"),
+            "observation_days": m.get("observation_days"),
+            "mean_detection_delay_min": m.get("mean_detection_delay_min"),
+            "median_detection_delay_min": m.get("median_detection_delay_min"),
+        }
+    vus = paper.get("vus_pr", m.get("vus_pr"))
+    pr_auc = paper.get("pr_auc", m.get("pr_auc"))
+    model = str(pred.get("model") or pred.get("source") or "riad")
+    tag = "RoCA" if str(model).startswith("roca") else "RiAD"
+    accent = "#0f766e" if tag == "RoCA" else "#5b21b6"
+    rows: list[Any] = [
+        html.Div(
+            f"{tag} metrics — VUS-PR (primary) · Event-F1 · operational · {split}",
+            style={
+                "fontWeight": "700",
+                "color": accent,
+                "marginBottom": "6px",
+            },
+        ),
+        html.Div(
+            "Point-Adjusted F1 / Accuracy는 주요 지표에서 제외. "
+            "AUROC는 보조만. primary thr = train percentile.",
+            style={"fontSize": "11px", "color": "#64748b", "marginBottom": "8px"},
+        ),
+        html.Div(
+            f"VUS-PR (primary) = {_fmt_opt(vus)}    "
+            f"PR-AUC = {_fmt_opt(pr_auc)}",
+            style={
+                "fontFamily": "monospace",
+                "fontSize": "13px",
+                "fontWeight": "600",
+                "marginBottom": "6px",
+                "color": "#1e293b",
+            },
+        ),
+        html.Div(
+            "Event-F1: "
+            + _fmt_prf(
+                event.get("precision"),
+                event.get("recall"),
+                event.get("f1"),
+            )
+            + f"  hit={event.get('n_hit_gt')} / gt={event.get('n_gt_events')}  "
+            f"pred_events={event.get('n_pred_events')}",
+            style={"fontFamily": "monospace", "fontSize": "12px", "marginBottom": "4px"},
+        ),
+        html.Div(
+            "Point: "
+            + _fmt_prf(
+                point.get("precision"),
+                point.get("recall"),
+                point.get("f1"),
+                tp=point.get("TP"),
+                fp=point.get("FP"),
+                fn=point.get("FN"),
+            ),
+            style={"fontFamily": "monospace", "fontSize": "12px", "marginBottom": "4px"},
+        ),
+        html.Div(
+            f"FA/day = {_fmt_opt(op.get('false_alarms_per_day'), digits=3)}  "
+            f"(FA events={op.get('n_false_alarm_events')} / "
+            f"days={_fmt_opt(op.get('observation_days'), digits=2)})",
+            style={"fontFamily": "monospace", "fontSize": "12px", "marginBottom": "2px"},
+        ),
+        html.Div(
+            f"Detection delay (min): mean={_fmt_opt(op.get('mean_detection_delay_min'), digits=2)}  "
+            f"median={_fmt_opt(op.get('median_detection_delay_min'), digits=2)}",
+            style={"fontFamily": "monospace", "fontSize": "12px", "marginBottom": "6px"},
+        ),
+        html.Div(
+            f"예측 구간 {len(pred.get('labels') or [])}개 · thr={_fmt_opt(pred.get('threshold'))} "
+            f"({pred.get('threshold_method') or 'percentile'})",
+            style={"fontSize": "12px", "color": "#334155"},
+        ),
+    ]
+    return rows
+
+
 def _argos_metrics_children(pred: dict) -> list[Any]:
     paper = pred.get("paper_metrics") or {}
     point = paper.get("point") or {}
@@ -586,17 +712,22 @@ def _argos_metrics_children(pred: dict) -> list[Any]:
 
 
 def _threshold_mode_options(pred: dict | None = None, source: str | None = None) -> list[dict]:
-    """Radio: primary thr → best-F1 point → best-F1 PA (Argos: rule only)."""
+    """Radio: primary thr → (optional) best-F1 point. PA는 RiAD에서 제외."""
     pred = pred if pred is not None else (state.get("predictions") or {})
     src = source if source is not None else state.get("pred_source")
     if is_argos_prediction(pred) or str(src or "").startswith("argos"):
         primary = primary_threshold_label(pred, source=src)
         return [{"label": primary["radio"], "value": "rule"}]
     primary = primary_threshold_label(pred, source=src)
+    if is_paper_backbone_prediction(pred, source=src):
+        return [
+            {"label": primary["radio"], "value": "pot"},
+            {"label": "best-F1 point (analysis only)", "value": "best_f1_point"},
+        ]
     return [
         {"label": primary["radio"], "value": "pot"},
         {"label": "best-F1 point (oracle)", "value": "best_f1_point"},
-        {"label": "best-F1 PA (oracle)", "value": "best_f1"},
+        {"label": "best-F1 PA (oracle · 비주용)", "value": "best_f1"},
     ]
 
 
@@ -611,6 +742,9 @@ def _threshold_mode_value_for_pred(
     mode = state.get("threshold_mode") or pred.get("threshold_mode") or "pot"
     if mode in ("rule", "argos_rule"):
         return "pot"
+    if is_paper_backbone_prediction(pred, source=src) and mode == "best_f1":
+        # PA mode removed from RiAD / RoCA UI.
+        return "pot"
     if mode in ("pot", "best_f1_point", "best_f1"):
         return mode
     return "pot"
@@ -622,13 +756,15 @@ def _detection_metrics_children() -> list[Any]:
         return [
             html.I(
                 "모델 예측 파일이 없습니다. "
-                "`run_plmn.py`로 학습·export 후 다시 로드하세요."
+                "`RiAD/run_plmn.py` 또는 `RoCA/run_plmn.py`로 학습·export 후 다시 로드하세요."
             )
         ]
     if is_argos_prediction(pred) or str(state.get("pred_source") or "").startswith(
         "argos"
     ):
         return _argos_metrics_children(pred)
+    if is_paper_backbone_prediction(pred, source=state.get("pred_source")):
+        return _riad_metrics_children(pred)
     mode = state.get("threshold_mode") or pred.get("threshold_mode") or "pot"
     metrics_split = (
         state.get("metrics_eval_split")
@@ -1607,6 +1743,9 @@ def _build_graph(click_mode: str):
                 thr = float(preds["threshold"])
             if thr is not None:
                 meta["score_threshold"] = thr
+            meta["score_polarity"] = str(
+                preds.get("score_polarity") or "higher_is_anomaly"
+            )
     if click_mode == "label_range" and state.get("label_range_anchor") is not None:
         meta["pending_range_start"] = str(
             to_plot_time(state["label_range_anchor"])
@@ -2065,7 +2204,14 @@ def _hover_panel_at_row(row: pd.Series):
         elif preds.get("threshold") is not None:
             thr = float(preds["threshold"])
         thr_txt = f"  (threshold={thr:.2f})" if thr is not None else ""
-        flag = " · anomaly" if thr is not None and score < thr else ""
+        higher = True
+        pol = str(preds.get("score_polarity") or "")
+        if pol in ("lower_is_anomaly", "low", "lt"):
+            higher = False
+        elif str(preds.get("source") or "").startswith("omnianomaly"):
+            higher = False
+        anomalous = (score > thr) if higher else (score < thr)
+        flag = " · anomaly" if thr is not None and anomalous else ""
         score_block = html.Div(
             f"Anomaly score = {score:.2f}{thr_txt}{flag}",
             style={
@@ -2744,7 +2890,7 @@ _START_METRIC_OPTS: list = []
 _START_METRIC_VALS: list = []
 _START_MODEL_PRED_OPTS: list = []
 _START_MODEL_SRC_OPTS: list = []
-_START_MODEL_SRC_VALUE = "omnianomaly"
+_START_MODEL_SRC_VALUE = "riad"
 _START_THR_OPTS: list = [
     {"label": "POT (논문 primary)", "value": "pot"},
     {"label": "best-F1 point (oracle)", "value": "best_f1_point"},
@@ -6556,6 +6702,9 @@ app.clientside_callback(
                     if (meta.score_threshold != null) {
                         cache.score_threshold = meta.score_threshold;
                     }
+                    if (meta.score_polarity) {
+                        cache.score_polarity = meta.score_polarity;
+                    }
                     if (meta.hover_cache_seq != null) cache.seq = meta.hover_cache_seq;
                     window.__plotHoverCache = cache;
                     return cache;
@@ -6671,7 +6820,15 @@ app.clientside_callback(
                     text += '\\nAnomaly score = ' + formatScoreNumber(score);
                     if (thr != null) {
                         text += '\\nthreshold = ' + formatScoreNumber(thr);
-                        if (score < thr) text += ' · anomaly';
+                        // RiAD / paperib default: higher score = anomaly
+                        var higher = true;
+                        if (cache.score_polarity === 'lower_is_anomaly'
+                            || cache.score_polarity === 'low'
+                            || cache.score_polarity === 'lt') {
+                            higher = false;
+                        }
+                        var hit = higher ? (score > thr) : (score < thr);
+                        if (hit) text += ' · anomaly';
                     }
                     return text;
                 }
@@ -6824,6 +6981,9 @@ app.clientside_callback(
                     if (meta.score_threshold != null) {
                         cache.score_threshold = meta.score_threshold;
                     }
+                    if (meta.score_polarity) {
+                        cache.score_polarity = meta.score_polarity;
+                    }
                     if (meta.hover_cache_seq != null) cache.seq = meta.hover_cache_seq;
                     window.__plotHoverCache = cache;
                     return cache;
@@ -6961,7 +7121,7 @@ app.clientside_callback(
 
 def main():
     url = f"http://{HOST}:{PORT}/"
-    print(f"순위 로드: {len(rank_df)}개 PLMN")
+    print(f"논문 PLMN {len(rank_df)}개: {', '.join(plmn_ids)}")
     print(f"라벨링 앱 실행 중 → {url}")
     print("종료: Ctrl+C")
     Timer(0.8, lambda: webbrowser.open(url)).start()

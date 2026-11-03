@@ -36,6 +36,21 @@ RANK_CACHE_PATH = os.path.join(LABEL_DIR, "plmn_rank.csv")
 CACHE_DIR = os.path.join(os.path.dirname(__file__), "cache")
 RANK_SIGNATURE_PATH = os.path.join(CACHE_DIR, "plmn_rank.signature")
 
+# Paper evaluation set (labeling UI / selection). Order is intentional.
+PAPER_PLMNS: tuple[str, ...] = (
+    "P0480",
+    "P0714",
+    "P1888",
+    "P0975",
+    "P2309",
+    "P1921",
+    "P1575",
+    "P0139",
+    "P2291",
+    "P0110",
+)
+PAPER_PLMN_SET: frozenset[str] = frozenset(PAPER_PLMNS)
+
 ANOMALY_FILL = "rgba(201, 162, 39, 0.28)"
 ANOMALY_LINE = "#c9a227"
 # OmniAnomaly (and other model) predictions — distinct from human labels.
@@ -187,20 +202,9 @@ REF_LINE = dict(width=REF_LINE_WIDTH, dash=REF_LINE_DASH)
 RATE_METRICS = frozenset({S_RATE_KEY, A_RATE_KEY})
 RATE_Y_RANGE = (0.0, 1.0)
 
-# Dropped from *all* model training / Argos axes (still shown in labeling UI).
-# Almost absent on train, sparse on valid/test, not operationally meaningful.
-EXCLUDED_TRAIN_METRICS: frozenset[str] = frozenset({"M688"})
-
 
 def is_rate_metric(metric: str) -> bool:
     return metric in RATE_METRICS
-
-
-def filter_train_metrics(metrics: list[str] | tuple[str, ...] | None) -> list[str]:
-    """Drop ``EXCLUDED_TRAIN_METRICS`` while preserving order."""
-    if not metrics:
-        return []
-    return [m for m in metrics if m not in EXCLUDED_TRAIN_METRICS]
 
 
 def rate_metrics_available(
@@ -517,11 +521,34 @@ def ensure_label_dir() -> str:
     return LABEL_DIR
 
 
-def load_or_build_ranking(top_n: int | None = None) -> pd.DataFrame:
+def filter_paper_plmns(rank_df: pd.DataFrame) -> pd.DataFrame:
+    """Keep only ``PAPER_PLMNS``, ordered 1..N for the paper eval set."""
+    if rank_df is None or rank_df.empty or "PLMN" not in rank_df.columns:
+        return rank_df
+    order = {plmn: i for i, plmn in enumerate(PAPER_PLMNS)}
+    out = rank_df[rank_df["PLMN"].astype(str).isin(order)].copy()
+    out["_paper_ord"] = out["PLMN"].astype(str).map(order)
+    out = (
+        out.sort_values("_paper_ord", kind="stable")
+        .drop(columns=["_paper_ord"])
+        .reset_index(drop=True)
+    )
+    if "rank" in out.columns:
+        out["rank"] = range(1, len(out) + 1)
+    return out
+
+
+def load_or_build_ranking(
+    top_n: int | None = None,
+    *,
+    paper_only: bool = False,
+) -> pd.DataFrame:
     """Load a ranking that matches the current source-data snapshot.
 
     Adding or replacing data/*.csv invalidates the rank signature. The next app
     start rebuilds the ranking, while label JSON files remain untouched.
+
+    When ``paper_only`` is True, restrict to ``PAPER_PLMNS`` (paper eval set).
     """
     ensure_label_dir()
     os.makedirs(CACHE_DIR, exist_ok=True)
@@ -546,6 +573,9 @@ def load_or_build_ranking(top_n: int | None = None) -> pd.DataFrame:
 
     if top_n is not None:
         rank_df = rank_df.head(top_n).copy()
+
+    if paper_only:
+        rank_df = filter_paper_plmns(rank_df)
 
     rank_df = rank_df.reset_index(drop=True)
     if "PLMN" in rank_df.columns:
@@ -683,7 +713,7 @@ def save_labels(doc: dict[str, Any]) -> str:
     return path
 
 
-def pred_path(plmn: str, source: str = "omnianomaly") -> str:
+def pred_path(plmn: str, source: str = "riad") -> str:
     return os.path.join(PRED_DIR, f"{plmn}_{source}.json")
 
 
@@ -693,8 +723,8 @@ def list_prediction_sources(plmn: str) -> list[dict[str, str]]:
     if not os.path.isdir(PRED_DIR):
         return [
             {
-                "label": "OmniAnomaly · paperib · 전체 raw · win=100 (파일 없음)",
-                "value": "omnianomaly",
+                "label": "RiAD · paperib · 전체 raw · win=100 (파일 없음)",
+                "value": "riad",
             }
         ]
     prefix = f"{plmn}_"
@@ -726,7 +756,42 @@ def list_prediction_sources(plmn: str) -> list[dict[str, str]]:
             source.startswith("lstm_ad")
             or doc.get("model") == "lstm_ad"
         )
+        is_riad = (
+            source.startswith("riad")
+            or doc.get("model") == "riad"
+            or str(doc.get("source") or "").startswith("riad")
+        )
+        is_roca = (
+            source.startswith("roca")
+            or doc.get("model") == "roca"
+            or str(doc.get("source") or "").startswith("roca")
+        )
         n_seg = len(doc.get("labels") or [])
+
+        if is_riad or is_roca:
+            run = doc.get("run_name") or "paperib"
+            try:
+                win = int(doc["window_length"]) if doc.get("window_length") is not None else (
+                    100 if is_riad else 32
+                )
+            except (TypeError, ValueError):
+                win = 100 if is_riad else 32
+            cols = doc.get("feature_columns") or []
+            tag = "RiAD" if is_riad else "RoCA"
+            label = (
+                f"{tag} · {run} · 전체 raw · win={win} "
+                f"({len(cols)}d, {n_seg}구간)"
+            )
+            family = 0 if is_riad else 1
+            view_ord = 0
+            options.append(
+                {
+                    "label": label,
+                    "value": source,
+                    "_sort": (family, view_ord, win, source),
+                }
+            )
+            continue
 
         if is_argos:
             # Independent of OmniAnomaly / AT — rule-based overlay.
@@ -833,14 +898,14 @@ def list_prediction_sources(plmn: str) -> list[dict[str, str]]:
     if not options:
         options.append(
             {
-                "label": "OmniAnomaly · paperib · 전체 raw · win=100 (파일 없음)",
-                "value": "omnianomaly",
+                "label": "RiAD · paperib · 전체 raw · win=100 (파일 없음)",
+                "value": "riad",
             }
         )
     return options
 
 
-def empty_pred_doc(plmn: str, source: str = "omnianomaly") -> dict[str, Any]:
+def empty_pred_doc(plmn: str, source: str = "riad") -> dict[str, Any]:
     return {
         "plmn": plmn,
         "source": source,
@@ -853,7 +918,7 @@ def empty_pred_doc(plmn: str, source: str = "omnianomaly") -> dict[str, Any]:
 def load_predictions(
     plmn: str,
     *,
-    source: str = "omnianomaly",
+    source: str = "riad",
 ) -> dict[str, Any]:
     """Load model prediction overlay (separate from human label JSON)."""
     path = pred_path(plmn, source=source)
@@ -1072,12 +1137,52 @@ def adjust_predicts(pred: np.ndarray, label: np.ndarray) -> np.ndarray:
     return predict
 
 
+def score_higher_is_anomaly(
+    predictions: dict[str, Any] | None = None,
+    *,
+    source: str | None = None,
+) -> bool:
+    """RiAD (and current paperib default): higher score = more anomalous.
+
+    Legacy OmniAnomaly/AT used lower-is-anomalous; those runners are removed.
+    """
+    if predictions is None and source is None:
+        return True
+    pol = str((predictions or {}).get("score_polarity") or "")
+    if pol in ("higher_is_anomaly", "high", "gt"):
+        return True
+    if pol in ("lower_is_anomaly", "low", "lt"):
+        return False
+    src = str(source or (predictions or {}).get("source") or "")
+    model = str((predictions or {}).get("model") or "")
+    if src.startswith("riad") or model == "riad":
+        return True
+    if src.startswith("roca") or model == "roca":
+        return True
+    # Default for paperib after OA removal.
+    return True
+
+
+def is_anomalous_score(
+    score: float | np.ndarray,
+    threshold: float,
+    *,
+    higher_is_anomaly: bool = True,
+) -> bool | np.ndarray:
+    """Compare score to threshold with the active polarity."""
+    if higher_is_anomaly:
+        return score > threshold
+    return score < threshold
+
+
 def compute_detection_metrics(
     score: np.ndarray,
     y_true: np.ndarray,
     threshold: float | None,
+    *,
+    higher_is_anomaly: bool = True,
 ) -> dict[str, Any]:
-    """Point-wise and point-adjusted P/R/F1 (score < thr ⇒ anomaly)."""
+    """Point-wise and point-adjusted P/R/F1 (default: score > thr ⇒ anomaly)."""
     score = np.asarray(score, dtype=np.float64).reshape(-1)
     y = np.asarray(y_true, dtype=bool).reshape(-1)
     n = min(len(score), len(y))
@@ -1086,6 +1191,7 @@ def compute_detection_metrics(
         "threshold": threshold,
         "n_scored": int(np.isfinite(score).sum()),
         "n_gt": int(y.sum()),
+        "higher_is_anomaly": bool(higher_is_anomaly),
     }
     if threshold is None or not np.isfinite(score).any():
         out["point"] = None
@@ -1093,7 +1199,9 @@ def compute_detection_metrics(
         return out
     ok = np.isfinite(score)
     pred = np.zeros(n, dtype=bool)
-    pred[ok] = score[ok] < float(threshold)
+    pred[ok] = is_anomalous_score(
+        score[ok], float(threshold), higher_is_anomaly=higher_is_anomaly
+    )
     if ok.any():
         first = int(np.flatnonzero(ok)[0])
         pred_e, y_e = pred[first:], y[first:]
@@ -1114,12 +1222,13 @@ def best_f1_threshold(
     *,
     n_steps: int = 200,
     objective: str = "point_adjust",
+    higher_is_anomaly: bool = True,
 ) -> tuple[float | None, dict[str, Any] | None]:
     """Oracle threshold maximizing F1 on the given window.
 
     ``objective``:
       - ``point`` — raw point-wise F1 (no PA)
-      - ``point_adjust`` — point-adjusted F1 (default; OmniAnomaly-style)
+      - ``point_adjust`` — point-adjusted F1 (analysis only; not paper primary)
     """
     score = np.asarray(score, dtype=np.float64).reshape(-1)
     y = np.asarray(y_true, dtype=bool).reshape(-1)
@@ -1134,13 +1243,21 @@ def best_f1_threshold(
     lo, hi = float(np.min(s)), float(np.max(s))
     if not np.isfinite(lo) or lo >= hi:
         thr = lo if np.isfinite(lo) else None
-        live = compute_detection_metrics(s, yy, thr) if thr is not None else None
+        live = (
+            compute_detection_metrics(
+                s, yy, thr, higher_is_anomaly=higher_is_anomaly
+            )
+            if thr is not None
+            else None
+        )
         return thr, live
     best_f1 = -1.0
     best_thr = lo
     best_live: dict[str, Any] | None = None
     for thr in np.linspace(lo, hi, max(2, int(n_steps))):
-        live = compute_detection_metrics(s, yy, float(thr))
+        live = compute_detection_metrics(
+            s, yy, float(thr), higher_is_anomaly=higher_is_anomaly
+        )
         f1 = float((live.get(metric_key) or {}).get("f1") or -1.0)
         if f1 > best_f1:
             best_f1 = f1
@@ -1160,6 +1277,39 @@ def is_argos_prediction(predictions: dict[str, Any] | None) -> bool:
         src.startswith("argos")
         or model == "argos"
         or method == "argos_rule"
+    )
+
+
+def is_riad_prediction(
+    predictions: dict[str, Any] | None,
+    *,
+    source: str | None = None,
+) -> bool:
+    """True for RiAD backbone overlays."""
+    src = str(source or (predictions or {}).get("source") or "")
+    model = str((predictions or {}).get("model") or "")
+    return src.startswith("riad") or model == "riad"
+
+
+def is_roca_prediction(
+    predictions: dict[str, Any] | None,
+    *,
+    source: str | None = None,
+) -> bool:
+    """True for RoCA backbone overlays."""
+    src = str(source or (predictions or {}).get("source") or "")
+    model = str((predictions or {}).get("model") or "")
+    return src.startswith("roca") or model == "roca"
+
+
+def is_paper_backbone_prediction(
+    predictions: dict[str, Any] | None,
+    *,
+    source: str | None = None,
+) -> bool:
+    """RiAD or RoCA contamination-robust backbone overlays."""
+    return is_riad_prediction(predictions, source=source) or is_roca_prediction(
+        predictions, source=source
     )
 
 
@@ -1183,13 +1333,15 @@ def is_baseline_percentile_prediction(
     *,
     source: str | None = None,
 ) -> bool:
-    """Classical / LSTM-AD (train percentile thr, not POT)."""
+    """RiAD / Classical / LSTM-AD (train percentile thr, not POT)."""
     src = str(source or (predictions or {}).get("source") or "")
     model = str((predictions or {}).get("model") or "")
     return (
-        src.startswith("classical")
+        src.startswith("riad")
+        or src.startswith("roca")
+        or src.startswith("classical")
         or src.startswith("lstm_ad")
-        or model in ("classical", "lstm_ad")
+        or model in ("riad", "roca", "classical", "lstm_ad")
     )
 
 
@@ -1246,6 +1398,32 @@ def primary_threshold_label(
                     "point / PA (valid)"
                 ),
                 "overlay": "percentile / OR",
+            }
+        if str(src).startswith("riad") or model == "riad":
+            return {
+                "short": "percentile",
+                "title": "[percentile]",
+                "radio": "percentile (train · RiAD)",
+                "note": (
+                    "primary thr · train top-percentile on recon MSE "
+                    "(higher = more anomalous). "
+                    "Paper primary metric = VUS-PR (PA-F1 제외)"
+                ),
+                "heading": "RiAD metrics — VUS-PR / Event-F1 / operational",
+                "overlay": "percentile",
+            }
+        if str(src).startswith("roca") or model == "roca":
+            return {
+                "short": "percentile",
+                "title": "[percentile]",
+                "radio": "percentile (train · RoCA)",
+                "note": (
+                    "primary thr · train top-percentile on RoCA loss_n "
+                    "(higher = more anomalous). "
+                    "Paper primary metric = VUS-PR (PA-F1 제외)"
+                ),
+                "heading": "RoCA metrics — VUS-PR / Event-F1 / operational",
+                "overlay": "percentile",
             }
         return {
             "short": "percentile",
@@ -1401,7 +1579,8 @@ def mask_to_pred_labels(
             sl = np.asarray(scores[i:j], dtype=np.float64)
             finite = sl[np.isfinite(sl)]
             if len(finite):
-                seg_score = float(np.min(finite))
+                # Default paperib polarity: higher score = more anomalous.
+                seg_score = float(np.max(finite))
         kind = "point" if j == i + 1 else "range"
         items.append(
             {
@@ -1430,13 +1609,16 @@ def rebuild_pred_labels_for_threshold(
     score = df[ANOMALY_SCORE_KEY].to_numpy(dtype=np.float64)
     ok = np.isfinite(score)
     mask = np.zeros(len(df), dtype=bool)
-    mask[ok] = score[ok] < float(threshold)
+    higher = score_higher_is_anomaly(predictions)
+    mask[ok] = is_anomalous_score(
+        score[ok], float(threshold), higher_is_anomaly=higher
+    )
     return mask_to_pred_labels(
         mask,
         df["time"],
         scores=score,
         id_prefix=id_prefix,
-        source=str(predictions.get("source") or "omnianomaly"),
+        source=str(predictions.get("source") or "riad"),
     )
 
 
@@ -1508,9 +1690,20 @@ def enrich_predictions_for_ui(
         else "pot"
     )
     thresholds = thresholds_from_pred_doc(doc)
-    paper = paper_metrics_from_ib_saved(
-        doc.get("metrics") or {}, metrics_split=split_choice
-    )
+    export_paper = doc.get("paper_metrics")
+    # RiAD / RoCA exports already carry VUS-PR · Event · operational blocks.
+    # Do not replace them with the legacy Omni/AT pot/best_f1 mapper (empty for these).
+    if is_paper_backbone_prediction(doc) and isinstance(export_paper, dict) and (
+        export_paper.get("vus_pr") is not None
+        or export_paper.get("event") is not None
+        or export_paper.get("primary_metric") == "vus_pr"
+    ):
+        paper = dict(export_paper)
+        paper["eval_split"] = split_choice
+    else:
+        paper = paper_metrics_from_ib_saved(
+            doc.get("metrics") or {}, metrics_split=split_choice
+        )
 
     # Oracle thr always fit on **valid** (never on test).
     region_valid = _eval_region_mask(df, doc, metrics_split="valid")
@@ -1522,15 +1715,20 @@ def enrich_predictions_for_ui(
     else:
         score_e = np.array([], dtype=np.float64)
 
+    higher = score_higher_is_anomaly(doc)
     if ANOMALY_SCORE_KEY in df.columns and region_valid.any() and y_full[region_valid].any():
         score_all = df[ANOMALY_SCORE_KEY].to_numpy(dtype=np.float64)
         s_val = score_all[region_valid]
         y_val = y_full[region_valid]
         # Point oracle always live on valid; PA uses saved thr when present.
-        bf_pt, _ = best_f1_threshold(s_val, y_val, objective="point")
+        bf_pt, _ = best_f1_threshold(
+            s_val, y_val, objective="point", higher_is_anomaly=higher
+        )
         thresholds["best_f1_point"] = bf_pt
         if thresholds.get("best_f1") is None:
-            bf_pa, _ = best_f1_threshold(s_val, y_val, objective="point_adjust")
+            bf_pa, _ = best_f1_threshold(
+                s_val, y_val, objective="point_adjust", higher_is_anomaly=higher
+            )
             thresholds["best_f1"] = bf_pa
 
     live_by_mode: dict[str, Any] = {}
@@ -1539,7 +1737,10 @@ def enrich_predictions_for_ui(
             if mthr is None:
                 continue
             live_by_mode[mkey] = compute_detection_metrics(
-                score_e[region], y_full[region], mthr
+                score_e[region],
+                y_full[region],
+                mthr,
+                higher_is_anomaly=higher,
             )
 
     # Labels per mode (full series — overlay not clipped to metrics_split)

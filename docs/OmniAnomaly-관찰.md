@@ -88,18 +88,17 @@ OmniAnomaly는 재구성 능력이 좋아 **mild한 운영 이상을 정상처�
 
 ## 6. 논문 프레이밍과의 연결
 
-목표는 “여러 모델 중 최강 하나”가 아니라:
+전체 스토리: [논문-스토리라인.md](./논문-스토리라인.md) (RiAD → Shared → Operational).  
+본 관찰은 메인 백본 결과가 아니라 **문제 제기·동기**다.
 
-> IB 운영 GT에서 **재구성 모델이 언제 필요한가 / 어디에 실패하는가**
+| 관찰 | 스토리 연결 |
+|------|-------------|
+| mild 복원 → score가 thr 아래 안 감 | **3단계** statistical ≠ operational |
+| severe에 편중 · 단순 규칙과 겹칠 수 있음 | statistical TSAD만의 운용 이득이 제한적일 수 있음 |
+| train contamination | backbone으로 **RiAD**를 쓰는 동기 (신규 robust 해법 기여 아님) |
+| `comb` / `comb_share` | **2단계** partner-norm·비율 feature와 연결 가능 |
 
-| 축 | 역할 |
-|----|------|
-| OmniAnomaly | 재구성 baseline — mild 복원·severe 편중 **가설의 근거** |
-| Attention 등 (예: AT) | 맥락·다른 inductive bias와 비교 |
-| 단순 baseline | “severe는 모델 없이도?”를 **숫자로** 검증 |
-| Feature (`comb` / `comb_share`) | raw 스케일 한계를 완화하면 mild score가 살아나는지 |
-
-비교 시 **임계값 프로토콜을 맞출 것**: primary는 양측 모두 label-free (OA=POT, AT=train percentile 등). best-F1은 oracle 상한으로만.
+비교 시 **임계값 프로토콜을 맞출 것**: primary는 label-free (OA=POT 등). best-F1은 oracle 상한으로만.
 
 ---
 
@@ -118,3 +117,4 @@ OmniAnomaly는 재구성 능력이 좋아 **mild한 운영 이상을 정상처�
 | 날짜 | 내용 |
 |------|------|
 | 2026-09-25 | P0480 `paperib`/POT 관찰·논문용 시사점 초안 |
+| 2026-11-03 | §6을 RiAD→Shared→Operational 스토리에 재연결 |

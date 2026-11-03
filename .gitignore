@@ -52,18 +52,11 @@ events.out.tfevents.*
 
 # --- Upstream clones ---
 /Argos/
+/_vendor/
 
-# --- Experiment artifacts (keep source) ---
-/OmniAnomaly/model/
-/OmniAnomaly/result/
-/OmniAnomaly/log/*
-!/OmniAnomaly/log/.gitkeep
-
-# AnomalyTransformer/model/ also holds source (attn.py, …); ignore run subdirs only.
-/AnomalyTransformer/model/*/
-/AnomalyTransformer/result/
-
-/LSTM_AD/model/
+# --- Experiment artifacts ---
+/RiAD/model/
+/RoCA/model/
 
 # --- Local outputs / caches ---
 graph/

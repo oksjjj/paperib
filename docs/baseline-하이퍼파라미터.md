@@ -19,7 +19,7 @@ source .venv/bin/activate   # 또는 .venv/bin/python …
 PLMN=P0480
 ```
 
-Feature run: `paperib` | `comb` | `comb_share` (`M688` 제외는 prep 공통).
+Feature run: `paperib` | `comb` | `comb_share` (`paperib` = 전체 raw, metric 사전 제외 없음).
 
 ---
 

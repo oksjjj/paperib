@@ -7,6 +7,6 @@ plotly==6.9.0
 dash==4.4.1
 nbformat>=4.2.0
 
-# OmniAnomaly (optional; see OmniAnomaly/requirements.txt)
-# torch>=2.0.0
-# tensorboard>=2.14.0
+# RiAD backbone + VUS-PR (Paparrizos et al.)
+torch>=2.0.0
+vus>=0.0.6
