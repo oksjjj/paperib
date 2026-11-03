@@ -180,7 +180,7 @@ def train_and_eval(
     y_valid = prep["y_valid"]
 
     bundle = evaluate_riad_valid(
-        y_valid, valid_scores, thr, window=window, sample_minutes=5.0
+        y_valid, valid_scores, thr, vus_window=None, sample_minutes=5.0
     )
 
     ckpt_path = None
@@ -229,6 +229,9 @@ def train_and_eval(
             split=prep["split"],
             metrics_extra={
                 "train_time": train_time,
+                "vus_window": bundle.get("vus_window"),
+                "score_distribution": bundle.get("score_distribution"),
+                "event_score_diagnostics": bundle.get("event_score_diagnostics"),
                 "anomaly_ratio": anomaly_ratio,
                 "threshold": thr,
                 "checkpoint": rel_ckpt,
@@ -247,7 +250,14 @@ def train_and_eval(
     if not quiet:
         print(
             f"valid VUS-PR={bundle['primary']['vus_pr']}  "
+            f"(vus_window={bundle.get('vus_window')})  "
             f"Event-F1={ev['f1']:.3f}  PR-AUC={bundle['pr_auc']}",
+            flush=True,
+        )
+        sd = bundle.get("score_distribution") or {}
+        print(
+            f"valid score>thr fraction={sd.get('fraction_above_threshold')} "
+            f"q95={sd.get('q95')} max={sd.get('max')}",
             flush=True,
         )
         print(
