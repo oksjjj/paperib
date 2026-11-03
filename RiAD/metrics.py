@@ -159,12 +159,110 @@ def pr_auc(y_true: np.ndarray, score_high_is_anomaly: np.ndarray) -> float | Non
     return float(average_precision_score(y[ok].astype(int), s[ok]))
 
 
+def _median_event_length(y_true: np.ndarray) -> int:
+    """Median GT event length in points; at least 1.
+
+    VUS recommends choosing the tolerance window from external knowledge such as
+    the labeled anomaly length. Using GT event length keeps evaluation tolerance
+    independent from each model's input window.
+    """
+    lengths = [b - a + 1 for a, b in _segments(np.asarray(y_true, dtype=bool))]
+    if not lengths:
+        return 1
+    return max(int(round(float(np.median(lengths)))), 1)
+
+
+def resolve_vus_window(
+    y_true: np.ndarray,
+    sliding_window: int | None = None,
+) -> int:
+    """Resolve one model-independent VUS tolerance window.
+
+    None or non-positive values mean auto: median GT event length.
+    """
+    if sliding_window is None or int(sliding_window) <= 0:
+        return _median_event_length(y_true)
+    return max(int(sliding_window), 1)
+
+
+def score_distribution(
+    scores_high_is_anomaly: np.ndarray,
+    threshold: float,
+) -> dict[str, float | None]:
+    """Compact score-distribution diagnostics for train-to-valid sanity checks."""
+    s = np.asarray(scores_high_is_anomaly, dtype=np.float64).reshape(-1)
+    s = s[np.isfinite(s)]
+    if s.size == 0:
+        return {
+            "fraction_above_threshold": None,
+            "q50": None,
+            "q90": None,
+            "q95": None,
+            "q99": None,
+            "max": None,
+        }
+    return {
+        "fraction_above_threshold": float(np.mean(s > float(threshold))),
+        "q50": float(np.quantile(s, 0.50)),
+        "q90": float(np.quantile(s, 0.90)),
+        "q95": float(np.quantile(s, 0.95)),
+        "q99": float(np.quantile(s, 0.99)),
+        "max": float(np.max(s)),
+    }
+
+
+def event_score_diagnostics(
+    y_true: np.ndarray,
+    scores_high_is_anomaly: np.ndarray,
+    threshold: float,
+) -> list[dict[str, float | int | bool | None]]:
+    """Per-GT-event score/rank diagnostics."""
+    y = np.asarray(y_true, dtype=bool).reshape(-1)
+    s = np.asarray(scores_high_is_anomaly, dtype=np.float64).reshape(-1)
+    n = min(len(y), len(s))
+    y, s = y[:n], s[:n]
+    finite_all = np.sort(s[np.isfinite(s)])
+
+    def pct(v: float | None) -> float | None:
+        if v is None or not np.isfinite(v) or finite_all.size == 0:
+            return None
+        return float(np.searchsorted(finite_all, v, side="right") / finite_all.size)
+
+    rows: list[dict[str, float | int | bool | None]] = []
+    for event_id, (a, b) in enumerate(_segments(y), start=1):
+        ss = s[a : b + 1]
+        finite = ss[np.isfinite(ss)]
+        if finite.size:
+            max_score = float(np.max(finite))
+            mean_score = float(np.mean(finite))
+            pred_points = int(np.sum(finite > float(threshold)))
+        else:
+            max_score = None
+            mean_score = None
+            pred_points = 0
+        rows.append(
+            {
+                "event_id": event_id,
+                "start_index": int(a),
+                "end_index": int(b),
+                "length_points": int(b - a + 1),
+                "detected": bool(pred_points > 0),
+                "n_pred_points": pred_points,
+                "max_score": max_score,
+                "mean_score": mean_score,
+                "max_score_percentile": pct(max_score),
+                "mean_score_percentile": pct(mean_score),
+            }
+        )
+    return rows
+
+
 def vus_pr(
     y_true: np.ndarray,
     score_high_is_anomaly: np.ndarray,
     *,
-    sliding_window: int = 100,
-) -> dict[str, float | None]:
+    sliding_window: int | None = None,
+) -> dict[str, float | int | None]:
     """VUS-PR via official ``vus`` package (Paparrizos et al.).
 
     ``score_high_is_anomaly`` must be higher-for-anomaly (e.g. reconstruction MSE).
@@ -176,8 +274,15 @@ def vus_pr(
     n = min(len(y), len(s))
     y, s = y[:n], s[:n]
     ok = np.isfinite(s)
+    vus_window = resolve_vus_window(y, sliding_window)
     if ok.sum() < 8 or int(y[ok].sum()) == 0:
-        return {"vus_pr": None, "auc_pr": None, "r_auc_pr": None}
+        return {
+            "vus_pr": None,
+            "auc_pr": None,
+            "r_auc_pr": None,
+            "vus_roc": None,
+            "vus_window": vus_window,
+        }
     # Fill leading NaNs (window warm-up) with nearest finite for VUS length match.
     s2 = s.copy()
     if not ok.all():
@@ -198,15 +303,22 @@ def vus_pr(
             s2,
             y.astype(int),
             metric="all",
-            slidingWindow=max(int(sliding_window), 1),
+            slidingWindow=vus_window,
         )
     except Exception:
-        return {"vus_pr": None, "auc_pr": None, "r_auc_pr": None}
+        return {
+            "vus_pr": None,
+            "auc_pr": None,
+            "r_auc_pr": None,
+            "vus_roc": None,
+            "vus_window": vus_window,
+        }
     return {
         "vus_pr": _f(res.get("VUS_PR")),
         "auc_pr": _f(res.get("AUC_PR")),
         "r_auc_pr": _f(res.get("R_AUC_PR")),
         "vus_roc": _f(res.get("VUS_ROC")),  # auxiliary only
+        "vus_window": vus_window,
     }
 
 
@@ -223,7 +335,7 @@ def evaluate_riad_valid(
     scores_high_is_anomaly: np.ndarray,
     threshold: float,
     *,
-    window: int = 100,
+    vus_window: int | None = None,
     sample_minutes: float = 5.0,
 ) -> dict[str, Any]:
     """Full metric bundle for one operator valid split.
@@ -250,8 +362,10 @@ def evaluate_riad_valid(
     event = event_f1(y_e, pred_e)
     fa = false_alarms_per_day(y_e, pred_e, sample_minutes=sample_minutes)
     delay = detection_delay(y_e, pred_e, sample_minutes=sample_minutes)
-    vus = vus_pr(y_e, s_e, sliding_window=window)
+    vus = vus_pr(y_e, s_e, sliding_window=vus_window)
     ap = pr_auc(y_e, s_e)
+    score_diag = score_distribution(s_e, threshold)
+    event_diag = event_score_diagnostics(y_e, s_e, threshold)
 
     return {
         "primary": {"vus_pr": vus.get("vus_pr")},
@@ -259,6 +373,9 @@ def evaluate_riad_valid(
         "point": point,
         "pr_auc": ap if ap is not None else vus.get("auc_pr"),
         "vus": vus,
+        "vus_window": vus.get("vus_window"),
+        "score_distribution": score_diag,
+        "event_score_diagnostics": event_diag,
         "operational": {
             **fa,
             **delay,
