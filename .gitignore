@@ -28,7 +28,9 @@ __pycache__/
 events.out.tfevents.*
 *.log
 
-# --- Data: track only README / labels / predictions ---
+# --- Data layout ---
+# Track: paper-only de-identified masked_*.csv, labels, predictions, results/
+# Never track: PLMN/metric reverse maps, full (non-paper) raw dump, local caches
 /data/*
 !/data/.gitkeep
 !/data/README.md
@@ -37,29 +39,56 @@ events.out.tfevents.*
 /data/ib_data/*
 !/data/ib_data/.gitkeep
 !/data/ib_data/README.md
+!/data/ib_data/raw/
 !/data/ib_data/labels/
 !/data/ib_data/predictions/
+!/data/ib_data/argos/
+
+# Full multi-PLMN dump stays local only
+/data/ib_data/_local_raw_full/
+
+/data/ib_data/raw/*
+!/data/ib_data/raw/.gitkeep
+!/data/ib_data/raw/masked_*.csv
+# reverse maps: masked ↔ real names (local labeling only)
+**/plmn_mapping.txt
+**/metric_mapping.txt
+*_mapping.txt
 
 /data/ib_data/labels/*
 !/data/ib_data/labels/.gitkeep
 !/data/ib_data/labels/*_labels.json
+!/data/ib_data/labels/plmn_rank.csv
 
 /data/ib_data/predictions/*
 !/data/ib_data/predictions/.gitkeep
 !/data/ib_data/predictions/*.json
 
-# Never commit PLMN/metric de-identification maps (or paste mappings into docs).
+# Argos exports (de-identified); ignore huge dumps if any
+/data/ib_data/argos/**
+!/data/ib_data/argos/**/
+!/data/ib_data/argos/**/*.csv
+!/data/ib_data/argos/**/*.json
 
 # --- Upstream clones ---
 /Argos/
 /_vendor/
 
-# --- Experiment artifacts ---
+# --- Training checkpoints (metrics live under results/) ---
 /RiAD/model/
 /RoCA/model/
 
-# --- Local outputs / caches ---
-graph/
-analysis/
-results/
-cache/
+# --- Local caches / analysis ---
+/labeling/cache/
+/graph/
+/analysis/
+/cache/
+
+# results/ is tracked (see results/README.md)
+!/results/
+/results/**
+!/results/README.md
+!/results/**/
+!/results/**/*.json
+!/results/**/*.csv
+!/results/**/*.md

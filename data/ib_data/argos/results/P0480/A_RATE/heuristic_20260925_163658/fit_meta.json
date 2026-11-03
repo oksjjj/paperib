@@ -1,0 +1,9 @@
+{
+  "kind": "rate_drop",
+  "abs_thr": 0.24522983098471618,
+  "q_low": 0.02,
+  "roll": 12,
+  "drop_ratio": 0.55,
+  "train_n": 22632,
+  "train_anom": 125
+}

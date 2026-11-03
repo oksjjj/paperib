@@ -1,0 +1,51 @@
+{
+  "plmn": "P0480",
+  "model": "roca",
+  "source": "roca",
+  "updated_at": "2026-11-03T07:05:08.560274+00:00",
+  "threshold": 0.08472365140914917,
+  "window_length": 32,
+  "metrics": {
+    "vus_pr": 0.07557519228898758,
+    "pr_auc": 0.4047621459680913,
+    "event_f1": 0.04081632653061224,
+    "precision": 0.23076923076923078,
+    "recall": 0.40540540540540543,
+    "f1": 0.29411764705882354,
+    "false_alarms_per_day": 1.6100093171835483,
+    "mean_detection_delay_min": 0.0
+  },
+  "paper_metrics": {
+    "primary_metric": "vus_pr",
+    "vus_pr": 0.07557519228898758,
+    "pr_auc": 0.4047621459680913,
+    "event": {
+      "f1": 0.04081632653061224,
+      "precision": 0.023255813953488372,
+      "recall": 0.16666666666666666,
+      "n_gt_events": 6,
+      "n_pred_events": 43,
+      "n_hit_gt": 1
+    },
+    "point": {
+      "precision": 0.23076923076923078,
+      "recall": 0.40540540540540543,
+      "f1": 0.29411764705882354,
+      "TP": 15,
+      "FP": 50,
+      "FN": 22
+    },
+    "operational": {
+      "false_alarms_per_day": 1.6100093171835483,
+      "mean_detection_delay_min": 0.0,
+      "median_detection_delay_min": 0.0,
+      "n_false_alarm_events": 42,
+      "observation_days": 26.086805555555557
+    },
+    "threshold": 0.08472365140914917,
+    "threshold_method": "percentile",
+    "score_polarity": "higher_is_anomaly",
+    "eval_split": "valid",
+    "note": "PA-F1 / Accuracy excluded from primary reporting"
+  }
+}

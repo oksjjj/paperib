@@ -5,7 +5,7 @@
 ```text
 data/
 ├── ib_data/                         # paperib (IB)
-│   ├── raw/                         # masked_*.csv (+ local-only *_mapping.txt, gitignored)
+│   ├── raw/                         # paper-only masked_*.csv (git) + local *_mapping.txt (ignored)
 │   ├── pickle/                      # PLMN 학습 캐시 (train/valid/test pkl)
 │   ├── labels/
 │   └── predictions/

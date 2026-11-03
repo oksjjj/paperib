@@ -1,0 +1,20 @@
+{
+  "plmn": "P0480",
+  "metric": "M971",
+  "csv_path": "/Users/oksjjj/coding/paperib/data/ib_data/argos/P0480/M971.csv",
+  "n_train": 22632,
+  "n_valid": 7544,
+  "n_csv": 30176,
+  "train_anom": 125,
+  "valid_anom": 37,
+  "train_test_split": 0.75,
+  "split": {
+    "t_min": "2026-04-29 15:00:00+00:00",
+    "train_end": "2026-07-17 05:10:00+00:00",
+    "valid_start": "2026-07-17 05:15:00+00:00",
+    "valid_end": "2026-08-12 10:15:00+00:00",
+    "test_start": "2026-08-12 10:20:00+00:00",
+    "t_max": "2026-09-07 14:55:00+00:00"
+  },
+  "note": "CSV = paperib train+valid. Pass train_test_split to Argos so Argos test fold == paperib valid. paperib test is held out."
+}
