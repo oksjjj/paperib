@@ -126,7 +126,6 @@ def write_riad_prediction(
             "pr_auc": eval_bundle["pr_auc"],
             "vus_window": eval_bundle.get("vus_window"),
             "r_auc_pr": vus.get("r_auc_pr"),
-            "vus_window": eval_bundle.get("vus_window"),
             "score_distribution": eval_bundle.get("score_distribution"),
             "event_score_diagnostics": eval_bundle.get("event_score_diagnostics"),
             "event_f1": event.get("f1"),
