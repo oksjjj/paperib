@@ -42,7 +42,6 @@ events.out.tfevents.*
 !/data/ib_data/raw/
 !/data/ib_data/labels/
 !/data/ib_data/predictions/
-!/data/ib_data/argos/
 
 # Full multi-PLMN dump stays local only
 /data/ib_data/_local_raw_full/
@@ -64,14 +63,7 @@ events.out.tfevents.*
 !/data/ib_data/predictions/.gitkeep
 !/data/ib_data/predictions/*.json
 
-# Argos exports (de-identified); ignore huge dumps if any
-/data/ib_data/argos/**
-!/data/ib_data/argos/**/
-!/data/ib_data/argos/**/*.csv
-!/data/ib_data/argos/**/*.json
-
 # --- Upstream clones ---
-/Argos/
 /_vendor/
 
 # --- Training checkpoints (metrics live under results/) ---

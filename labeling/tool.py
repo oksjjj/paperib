@@ -743,11 +743,6 @@ def list_prediction_sources(plmn: str) -> list[dict[str, str]]:
         is_at = source.startswith("anomalytransformer") or doc.get(
             "model"
         ) == "anomalytransformer"
-        is_argos = (
-            source.startswith("argos")
-            or str(doc.get("source") or "").startswith("argos")
-            or str(doc.get("model") or "") == "argos"
-        )
         is_classical = (
             source.startswith("classical")
             or doc.get("model") == "classical"
@@ -793,33 +788,7 @@ def list_prediction_sources(plmn: str) -> list[dict[str, str]]:
             )
             continue
 
-        if is_argos:
-            # Independent of OmniAnomaly / AT — rule-based overlay.
-            mode_tag = "heuristic" if "heuristic" in source else (
-                str((doc.get("metrics") or {}).get("mode") or doc.get("mode") or "rule")
-            )
-            is_ens = (
-                "ensemble" in source
-                or doc.get("feature_mode") == "argos_ensemble"
-                or (doc.get("metrics") or {}).get("ensemble")
-            )
-            if is_ens:
-                axes = doc.get("ensemble_metrics") or (
-                    (doc.get("metrics") or {}).get("ensemble_metrics") or []
-                )
-                fuse = (doc.get("metrics") or {}).get("fuse") or "or"
-                n_axes = len(axes) if axes else "?"
-                label = (
-                    f"Argos · {mode_tag} · ensemble[{fuse} · {n_axes} axes] "
-                    f"({n_seg}구간)"
-                )
-            else:
-                metric = doc.get("metric") or "metric?"
-                label = f"Argos · {mode_tag} · {metric} ({n_seg}구간)"
-            family = 2
-            view_ord = 0 if is_ens else 1
-            win = 0
-        elif is_classical or is_lstm:
+        if is_classical or is_lstm:
             run = doc.get("run_name") or "paperib"
             if is_classical:
                 label = f"Classical · IQR+EWMA · {run} ({n_seg}구간)"
@@ -1266,20 +1235,6 @@ def best_f1_threshold(
     return best_thr, best_live
 
 
-def is_argos_prediction(predictions: dict[str, Any] | None) -> bool:
-    """True for Argos / IB heuristic rule overlays (not OA/AT score models)."""
-    if not predictions:
-        return False
-    src = str(predictions.get("source") or "")
-    model = str(predictions.get("model") or "")
-    method = str(predictions.get("threshold_method") or "")
-    return (
-        src.startswith("argos")
-        or model == "argos"
-        or method == "argos_rule"
-    )
-
-
 def is_riad_prediction(
     predictions: dict[str, Any] | None,
     *,
@@ -1352,36 +1307,6 @@ def primary_threshold_label(
 ) -> dict[str, str]:
     """UI copy for the primary (``pot``-slot) threshold mode."""
     src = source or (predictions or {}).get("source")
-    if is_argos_prediction(predictions) or str(src or "").startswith("argos"):
-        paper = (predictions or {}).get("paper_metrics") or {}
-        metrics = (predictions or {}).get("metrics") or {}
-        fuse = paper.get("fuse") or metrics.get("fuse") or "or"
-        thr = paper.get("score_threshold")
-        if thr is None:
-            thr = metrics.get("score_threshold")
-        thr_s = f"≥{thr}" if thr is not None else "rule"
-        ens = bool(
-            paper.get("ensemble")
-            or metrics.get("ensemble")
-            or "ensemble" in str(src or "")
-        )
-        if ens:
-            radio = f"rule / fuse={fuse} ({thr_s})"
-            note = (
-                f"Argos multi-metric rules · fuse={fuse} · "
-                f"score_threshold={thr_s} (not POT / percentile)"
-            )
-        else:
-            radio = "rule (Argos binary)"
-            note = "Argos per-metric rule output · binary (not POT / percentile)"
-        return {
-            "short": "rule",
-            "title": "[rule]",
-            "radio": radio,
-            "note": note,
-            "heading": "Detection metrics — Argos rule / fuse (not POT)",
-            "overlay": "rule",
-        }
     if is_baseline_percentile_prediction(predictions, source=src):
         model = str((predictions or {}).get("model") or "")
         if str(src).startswith("classical") or model == "classical":
@@ -1467,45 +1392,6 @@ def primary_threshold_label(
         "heading": "Detection metrics — POT vs best-F1 point / PA (valid)",
         "overlay": "POT",
     }
-
-
-def paper_metrics_from_argos(
-    metrics: dict[str, Any] | None,
-) -> dict[str, Any]:
-    """Map Argos ``metrics`` (point / event) for the labeling UI."""
-    m = metrics or {}
-    point = m.get("point") if isinstance(m.get("point"), dict) else None
-    event = m.get("event") if isinstance(m.get("event"), dict) else None
-    if point is None and _as_float(m.get("f1")) is not None:
-        point = m
-    out: dict[str, Any] = {
-        "mode": m.get("mode"),
-        "metric": m.get("metric"),
-        "eval_split": m.get("eval_split") or "valid",
-        "ensemble": bool(m.get("ensemble")),
-        "fuse": m.get("fuse"),
-        "score_threshold": m.get("score_threshold"),
-        "fuse_detail": m.get("fuse_detail"),
-        "ensemble_metrics": m.get("ensemble_metrics"),
-    }
-    if point:
-        out["point"] = {
-            "precision": _as_float(point.get("precision")),
-            "recall": _as_float(point.get("recall")),
-            "f1": _as_float(point.get("f1")),
-            "TP": point.get("tp", point.get("TP")),
-            "FP": point.get("fp", point.get("FP")),
-            "FN": point.get("fn", point.get("FN")),
-            "TN": point.get("tn", point.get("TN")),
-        }
-    if event:
-        out["event"] = {
-            "event_recall": _as_float(event.get("event_recall")),
-            "n_gt_events": event.get("n_gt_events"),
-            "n_hit_events": event.get("n_hit_events"),
-            "n_pred_events": event.get("n_pred_events"),
-        }
-    return out
 
 
 def thresholds_from_pred_doc(predictions: dict[str, Any]) -> dict[str, float | None]:
@@ -1636,53 +1522,12 @@ def enrich_predictions_for_ui(
     Rebuilds oracle segments from the score series; searches thr if missing.
     Modes (score models): ``pot`` → ``best_f1_point`` → ``best_f1`` (PA).
     ``metrics_split`` selects valid vs test for live P/R/F1 (thr still train/valid-oracle).
-    Argos rule overlays skip score thresholds and expose point/event metrics.
     """
     doc = dict(predictions)
     split_choice = "test" if metrics_split == "test" else "valid"
     if split_choice == "test" and "test" not in available_metrics_splits(doc):
         split_choice = "valid"
     doc["metrics_eval_split"] = split_choice
-
-    if is_argos_prediction(doc):
-        file_labels = list(doc.get("labels") or [])
-        paper = paper_metrics_from_argos(doc.get("metrics") or {})
-        doc["threshold"] = None
-        doc["threshold_mode"] = "rule"
-        doc["thresholds"] = {
-            "pot": None,
-            "best_f1_point": None,
-            "best_f1": None,
-        }
-        doc["paper_metrics"] = paper
-        doc["live_by_mode"] = {}
-        doc["labels_by_mode"] = {
-            "rule": file_labels,
-            "pot": file_labels,
-            "best_f1_point": [],
-            "best_f1": [],
-        }
-        doc["labels"] = file_labels
-        doc["n_pred_segments"] = len(file_labels)
-        doc["n_pred_points"] = int(
-            sum(
-                1
-                if it.get("kind") == "point"
-                else max(
-                    1,
-                    int(
-                        (
-                            pd.to_datetime(it.get("end"), utc=True)
-                            - pd.to_datetime(it.get("start"), utc=True)
-                        ).total_seconds()
-                        / 60
-                    )
-                    + 1,
-                )
-                for it in file_labels
-            )
-        ) if file_labels else 0
-        return doc
 
     mode = (
         threshold_mode
@@ -1855,13 +1700,6 @@ def apply_threshold_mode(
 ) -> dict[str, Any]:
     """Switch active overlay labels / threshold without re-searching best-F1."""
     doc = dict(predictions)
-    if is_argos_prediction(doc):
-        labels = list(doc.get("labels") or (doc.get("labels_by_mode") or {}).get("rule") or [])
-        doc["threshold_mode"] = "rule"
-        doc["threshold"] = None
-        doc["labels"] = labels
-        doc["n_pred_segments"] = len(labels)
-        return doc
     mode = (
         threshold_mode
         if threshold_mode in SCORE_THRESHOLD_MODES

@@ -1,7 +1,0 @@
-{
-  "kind": "count_spike",
-  "abs_thr": 0.0,
-  "q_high": 0.99,
-  "train_n": 22632,
-  "train_anom": 125
-}

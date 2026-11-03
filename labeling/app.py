@@ -49,7 +49,6 @@ from tool import (  # noqa: E402
     enrich_predictions_for_ui,
     available_metrics_splits,
     is_anomalytransformer_prediction,
-    is_argos_prediction,
     is_paper_backbone_prediction,
     primary_threshold_label,
     format_kst,
@@ -346,9 +345,7 @@ def _model_pred_options():
     items = _model_pred_items()
     mode = state.get("threshold_mode") or pred.get("threshold_mode") or "pot"
     primary = primary_threshold_label(pred, source=state.get("pred_source"))
-    if mode in ("rule", "argos_rule") or is_argos_prediction(pred):
-        mode_tag = "rule"
-    elif mode == "pot":
+    if mode == "pot":
         mode_tag = primary["short"]
     elif mode == "best_f1_point":
         mode_tag = "best-F1·point"
@@ -626,98 +623,10 @@ def _riad_metrics_children(pred: dict) -> list[Any]:
     return rows
 
 
-def _argos_metrics_children(pred: dict) -> list[Any]:
-    paper = pred.get("paper_metrics") or {}
-    point = paper.get("point") or {}
-    event = paper.get("event") or {}
-    mode = paper.get("mode") or pred.get("source") or "argos"
-    metric = paper.get("metric") or pred.get("metric") or "?"
-    split = paper.get("eval_split") or pred.get("eval_split") or "valid"
-    fuse = paper.get("fuse") or "?"
-    score_thr = paper.get("score_threshold")
-    thr_s = f"≥{score_thr}" if score_thr is not None else "—"
-    ens = bool(paper.get("ensemble") or "ensemble" in str(pred.get("source") or ""))
-    title = (
-        f"Detection metrics — Argos ensemble "
-        f"({mode} · fuse={fuse} · thr {thr_s} · {split})"
-        if ens
-        else f"Detection metrics — Argos rule ({mode} · {metric} · {split})"
-    )
-    rows: list[Any] = [
-        html.Div(
-            title,
-            style={
-                "fontWeight": "700",
-                "color": "#5b21b6",
-                "marginBottom": "6px",
-            },
-        ),
-        html.Div(
-            (
-                f"준지도 규칙 · fuse={fuse} · score_threshold {thr_s} "
-                f"(−#axes UI score) · POT/percentile/best-F1 해당 없음"
-                if ens
-                else "준지도 이진 규칙 출력 · POT/percentile/best-F1 해당 없음"
-            ),
-            style={"fontSize": "11px", "color": "#64748b", "marginBottom": "6px"},
-        ),
-    ]
-    if ens and paper.get("ensemble_metrics"):
-        rows.append(
-            html.Div(
-                "axes: " + ", ".join(str(x) for x in paper.get("ensemble_metrics") or []),
-                style={"fontSize": "11px", "color": "#475569", "marginBottom": "4px"},
-            )
-        )
-    if point:
-        rows.append(
-            html.Div(
-                "Point-wise: "
-                + _fmt_prf(
-                    point.get("precision"),
-                    point.get("recall"),
-                    point.get("f1"),
-                    tp=point.get("TP"),
-                    fp=point.get("FP"),
-                    fn=point.get("FN"),
-                ),
-                style={"fontFamily": "monospace", "fontSize": "12px", "marginBottom": "2px"},
-            )
-        )
-    else:
-        rows.append(html.I("저장된 point metrics가 없습니다."))
-    if event:
-        er = event.get("event_recall")
-        er_s = f"{er:.4f}" if isinstance(er, (int, float)) else "—"
-        rows.append(
-            html.Div(
-                f"Event: recall={er_s}  "
-                f"hit={event.get('n_hit_events')} / gt={event.get('n_gt_events')}  "
-                f"pred_events={event.get('n_pred_events')}",
-                style={"fontFamily": "monospace", "fontSize": "12px"},
-            )
-        )
-    rows.append(
-        html.Div(
-            f"예측 구간 {len(pred.get('labels') or [])}개"
-            + (
-                f" · rule={os.path.basename(str(pred.get('rule_path')))}"
-                if pred.get("rule_path")
-                else ""
-            ),
-            style={"fontSize": "12px", "marginTop": "6px", "color": "#334155"},
-        )
-    )
-    return rows
-
-
 def _threshold_mode_options(pred: dict | None = None, source: str | None = None) -> list[dict]:
-    """Radio: primary thr → (optional) best-F1 point. PA는 RiAD에서 제외."""
+    """Radio: primary thr → (optional) best-F1 point. PA는 RiAD/RoCA에서 제외."""
     pred = pred if pred is not None else (state.get("predictions") or {})
     src = source if source is not None else state.get("pred_source")
-    if is_argos_prediction(pred) or str(src or "").startswith("argos"):
-        primary = primary_threshold_label(pred, source=src)
-        return [{"label": primary["radio"], "value": "rule"}]
     primary = primary_threshold_label(pred, source=src)
     if is_paper_backbone_prediction(pred, source=src):
         return [
@@ -734,11 +643,9 @@ def _threshold_mode_options(pred: dict | None = None, source: str | None = None)
 def _threshold_mode_value_for_pred(
     pred: dict | None = None, source: str | None = None
 ) -> str:
-    """Selected radio value for the current model (Argos → rule, else pot-slot)."""
+    """Selected radio value for the current model (percentile/POT slot)."""
     pred = pred if pred is not None else (state.get("predictions") or {})
     src = source if source is not None else state.get("pred_source")
-    if is_argos_prediction(pred) or str(src or "").startswith("argos"):
-        return "rule"
     mode = state.get("threshold_mode") or pred.get("threshold_mode") or "pot"
     if mode in ("rule", "argos_rule"):
         return "pot"
@@ -759,10 +666,6 @@ def _detection_metrics_children() -> list[Any]:
                 "`RiAD/run_plmn.py` 또는 `RoCA/run_plmn.py`로 학습·export 후 다시 로드하세요."
             )
         ]
-    if is_argos_prediction(pred) or str(state.get("pred_source") or "").startswith(
-        "argos"
-    ):
-        return _argos_metrics_children(pred)
     if is_paper_backbone_prediction(pred, source=state.get("pred_source")):
         return _riad_metrics_children(pred)
     mode = state.get("threshold_mode") or pred.get("threshold_mode") or "pot"
@@ -3502,7 +3405,6 @@ def _switch_model_pred_source(source, click_mode):
     state["pred_source"] = source
     preds = load_predictions(plmn, source=source)
     state["selected_pred_id"] = None
-    is_argos = is_argos_prediction(preds) or str(source).startswith("argos")
     if state.get("df") is not None:
         state["df"] = ensure_score_column(
             state["df"],
@@ -3511,8 +3413,8 @@ def _switch_model_pred_source(source, click_mode):
             plmn=plmn,
         )
         human = ((state.get("doc") or {}).get("labels")) or []
-        mode = "rule" if is_argos else (state.get("threshold_mode") or "pot")
-        if not is_argos and mode in ("rule", "argos_rule"):
+        mode = state.get("threshold_mode") or "pot"
+        if mode in ("rule", "argos_rule"):
             mode = "pot"
         msplit = state.get("metrics_eval_split") or "valid"
         if msplit not in available_metrics_splits(preds):
@@ -3532,7 +3434,7 @@ def _switch_model_pred_source(source, click_mode):
         )
     else:
         state["predictions"] = preds
-        state["threshold_mode"] = "rule" if is_argos else (state.get("threshold_mode") or "pot")
+        state["threshold_mode"] = state.get("threshold_mode") or "pot"
     state["_score_hover"] = None
     state["_hover_arrays_pushed"] = False
     state["hover_cache_seq"] = int(state.get("hover_cache_seq") or 0) + 1
@@ -3549,7 +3451,7 @@ def _switch_model_pred_source(source, click_mode):
     if split_val not in split_vals:
         split_val = "valid"
     state["metrics_eval_split"] = split_val
-    # Argos exports valid only today; grey Metrics split when <2 options.
+    # Grey Metrics split when <2 options.
     split_style = (
         {"fontSize": "13px", "opacity": "0.35", "pointerEvents": "none"}
         if len(split_opts) < 2
@@ -3618,13 +3520,9 @@ def _sync_model_pred_list(plmn):
 )
 def _switch_threshold_mode(mode, click_mode):
     preds = state.get("predictions") or {}
-    src = state.get("pred_source")
-    if is_argos_prediction(preds) or str(src or "").startswith("argos"):
-        mode = "rule"
-    else:
-        mode = mode or "pot"
-        if mode in ("rule", "argos_rule"):
-            mode = "pot"
+    mode = mode or "pot"
+    if mode in ("rule", "argos_rule"):
+        mode = "pot"
     state["threshold_mode"] = mode
     df = state.get("df")
     if df is None or not preds:

@@ -6,8 +6,7 @@ data/ib_data/
 ├── raw/*_mapping.txt         # 로컬 전용 · git 금지 (역매핑)
 ├── _local_raw_full/          # 전체 PLMN raw (로컬 전용 · git 금지)
 ├── labels/{PLMN}_labels.json
-├── predictions/{PLMN}_*.json
-└── argos/                    # (선택) Argos export
+└── predictions/{PLMN}_*.json
 ```
 
 **보안:** `plmn_mapping.txt` / `metric_mapping.txt`(masked ↔ 원본명)는 **로컬 전용**.  

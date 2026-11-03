@@ -1,11 +1,11 @@
 # Baseline 하이퍼파라미터 · valid 튜닝 가이드
 
-논문 비교군(**Argos 제외**)의 **개선된 기본 하이퍼**, valid 전용 평가, 학습·스윕 명령을 한곳에 둔다.  
+논문 비교군의 **개선된 기본 하이퍼**, valid 전용 평가, 학습·스윕 명령을 한곳에 둔다.  
 스토리·역할: [논문-스토리라인.md](./논문-스토리라인.md).  
 파이프라인 공통: [논문-설계-노트.md](./논문-설계-노트.md).
 
-> **범위:** LSTM-AD · OmniAnomaly · Anomaly Transformer.  
-> **Classical:** 디렉터리 삭제됨 (원논문 없음 · Argos heuristic과 중복) — [baseline-참고논문.md](./baseline-참고논문.md).  
+> **범위:** LSTM-AD · OmniAnomaly · Anomaly Transformer (참고·관찰).  
+> **Classical:** 디렉터리 삭제됨 — [baseline-참고논문.md](./baseline-참고논문.md).  
 > **지금 단계:** 하이퍼파라미터 튜닝 → **valid만** 스코어/메트릭/UI export.  
 > **UI:** labeling 앱의 Metrics valid|test 토글·`[VALID]`/`[TEST]` 태그는 유지. test 구간이 비어 있으면 test 메트릭만 비어 보임.  
 > **최종 표:** 튜닝 확정 후 같은 설정으로 `--with_test` 한 번만 돌려 test 고정 보고.  
@@ -253,7 +253,6 @@ cd AnomalyTransformer
 | Runner 최종 | `--with_test` → valid+test |
 | UI Metrics | valid ↔ test 전환 유지; oracle thr는 **valid 라벨**로만 탐색 |
 | 보고 | point + event; mild/severe(`reasons`) breakdown |
-| Argos | 이 문서 범위 밖 — [Argos-IB.md](./Argos-IB.md); prediction 유지 |
 
 valid 스윕 후 최종 표는 **같은 설정으로 `--with_test`** 한 번만 고정해 보고할 것.
 

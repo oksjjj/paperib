@@ -50,7 +50,6 @@
 | **예측 잔차** | LSTM-AD | Malhotra et al., *Long Short Term Memory Networks for Anomaly Detection in Time Series* | ESANN 2015 | `LSTM_AD/` |
 | **재구성·우도** | OmniAnomaly | Su et al., *Robust Anomaly Detection for Multivariate Time Series through Stochastic Recurrent Neural Network* | KDD 2019 | `OmniAnomaly/` |
 | **시간 연관성 괴리** | Anomaly Transformer | Xu et al., *Anomaly Transformer: Time Series Anomaly Detection with Association Discrepancy* | ICLR 2022 | `AnomalyTransformer/` |
-| **Operational calibration 옵션** | Argos (+ multi-metric IB) | Gu et al., *Argos: Agentic Time-Series Anomaly Detection with Autonomous Rule Generation via Large Language Models* | arXiv:2501.14170 | `Argos_ib/` |
 
 ### BibTeX 스케치
 
@@ -74,13 +73,6 @@
   author={Xu, Jiehui and Wu, Haixu and Wang, Jianmin and Long, Mingsheng},
   booktitle={ICLR},
   year={2022}
-}
-
-@article{gu2025argos,
-  title={Argos: Agentic Time-Series Anomaly Detection with Autonomous Rule Generation via Large Language Models},
-  author={Gu, Yile and Castro, Yifan and Dong, Jingchao and Song, Boyi and Geng, Tharuka and Han, Qizheng and others},
-  journal={arXiv preprint arXiv:2501.14170},
-  year={2025}
 }
 ```
 
@@ -140,7 +132,7 @@ TSAD 벤치에서 “Classical = 이 조합”으로 고정된 **단일 방법 �
 | IQR fence | Tukey, *Exploratory Data Analysis*, 1977 | boxplot outlier fence |
 | EWMA | Roberts, *Control Chart Tests Based on Geometric Moving Averages*, Technometrics 1959 | SPC |
 
-“severe는 단순 규칙으로?” 시사점은 **Argos heuristic**이 담당하므로 실험군·코드 모두 제거했다 (`Classical/` 삭제, 2026-09-26).
+“severe는 단순 규칙으로?” 시사점은 Classical 실험군·코드 제거로 반영했다 (`Classical/` 삭제, 2026-09-26).
 
 ---
 
@@ -151,7 +143,6 @@ TSAD 벤치에서 “Classical = 이 조합”으로 고정된 **단일 방법 �
 | LSTM-AD | next-step residual, train 정규 thr | 원논문은 다변량 Gaussian on errors; 우리는 −MSE + train percentile |
 | OmniAnomaly | SRNN+NF 재구성, POT | IB chronological split, feature runs |
 | Anomaly Transformer | association discrepancy, energy thr | IB prep 공유; POT 대신 train energy percentile |
-| Argos | 단변량 `inference` 규칙 | **제안:** multi-metric ensemble (OR/sum/two_stage) |
 
 ---
 
@@ -163,7 +154,7 @@ TSAD 벤치에서 “Classical = 이 조합”으로 고정된 **단일 방법 �
 | TranAD | Tuli et al., VLDB 2022 | transformer |
 | InterFusion | Li et al., KDD 2021 | hierarchical VAE |
 
-1픽(LSTM / OA / AT) + Argos가 안정되기 전에는 넣지 않는다.
+Individual backbone·Shared가 안정되기 전에는 넣지 않는다.
 
 ---
 
@@ -172,11 +163,10 @@ TSAD 벤치에서 “Classical = 이 조합”으로 고정된 **단일 방법 �
 | 날짜 | 내용 |
 |------|------|
 | 2026-09-26 | 초안: 논문 대응 baseline 정리; Classical은 실험 제외 |
-| 2026-09-26 | 스토리 한 줄: DL 비지도 → IB 한계 → 준지도 Argos가 더 적합 |
 | 2026-09-26 | §2 추가: 완전 지도·약지도 포지셔닝 인용 (실험 제외) |
 | 2026-09-26 | `Classical/` 코드 삭제 |
 | 2026-09-26 | 비교군 축을 탐지 원리 3종으로 MECE 정리 (Transformer ≠ 동급 카테고리) |
-| 2026-11-03 | (구) baseline=3단계 백본; Argos=옵션 |
-| 2026-11-03 | 재개정: **RiAD**=메인 backbone; LSTM/OA/AT=참고·관찰; Argos=operational 옵션 |
+| 2026-11-03 | 재개정: **RiAD**=메인 backbone; LSTM/OA/AT=참고·관찰 |
 | 2026-11-03 | 평가: VUS-PR primary · Event-F1 · operational; PA-F1 제외 |
 | 2026-11-03 | 비교 backbone **RoCA** (`RoCA/`, 공식 코드 발췌) 추가 |
+| 2026-11-03 | **Argos** 문서·코드·데이터·UI 전부 제거 |
