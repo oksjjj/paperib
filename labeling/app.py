@@ -48,8 +48,6 @@ from tool import (  # noqa: E402
     display_plmn,
     enrich_predictions_for_ui,
     available_metrics_splits,
-    is_anomalytransformer_prediction,
-    is_paper_backbone_prediction,
     primary_threshold_label,
     format_kst,
     freeze_shape_editing,
@@ -511,18 +509,42 @@ def _fmt_opt(v: Any, *, digits: int = 4) -> str:
     return "—"
 
 
-def _riad_metrics_children(pred: dict) -> list[Any]:
-    """Paper metrics: VUS-PR primary · Event-F1 · P/R/F1 · FA/day · delay (RiAD/RoCA)."""
+def _model_metrics_tag(pred: dict) -> tuple[str, str]:
+    """Display name + accent color for the shared VUS metrics panel."""
+    model = str(pred.get("model") or pred.get("source") or "model").lower()
+    src = str(pred.get("source") or "").lower()
+    key = model if model not in ("", "none") else src
+    if key.startswith("roca"):
+        return "RoCA", "#0f766e"
+    if key.startswith("riad"):
+        return "RiAD", "#5b21b6"
+    if key.startswith("msrs"):
+        return "MSRS", "#b45309"
+    if key.startswith("lstm"):
+        return "LSTM-AD", "#0369a1"
+    if "anomalytransformer" in key or key.startswith("at"):
+        return "AnomalyTransformer", "#7c3aed"
+    if key.startswith("omni"):
+        return "OmniAnomaly", "#be185d"
+    # Fallback: capitalize source stem
+    stem = (pred.get("model") or pred.get("source") or "Model")
+    stem = str(stem).split("_")[0]
+    return stem.upper() if len(stem) <= 6 else stem, "#334155"
+
+
+def _vus_metrics_children(pred: dict) -> list[Any]:
+    """Shared paper metrics for every model: VUS-PR · Event-F1 · P/R/F1 · FA/day · delay."""
     paper = pred.get("paper_metrics") or {}
     m = pred.get("metrics") or {}
     split = (
         paper.get("eval_split")
         or m.get("eval_split")
+        or pred.get("metrics_eval_split")
         or pred.get("eval_split")
         or "valid"
     )
     point = dict(paper.get("point") or {})
-    if not point:
+    if not any(point.get(k) is not None for k in ("precision", "recall", "f1", "TP", "FP")):
         point = {
             "precision": m.get("precision"),
             "recall": m.get("recall"),
@@ -532,7 +554,7 @@ def _riad_metrics_children(pred: dict) -> list[Any]:
             "FN": m.get("fn") if m.get("fn") is not None else m.get("FN"),
         }
     event = dict(paper.get("event") or {})
-    if not event:
+    if not any(event.get(k) is not None for k in ("f1", "precision", "recall", "n_gt_events")):
         event = {
             "f1": m.get("event_f1"),
             "precision": m.get("event_precision"),
@@ -542,7 +564,10 @@ def _riad_metrics_children(pred: dict) -> list[Any]:
             "n_hit_gt": m.get("n_hit_gt"),
         }
     op = dict(paper.get("operational") or {})
-    if not op:
+    if not any(
+        op.get(k) is not None
+        for k in ("false_alarms_per_day", "mean_detection_delay_min", "observation_days")
+    ):
         op = {
             "false_alarms_per_day": m.get("false_alarms_per_day"),
             "n_false_alarm_events": m.get("n_false_alarm_events"),
@@ -552,9 +577,13 @@ def _riad_metrics_children(pred: dict) -> list[Any]:
         }
     vus = paper.get("vus_pr", m.get("vus_pr"))
     pr_auc = paper.get("pr_auc", m.get("pr_auc"))
-    model = str(pred.get("model") or pred.get("source") or "riad")
-    tag = "RoCA" if str(model).startswith("roca") else "RiAD"
-    accent = "#0f766e" if tag == "RoCA" else "#5b21b6"
+    vus_win = paper.get("vus_window", m.get("vus_window"))
+    tag, accent = _model_metrics_tag(pred)
+    thr_method = (
+        paper.get("threshold_method")
+        or pred.get("threshold_method")
+        or "percentile"
+    )
     rows: list[Any] = [
         html.Div(
             f"{tag} metrics — VUS-PR (primary) · Event-F1 · operational · {split}",
@@ -565,13 +594,14 @@ def _riad_metrics_children(pred: dict) -> list[Any]:
             },
         ),
         html.Div(
-            "Point-Adjusted F1 / Accuracy는 주요 지표에서 제외. "
-            "AUROC는 보조만. primary thr = train percentile.",
+            "모든 모델 공통 지표. Point-Adjusted F1 / Accuracy는 주요 지표에서 제외. "
+            "AUROC는 보조만.",
             style={"fontSize": "11px", "color": "#64748b", "marginBottom": "8px"},
         ),
         html.Div(
             f"VUS-PR (primary) = {_fmt_opt(vus)}    "
-            f"PR-AUC = {_fmt_opt(pr_auc)}",
+            f"PR-AUC = {_fmt_opt(pr_auc)}"
+            + (f"    VUS-window = {vus_win}" if vus_win is not None else ""),
             style={
                 "fontFamily": "monospace",
                 "fontSize": "13px",
@@ -616,7 +646,7 @@ def _riad_metrics_children(pred: dict) -> list[Any]:
         ),
         html.Div(
             f"예측 구간 {len(pred.get('labels') or [])}개 · thr={_fmt_opt(pred.get('threshold'))} "
-            f"({pred.get('threshold_method') or 'percentile'})",
+            f"({thr_method})",
             style={"fontSize": "12px", "color": "#334155"},
         ),
     ]
@@ -624,19 +654,13 @@ def _riad_metrics_children(pred: dict) -> list[Any]:
 
 
 def _threshold_mode_options(pred: dict | None = None, source: str | None = None) -> list[dict]:
-    """Radio: primary thr → (optional) best-F1 point. PA는 RiAD/RoCA에서 제외."""
+    """Radio: primary thr → best-F1 point (analysis). PA는 주요 UI에서 제외."""
     pred = pred if pred is not None else (state.get("predictions") or {})
     src = source if source is not None else state.get("pred_source")
     primary = primary_threshold_label(pred, source=src)
-    if is_paper_backbone_prediction(pred, source=src):
-        return [
-            {"label": primary["radio"], "value": "pot"},
-            {"label": "best-F1 point (analysis only)", "value": "best_f1_point"},
-        ]
     return [
         {"label": primary["radio"], "value": "pot"},
-        {"label": "best-F1 point (oracle)", "value": "best_f1_point"},
-        {"label": "best-F1 PA (oracle · 비주용)", "value": "best_f1"},
+        {"label": "best-F1 point (analysis only)", "value": "best_f1_point"},
     ]
 
 
@@ -645,14 +669,10 @@ def _threshold_mode_value_for_pred(
 ) -> str:
     """Selected radio value for the current model (percentile/POT slot)."""
     pred = pred if pred is not None else (state.get("predictions") or {})
-    src = source if source is not None else state.get("pred_source")
     mode = state.get("threshold_mode") or pred.get("threshold_mode") or "pot"
-    if mode in ("rule", "argos_rule"):
+    if mode in ("rule", "argos_rule", "best_f1"):
         return "pot"
-    if is_paper_backbone_prediction(pred, source=src) and mode == "best_f1":
-        # PA mode removed from RiAD / RoCA UI.
-        return "pot"
-    if mode in ("pot", "best_f1_point", "best_f1"):
+    if mode in ("pot", "best_f1_point"):
         return mode
     return "pot"
 
@@ -663,94 +683,10 @@ def _detection_metrics_children() -> list[Any]:
         return [
             html.I(
                 "모델 예측 파일이 없습니다. "
-                "`RiAD/run_plmn.py` 또는 `RoCA/run_plmn.py`로 학습·export 후 다시 로드하세요."
+                "학습·export 후 다시 로드하세요."
             )
         ]
-    if is_paper_backbone_prediction(pred, source=state.get("pred_source")):
-        return _riad_metrics_children(pred)
-    mode = state.get("threshold_mode") or pred.get("threshold_mode") or "pot"
-    metrics_split = (
-        state.get("metrics_eval_split")
-        or pred.get("metrics_eval_split")
-        or "valid"
-    )
-    thresholds = pred.get("thresholds") or {}
-    paper = pred.get("paper_metrics") or {}
-    live_by = pred.get("live_by_mode") or {}
-    primary = primary_threshold_label(pred, source=state.get("pred_source"))
-    pot_paper = paper.get("pot") or None
-    pot_note = (pot_paper or {}).get("note") or primary["note"]
-    split_tag = "test" if metrics_split == "test" else "valid"
-    rows: list[Any] = [
-        html.Div(
-            f"{primary['heading']} · metrics on {split_tag}",
-            style={
-                "fontWeight": "700",
-                "color": "#5b21b6",
-                "marginBottom": "6px",
-            },
-        ),
-        html.Div(
-            (
-                f"표시 구간 = {split_tag}. "
-                "primary thr는 train에서 고정 · oracle thr는 valid 라벨로만 탐색 "
-                "(test에 재적합하지 않음)."
-                if split_tag == "test"
-                else "표시 구간 = valid. primary thr = train · oracle = valid 라벨."
-            ),
-            style={"fontSize": "11px", "color": "#64748b", "marginBottom": "6px"},
-        ),
-    ]
-    rows.append(
-        _mode_block(
-            primary["title"],
-            active=(mode == "pot"),
-            thr=thresholds.get("pot"),
-            paper=pot_paper,
-            live=live_by.get("pot"),
-            note=pot_note,
-        )
-    )
-    rows.append(
-        _mode_block(
-            "[best-F1 point]",
-            active=(mode == "best_f1_point"),
-            thr=thresholds.get("best_f1_point"),
-            paper=paper.get("best_f1_point") or None,
-            live=live_by.get("best_f1_point"),
-            note=(
-                f"oracle thr · valid 라벨 point-F1 최대 "
-                f"→ metrics on {split_tag} (PA 없음)"
-            ),
-        )
-    )
-    rows.append(
-        _mode_block(
-            "[best-F1 PA]",
-            active=(mode == "best_f1"),
-            thr=thresholds.get("best_f1"),
-            paper=paper.get("best_f1") or None,
-            live=live_by.get("best_f1"),
-            note=(
-                f"oracle thr · valid 라벨 PA-F1 최대 "
-                f"→ metrics on {split_tag}"
-            ),
-        )
-    )
-    if mode == "pot":
-        overlay_name = primary["overlay"]
-    elif mode == "best_f1_point":
-        overlay_name = "best-F1 point"
-    else:
-        overlay_name = "best-F1 PA"
-    rows.append(
-        html.Div(
-            f"· 예측 구간 {len(_model_pred_items())}개 ({split_tag}) "
-            f"· metrics={split_tag}",
-            style={"fontSize": "12px", "marginTop": "4px", "color": "#334155"},
-        )
-    )
-    return rows
+    return _vus_metrics_children(pred)
 
 
 def _enrich_current_predictions(*, threshold_mode: str | None = None) -> None:

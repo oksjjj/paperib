@@ -761,23 +761,33 @@ def list_prediction_sources(plmn: str) -> list[dict[str, str]]:
             or doc.get("model") == "roca"
             or str(doc.get("source") or "").startswith("roca")
         )
+        is_msrs = (
+            source.startswith("msrs")
+            or doc.get("model") == "msrs"
+            or str(doc.get("source") or "").startswith("msrs")
+        )
         n_seg = len(doc.get("labels") or [])
 
-        if is_riad or is_roca:
+        if is_riad or is_roca or is_msrs:
             run = doc.get("run_name") or "paperib"
             try:
                 win = int(doc["window_length"]) if doc.get("window_length") is not None else (
-                    100 if is_riad else 32
+                    100 if is_riad else (32 if is_roca else 0)
                 )
             except (TypeError, ValueError):
-                win = 100 if is_riad else 32
+                win = 100 if is_riad else (32 if is_roca else 0)
             cols = doc.get("feature_columns") or []
-            tag = "RiAD" if is_riad else "RoCA"
+            if is_riad:
+                tag, family = "RiAD", 0
+            elif is_roca:
+                tag, family = "RoCA", 1
+            else:
+                tag, family = "MSRS", 2
+            win_bit = f" · win={win}" if win else ""
             label = (
-                f"{tag} · {run} · 전체 raw · win={win} "
+                f"{tag} · {run} · 전체 raw{win_bit} "
                 f"({len(cols)}d, {n_seg}구간)"
             )
-            family = 0 if is_riad else 1
             view_ord = 0
             options.append(
                 {
@@ -1268,6 +1278,173 @@ def is_paper_backbone_prediction(
     )
 
 
+def has_vus_paper_metrics(predictions: dict[str, Any] | None) -> bool:
+    """True when export/UI doc already carries the shared VUS metric schema."""
+    if not predictions:
+        return False
+    paper = predictions.get("paper_metrics") or {}
+    metrics = predictions.get("metrics") or {}
+    if paper.get("vus_pr") is not None or metrics.get("vus_pr") is not None:
+        return True
+    if paper.get("primary_metric") == "vus_pr" or metrics.get("primary_metric") == "vus_pr":
+        return True
+    if isinstance(paper.get("event"), dict) and paper.get("operational") is not None:
+        return True
+    return False
+
+
+def paper_metrics_from_flat_metrics(
+    metrics: dict[str, Any] | None,
+    *,
+    eval_split: str = "valid",
+    threshold: float | None = None,
+    threshold_method: str | None = None,
+) -> dict[str, Any] | None:
+    """Hydrate UI ``paper_metrics`` from flat export ``metrics`` (VUS schema)."""
+    m = metrics or {}
+    if m.get("vus_pr") is None and m.get("primary_metric") != "vus_pr":
+        return None
+    return {
+        "primary_metric": "vus_pr",
+        "vus_pr": m.get("vus_pr"),
+        "pr_auc": m.get("pr_auc"),
+        "vus_window": m.get("vus_window"),
+        "r_auc_pr": m.get("r_auc_pr"),
+        "event": {
+            "f1": m.get("event_f1"),
+            "precision": m.get("event_precision"),
+            "recall": m.get("event_recall"),
+            "n_gt_events": m.get("n_gt_events"),
+            "n_pred_events": m.get("n_pred_events"),
+            "n_hit_gt": m.get("n_hit_gt"),
+        },
+        "point": {
+            "precision": m.get("precision"),
+            "recall": m.get("recall"),
+            "f1": m.get("f1"),
+            "TP": m.get("tp", m.get("TP")),
+            "FP": m.get("fp", m.get("FP")),
+            "FN": m.get("fn", m.get("FN")),
+        },
+        "operational": {
+            "false_alarms_per_day": m.get("false_alarms_per_day"),
+            "mean_detection_delay_min": m.get("mean_detection_delay_min"),
+            "median_detection_delay_min": m.get("median_detection_delay_min"),
+            "n_false_alarm_events": m.get("n_false_alarm_events"),
+            "observation_days": m.get("observation_days"),
+        },
+        "threshold": threshold if threshold is not None else m.get("threshold"),
+        "threshold_method": threshold_method or m.get("threshold_method"),
+        "score_polarity": m.get("score_polarity") or "higher_is_anomaly",
+        "eval_split": m.get("eval_split") or eval_split,
+        "note": "PA-F1 / Accuracy excluded from primary reporting",
+    }
+
+
+def _load_evaluate_valid():
+    """Lazy-load RiAD ``evaluate_riad_valid`` (shared paper metrics)."""
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[1] / "RiAD" / "metrics.py"
+    spec = importlib.util.spec_from_file_location("riad_metrics_ui", path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load {path}")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.evaluate_riad_valid
+
+
+def paper_metrics_from_vus_bundle(
+    bundle: dict[str, Any],
+    *,
+    eval_split: str = "valid",
+    threshold: float | None = None,
+    threshold_method: str | None = None,
+) -> dict[str, Any]:
+    """Map ``evaluate_riad_valid`` output → UI ``paper_metrics`` block."""
+    point = bundle.get("point") or {}
+    event = bundle.get("event") or {}
+    op = bundle.get("operational") or {}
+    vus = bundle.get("vus") or {}
+    thr = threshold if threshold is not None else bundle.get("threshold")
+    return {
+        "primary_metric": "vus_pr",
+        "vus_pr": (bundle.get("primary") or {}).get("vus_pr", vus.get("vus_pr")),
+        "pr_auc": bundle.get("pr_auc"),
+        "vus_window": bundle.get("vus_window", vus.get("vus_window")),
+        "r_auc_pr": vus.get("r_auc_pr"),
+        "event": {
+            "f1": event.get("f1"),
+            "precision": event.get("precision"),
+            "recall": event.get("recall"),
+            "n_gt_events": event.get("n_gt_events"),
+            "n_pred_events": event.get("n_pred_events"),
+            "n_hit_gt": event.get("n_hit_gt"),
+        },
+        "point": {
+            "precision": point.get("precision"),
+            "recall": point.get("recall"),
+            "f1": point.get("f1"),
+            "TP": point.get("tp", point.get("TP")),
+            "FP": point.get("fp", point.get("FP")),
+            "FN": point.get("fn", point.get("FN")),
+        },
+        "operational": {
+            "false_alarms_per_day": op.get("false_alarms_per_day"),
+            "mean_detection_delay_min": op.get("mean_detection_delay_min"),
+            "median_detection_delay_min": op.get("median_detection_delay_min"),
+            "n_false_alarm_events": op.get("n_false_alarm_events"),
+            "observation_days": op.get("observation_days"),
+        },
+        "threshold": thr,
+        "threshold_method": threshold_method,
+        "score_polarity": "higher_is_anomaly",
+        "eval_split": eval_split,
+        "note": "PA-F1 / Accuracy excluded from primary reporting",
+    }
+
+
+def compute_vus_paper_metrics(
+    y_true: np.ndarray,
+    scores: np.ndarray,
+    threshold: float,
+    *,
+    higher_is_anomaly: bool = True,
+    eval_split: str = "valid",
+    threshold_method: str | None = None,
+    window: int | None = None,
+) -> dict[str, Any] | None:
+    """Live VUS / Event / operational block for any score model."""
+    y = np.asarray(y_true, dtype=bool).reshape(-1)
+    s = np.asarray(scores, dtype=np.float64).reshape(-1)
+    n = min(len(y), len(s))
+    if n == 0:
+        return None
+    y, s = y[:n], s[:n]
+    thr = float(threshold)
+    if not higher_is_anomaly:
+        s = -s
+        thr = -thr
+    try:
+        evaluate = _load_evaluate_valid()
+        bundle = evaluate(
+            y,
+            s,
+            thr,
+            vus_window=window,
+            sample_minutes=5.0,
+        )
+    except Exception:
+        return None
+    return paper_metrics_from_vus_bundle(
+        bundle,
+        eval_split=eval_split,
+        threshold=float(threshold),
+        threshold_method=threshold_method,
+    )
+
+
 def is_anomalytransformer_prediction(
     predictions: dict[str, Any] | None,
     *,
@@ -1536,15 +1713,24 @@ def enrich_predictions_for_ui(
     )
     thresholds = thresholds_from_pred_doc(doc)
     export_paper = doc.get("paper_metrics")
-    # RiAD / RoCA exports already carry VUS-PR · Event · operational blocks.
-    # Do not replace them with the legacy Omni/AT pot/best_f1 mapper (empty for these).
-    if is_paper_backbone_prediction(doc) and isinstance(export_paper, dict) and (
+    # Prefer shared VUS schema from any model export (RiAD/RoCA/MSRS/…).
+    # Do not replace with the legacy Omni/AT pot/best_f1 mapper.
+    flat_vus = paper_metrics_from_flat_metrics(
+        doc.get("metrics") or {},
+        eval_split=split_choice,
+        threshold=_as_float(doc.get("threshold")),
+        threshold_method=str(doc.get("threshold_method") or "") or None,
+    )
+    if isinstance(export_paper, dict) and (
         export_paper.get("vus_pr") is not None
         or export_paper.get("event") is not None
         or export_paper.get("primary_metric") == "vus_pr"
     ):
         paper = dict(export_paper)
         paper["eval_split"] = split_choice
+        paper.setdefault("primary_metric", "vus_pr")
+    elif flat_vus is not None:
+        paper = flat_vus
     else:
         paper = paper_metrics_from_ib_saved(
             doc.get("metrics") or {}, metrics_split=split_choice
@@ -1662,6 +1848,70 @@ def enrich_predictions_for_ui(
     doc["threshold"] = thr
     doc["threshold_mode"] = mode
     doc["thresholds"] = thresholds
+    # Live VUS / Event / FA for the active split + threshold (all models).
+    if thr is not None and region.any() and ANOMALY_SCORE_KEY in df.columns:
+        score_all = df[ANOMALY_SCORE_KEY].to_numpy(dtype=np.float64)
+        s_reg = score_all[region]
+        y_reg = y_full[region]
+        win = None
+        try:
+            win = int(doc.get("window_length") or doc.get("window") or 0) or None
+        except (TypeError, ValueError):
+            win = None
+        live_paper = compute_vus_paper_metrics(
+            y_reg,
+            s_reg,
+            float(thr),
+            higher_is_anomaly=higher,
+            eval_split=split_choice,
+            threshold_method=str(doc.get("threshold_method") or mode),
+            window=win,
+        )
+        if live_paper is not None:
+            paper = live_paper
+            # Keep flat metrics keys in sync for UI fallbacks.
+            mflat = dict(doc.get("metrics") or {})
+            mflat.update(
+                {
+                    "primary_metric": "vus_pr",
+                    "vus_pr": live_paper.get("vus_pr"),
+                    "pr_auc": live_paper.get("pr_auc"),
+                    "vus_window": live_paper.get("vus_window"),
+                    "event_f1": (live_paper.get("event") or {}).get("f1"),
+                    "event_precision": (live_paper.get("event") or {}).get("precision"),
+                    "event_recall": (live_paper.get("event") or {}).get("recall"),
+                    "n_gt_events": (live_paper.get("event") or {}).get("n_gt_events"),
+                    "n_pred_events": (live_paper.get("event") or {}).get("n_pred_events"),
+                    "n_hit_gt": (live_paper.get("event") or {}).get("n_hit_gt"),
+                    "precision": (live_paper.get("point") or {}).get("precision"),
+                    "recall": (live_paper.get("point") or {}).get("recall"),
+                    "f1": (live_paper.get("point") or {}).get("f1"),
+                    "tp": (live_paper.get("point") or {}).get("TP"),
+                    "fp": (live_paper.get("point") or {}).get("FP"),
+                    "fn": (live_paper.get("point") or {}).get("FN"),
+                    "false_alarms_per_day": (live_paper.get("operational") or {}).get(
+                        "false_alarms_per_day"
+                    ),
+                    "n_false_alarm_events": (live_paper.get("operational") or {}).get(
+                        "n_false_alarm_events"
+                    ),
+                    "observation_days": (live_paper.get("operational") or {}).get(
+                        "observation_days"
+                    ),
+                    "mean_detection_delay_min": (live_paper.get("operational") or {}).get(
+                        "mean_detection_delay_min"
+                    ),
+                    "median_detection_delay_min": (
+                        live_paper.get("operational") or {}
+                    ).get("median_detection_delay_min"),
+                    "eval_split": split_choice,
+                }
+            )
+            doc["metrics"] = mflat
+        elif has_vus_paper_metrics({"paper_metrics": paper, "metrics": doc.get("metrics")}):
+            # Keep export VUS block when live recompute fails (e.g. missing vus pkg).
+            paper = dict(paper)
+            paper["eval_split"] = split_choice
     doc["paper_metrics"] = paper
     doc["live_by_mode"] = live_by_mode
     doc["labels_by_mode"] = labels_by_mode
