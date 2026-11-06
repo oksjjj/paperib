@@ -11,6 +11,7 @@ This experiment changes only the context partitioning relative to HourAE.
 6. Train one iterative-decontamination AutoEncoder per discovered context.
 7. Score each point with the AutoEncoder assigned to its local 5-minute slot.
 8. Load human labels only after all models and scores are fixed.
+9. Train the fixed 24-hour HourAE baseline with the same hyperparameters and compare validation metrics.
 
 Directional scoring is intentionally NOT included here. This script isolates the
 effect of replacing fixed 24 hourly models with data-driven K context models.
@@ -68,6 +69,18 @@ def _load_metrics():
 paper_metrics = _load_metrics()
 evaluate_valid = paper_metrics.evaluate_riad_valid
 resolve_vus_window = paper_metrics.resolve_vus_window
+
+
+def _load_hourae():
+    """Load the existing fixed 24-hour HourAE implementation."""
+    path = REPO / "HourAE" / "run_plmn.py"
+    spec = importlib.util.spec_from_file_location("paperib_hourae_baseline", path)
+    if spec is None or spec.loader is None:
+        raise ImportError(path)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = mod
+    spec.loader.exec_module(mod)
+    return mod
 
 
 @dataclass
@@ -1051,11 +1064,185 @@ def print_context_map(
         )
 
 
+
+def _metric_delta(
+    context_metrics: dict[str, Any],
+    hour_metrics: dict[str, Any],
+    key: str,
+) -> float | None:
+    a = context_metrics.get(key)
+    b = hour_metrics.get(key)
+    if a is None or b is None:
+        return None
+    return float(a) - float(b)
+
+
+def print_hour24_comparison(
+    *,
+    selected_k: int,
+    context_metrics: dict[str, Any],
+    hour_metrics: dict[str, Any],
+) -> None:
+    """Compact side-by-side validation comparison."""
+    print("", flush=True)
+    print("=" * 86, flush=True)
+    print(
+        f"VALID COMPARISON: adaptive K={selected_k} contexts vs fixed 24 hourly AEs",
+        flush=True,
+    )
+    print("=" * 86, flush=True)
+    print(
+        f"{'metric':<20} {'adaptive-K':>16} {'hour-24':>16} {'delta(K-24)':>16}",
+        flush=True,
+    )
+
+    rows = [
+        ("VUS-PR", "vus_pr"),
+        ("PR-AUC", "pr_auc"),
+        ("Event-F1", "event_f1"),
+        ("Event-Recall", "event_recall"),
+        ("Point-F1", "f1"),
+        ("FA/day", "false_alarms_per_day"),
+    ]
+
+    for label, key in rows:
+        a = context_metrics.get(key)
+        b = hour_metrics.get(key)
+        d = _metric_delta(context_metrics, hour_metrics, key)
+
+        def fmt(v: Any) -> str:
+            return "None" if v is None else f"{float(v):.6f}"
+
+        print(
+            f"{label:<20} {fmt(a):>16} {fmt(b):>16} {fmt(d):>16}",
+            flush=True,
+        )
+
+    print("=" * 86, flush=True)
+
+
+def write_hour24_comparison(
+    *,
+    plmn: str,
+    selected_k: int,
+    selected_silhouette: float,
+    context_result: dict[str, Any],
+    hour_result: dict[str, Any],
+    eval_test: bool,
+) -> str:
+    """Save a small comparison file without duplicating full score series."""
+    context_valid = context_result["valid"]
+    hour_valid = hour_result["valid"]
+
+    keys = [
+        "vus_pr",
+        "pr_auc",
+        "r_auc_pr",
+        "event_f1",
+        "event_precision",
+        "event_recall",
+        "n_gt_events",
+        "n_pred_events",
+        "n_hit_gt",
+        "precision",
+        "recall",
+        "f1",
+        "tp",
+        "fp",
+        "fn",
+        "false_alarms_per_day",
+        "n_false_alarm_events",
+        "n_detected_events",
+        "n_missed_events",
+    ]
+
+    valid_delta = {
+        key: _metric_delta(context_valid, hour_valid, key)
+        for key in keys
+        if isinstance(context_valid.get(key), (int, float))
+        and isinstance(hour_valid.get(key), (int, float))
+    }
+
+    payload: dict[str, Any] = {
+        "plmn": plmn,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "comparison": "silhouette_selected_contiguous_context_vs_fixed_24_hour",
+        "selected_k": int(selected_k),
+        "selected_silhouette": float(selected_silhouette),
+        "same_hyperparameters": True,
+        "train_labels_used": False,
+        "valid": {
+            "adaptive_context": context_valid,
+            "fixed_hour24": hour_valid,
+            "delta_adaptive_minus_hour24": valid_delta,
+        },
+        "paths": {
+            "adaptive_context": context_result.get("valid_path"),
+            "fixed_hour24": hour_result.get("valid_path"),
+        },
+    }
+
+    if eval_test and "test" in context_result and "test" in hour_result:
+        context_test = context_result["test"]
+        hour_test = hour_result["test"]
+        payload["test"] = {
+            "adaptive_context": context_test,
+            "fixed_hour24": hour_test,
+            "delta_adaptive_minus_hour24": {
+                key: _metric_delta(context_test, hour_test, key)
+                for key in keys
+                if isinstance(context_test.get(key), (int, float))
+                and isinstance(hour_test.get(key), (int, float))
+            },
+        }
+        payload["paths"]["adaptive_context_test"] = context_result.get("test_path")
+        payload["paths"]["fixed_hour24_test"] = hour_result.get("test_path")
+
+    PRED_DIR.mkdir(parents=True, exist_ok=True)
+    path = PRED_DIR / f"{plmn}_context_vs_hour24.json"
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return str(path)
+
+
+def run_hour24_baseline(
+    *,
+    plmn: str,
+    cfg: Config,
+    eval_test: bool,
+) -> dict[str, Any]:
+    """Train the existing HourAE baseline with exactly the shared AE settings."""
+    hourae = _load_hourae()
+    hour_cfg = hourae.Config(
+        timezone=cfg.timezone,
+        stage1_remove_pct=cfg.stage1_remove_pct,
+        final_contamination_pct=cfg.final_contamination_pct,
+        threshold_sigma=cfg.threshold_sigma,
+        hidden_dim=cfg.hidden_dim,
+        latent_dim=cfg.latent_dim,
+        stage1_epochs=cfg.stage1_epochs,
+        final_epochs=cfg.final_epochs,
+        batch_size=cfg.batch_size,
+        lr=cfg.lr,
+        weight_decay=cfg.weight_decay,
+        seed=cfg.seed,
+        sample_minutes=cfg.sample_minutes,
+    )
+    return hourae.run(
+        plmn=plmn,
+        cfg=hour_cfg,
+        eval_test=eval_test,
+    )
+
+
 def run(
     *,
     plmn: str,
     cfg: Config,
     eval_test: bool,
+    compare_hour24: bool = True,
 ) -> dict[str, Any]:
     set_seed(cfg.seed)
     device = device_for_run()
@@ -1294,6 +1481,36 @@ def run(
             flush=True,
         )
 
+    if compare_hour24:
+        print("", flush=True)
+        print(
+            "training fixed 24-hour HourAE baseline with identical AE hyperparameters",
+            flush=True,
+        )
+        hour24_result = run_hour24_baseline(
+            plmn=plmn,
+            cfg=cfg,
+            eval_test=eval_test,
+        )
+        result["hour24_baseline"] = hour24_result
+
+        print_hour24_comparison(
+            selected_k=int(segment_info["selected_k"]),
+            context_metrics=result["valid"],
+            hour_metrics=hour24_result["valid"],
+        )
+
+        comparison_path = write_hour24_comparison(
+            plmn=plmn,
+            selected_k=int(segment_info["selected_k"]),
+            selected_silhouette=float(segment_info["selected_silhouette"]),
+            context_result=result,
+            hour_result=hour24_result,
+            eval_test=eval_test,
+        )
+        result["comparison_path"] = comparison_path
+        print(f"comparison saved: {comparison_path}", flush=True)
+
     return result
 
 
@@ -1329,6 +1546,11 @@ def main() -> None:
     p.add_argument("--weight_decay", type=float, default=1e-5)
     p.add_argument("--seed", type=int, default=2)
 
+    p.add_argument(
+        "--skip_hour24_compare",
+        action="store_true",
+        help="skip retraining/comparison against the fixed 24-hour HourAE baseline",
+    )
     p.add_argument(
         "--eval_test",
         action="store_true",
@@ -1388,6 +1610,7 @@ def main() -> None:
         plmn=args.plmn,
         cfg=cfg,
         eval_test=args.eval_test,
+        compare_hour24=not args.skip_hour24_compare,
     )
 
 
