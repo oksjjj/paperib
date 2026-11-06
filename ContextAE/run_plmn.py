@@ -5,11 +5,12 @@ This experiment changes only the context partitioning relative to HourAE.
 
 1. Split data chronologically into train/valid/test.
 2. Using TRAIN only, map each local 5-minute slot to one robust temporal profile.
-3. Cluster the 288 daily slots by their robust profiles.
-4. Select K using train-only silhouette score, unless --k explicitly fixes K.
-5. Train one iterative-decontamination AutoEncoder per discovered context.
-6. Score each point with the AutoEncoder assigned to its local 5-minute slot.
-7. Load human labels only after all models and scores are fixed.
+3. Partition the 288 daily slots into K contiguous temporal regimes.
+4. For each K, find the minimum-SSE contiguous segmentation by dynamic programming.
+5. Select K using train-only silhouette score, unless --k explicitly fixes K.
+6. Train one iterative-decontamination AutoEncoder per discovered context.
+7. Score each point with the AutoEncoder assigned to its local 5-minute slot.
+8. Load human labels only after all models and scores are fixed.
 
 Directional scoring is intentionally NOT included here. This script isolates the
 effect of replacing fixed 24 hourly models with data-driven K context models.
@@ -31,7 +32,6 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import torch
-from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 from sklearn.preprocessing import RobustScaler
 from torch import nn
@@ -76,7 +76,7 @@ class Config:
     k: int = 0
     k_min: int = 2
     k_max: int = 24
-    min_cluster_slots: int = 3
+    min_segment_slots: int = 3
     profile_use_mad: bool = True
     stage1_remove_pct: float = 5.0
     final_contamination_pct: float = 0.01
@@ -221,11 +221,12 @@ def build_train_slot_profiles(
     *,
     use_mad: bool,
 ) -> dict[str, Any]:
-    """Build robust 5-minute slot profiles from TRAIN only.
+    """Build one robust profile for every 5-minute slot using TRAIN only.
 
-    Raw feature magnitudes are first globally robust-scaled using TRAIN only so
-    large counters cannot dominate clustering. Each observed slot profile uses
-    the across-day median and optionally MAD for every feature.
+    Raw features are robust-scaled from TRAIN only. For each slot we summarize
+    across days with median and optionally MAD. If a slot is absent from TRAIN,
+    its profile is copied from the nearest observed slot in circular clock time.
+    Validation/test data are never used to construct or fill profiles.
     """
     clustering_input_scaler = RobustScaler(
         with_centering=True,
@@ -235,8 +236,11 @@ def build_train_slot_profiles(
     train_scaled = clustering_input_scaler.fit_transform(train_raw)
 
     observed_slots = np.unique(train_slots).astype(int)
-    profiles: list[np.ndarray] = []
-    counts: list[int] = []
+    if observed_slots.size == 0:
+        raise RuntimeError("no train time slots observed")
+
+    observed_profiles: dict[int, np.ndarray] = {}
+    observed_counts: dict[int, int] = {}
 
     for slot in observed_slots:
         block = train_scaled[train_slots == slot]
@@ -246,8 +250,28 @@ def build_train_slot_profiles(
             profile = np.concatenate([med, mad], axis=0)
         else:
             profile = med
-        profiles.append(profile.astype(np.float64))
-        counts.append(int(len(block)))
+        observed_profiles[int(slot)] = profile.astype(np.float64)
+        observed_counts[int(slot)] = int(len(block))
+
+    all_slots = np.arange(288, dtype=int)
+    missing_slots: list[int] = []
+    profiles: list[np.ndarray] = []
+    counts: list[int] = []
+
+    for slot in all_slots:
+        if int(slot) in observed_profiles:
+            profiles.append(observed_profiles[int(slot)])
+            counts.append(observed_counts[int(slot)])
+            continue
+
+        missing_slots.append(int(slot))
+        circular = np.minimum(
+            np.abs(observed_slots - slot),
+            288 - np.abs(observed_slots - slot),
+        )
+        nearest_slot = int(observed_slots[int(np.argmin(circular))])
+        profiles.append(observed_profiles[nearest_slot].copy())
+        counts.append(0)
 
     profile_matrix = np.vstack(profiles)
     profile_scaler = RobustScaler(
@@ -258,7 +282,9 @@ def build_train_slot_profiles(
     profile_matrix_scaled = profile_scaler.fit_transform(profile_matrix)
 
     return {
+        "slots": all_slots,
         "observed_slots": observed_slots,
+        "missing_slots": missing_slots,
         "profiles": profile_matrix,
         "profiles_scaled": profile_matrix_scaled,
         "slot_counts": np.asarray(counts, dtype=int),
@@ -267,117 +293,188 @@ def build_train_slot_profiles(
     }
 
 
-def canonicalize_labels(
-    observed_slots: np.ndarray,
-    labels: np.ndarray,
-) -> tuple[np.ndarray, dict[int, int]]:
-    """Remap arbitrary KMeans labels by earliest local time slot."""
-    unique = sorted(
-        np.unique(labels).astype(int).tolist(),
-        key=lambda c: int(np.min(observed_slots[labels == c])),
+def build_segment_cost_matrix(
+    x: np.ndarray,
+    *,
+    min_segment_slots: int,
+) -> np.ndarray:
+    """SSE cost for every contiguous [start, end) segment."""
+    n, _d = x.shape
+    m = int(min_segment_slots)
+    cost = np.full((n + 1, n + 1), np.inf, dtype=np.float64)
+
+    cum_sum = np.vstack(
+        [np.zeros((1, x.shape[1]), dtype=np.float64), np.cumsum(x, axis=0)]
     )
-    remap = {old: new for new, old in enumerate(unique)}
-    canonical = np.asarray([remap[int(x)] for x in labels], dtype=np.int16)
-    return canonical, remap
+    cum_sq = np.concatenate(
+        [[0.0], np.cumsum(np.sum(x * x, axis=1), dtype=np.float64)]
+    )
+
+    for start in range(n):
+        ends = np.arange(start + m, n + 1, dtype=int)
+        if ends.size == 0:
+            continue
+        sums = cum_sum[ends] - cum_sum[start]
+        lengths = (ends - start).astype(np.float64)
+        sse = (
+            cum_sq[ends]
+            - cum_sq[start]
+            - np.sum(sums * sums, axis=1) / lengths
+        )
+        cost[start, ends] = np.maximum(sse, 0.0)
+
+    return cost
 
 
-def fit_context_clustering(
+def optimal_contiguous_partition(
+    cost: np.ndarray,
+    *,
+    k: int,
+    min_segment_slots: int,
+) -> tuple[np.ndarray, list[int], float]:
+    """Minimum-SSE partition of 00:00..23:55 into exactly K segments."""
+    n = cost.shape[0] - 1
+    m = int(min_segment_slots)
+
+    if k < 1 or k * m > n:
+        raise ValueError(
+            f"infeasible K={k} for n_slots={n}, min_segment_slots={m}"
+        )
+
+    dp = np.full((k + 1, n + 1), np.inf, dtype=np.float64)
+    prev = np.full((k + 1, n + 1), -1, dtype=np.int32)
+    dp[0, 0] = 0.0
+
+    for seg in range(1, k + 1):
+        j_min = seg * m
+        j_max = n - (k - seg) * m
+
+        for end in range(j_min, j_max + 1):
+            start_min = (seg - 1) * m
+            start_max = end - m
+            starts = np.arange(start_min, start_max + 1, dtype=int)
+            values = dp[seg - 1, starts] + cost[starts, end]
+            best_pos = int(np.argmin(values))
+            best_start = int(starts[best_pos])
+            best_value = float(values[best_pos])
+
+            if np.isfinite(best_value):
+                dp[seg, end] = best_value
+                prev[seg, end] = best_start
+
+    if not np.isfinite(dp[k, n]):
+        raise RuntimeError(f"failed to build contiguous partition for K={k}")
+
+    boundaries = [n]
+    end = n
+    for seg in range(k, 0, -1):
+        start = int(prev[seg, end])
+        if start < 0:
+            raise RuntimeError(f"invalid DP backtrack for K={k}, seg={seg}")
+        boundaries.append(start)
+        end = start
+    boundaries = sorted(boundaries)
+
+    labels = np.empty(n, dtype=np.int16)
+    for context_id, (a, b) in enumerate(zip(boundaries[:-1], boundaries[1:])):
+        labels[a:b] = context_id
+
+    return labels, boundaries, float(dp[k, n])
+
+
+def fit_context_segmentation(
     slot_info: dict[str, Any],
     cfg: Config,
 ) -> dict[str, Any]:
-    x = slot_info["profiles_scaled"]
-    slots = slot_info["observed_slots"]
-    n_slots = len(slots)
+    """Discover K contiguous temporal contexts from TRAIN profiles only."""
+    x = np.asarray(slot_info["profiles_scaled"], dtype=np.float64)
+    n_slots = len(x)
 
-    if n_slots < 4:
-        raise RuntimeError(f"only {n_slots} observed train slots")
+    if n_slots != 288:
+        raise RuntimeError(f"expected 288 daily slots, got {n_slots}")
 
-    candidate_rows: list[dict[str, Any]] = []
+    m = int(cfg.min_segment_slots)
+    if m < 1:
+        raise RuntimeError("min_segment_slots must be >= 1")
+
+    max_feasible_k = n_slots // m
 
     if cfg.k > 0:
-        candidate_ks = [cfg.k]
+        candidate_ks = [int(cfg.k)]
     else:
-        upper = min(cfg.k_max, n_slots - 1)
-        lower = max(cfg.k_min, 2)
+        lower = max(int(cfg.k_min), 2)
+        upper = min(int(cfg.k_max), max_feasible_k, n_slots - 1)
         if lower > upper:
             raise RuntimeError(
-                f"invalid K range after slot count: {lower}..{upper}"
+                f"invalid K range: {lower}..{upper} "
+                f"for min_segment_slots={m}"
             )
         candidate_ks = list(range(lower, upper + 1))
 
-    accepted: list[tuple[float, int, KMeans, np.ndarray]] = []
+    cost = build_segment_cost_matrix(
+        x,
+        min_segment_slots=m,
+    )
+
+    candidates: list[dict[str, Any]] = []
+    accepted: list[tuple[float, int, np.ndarray, list[int], float]] = []
 
     for k in candidate_ks:
-        if k < 2 or k >= n_slots:
+        if k < 2 or k > max_feasible_k:
             continue
 
-        km = KMeans(
-            n_clusters=int(k),
-            random_state=cfg.seed,
-            n_init=20,
+        labels, boundaries, within_sse = optimal_contiguous_partition(
+            cost,
+            k=int(k),
+            min_segment_slots=m,
         )
-        labels = km.fit_predict(x)
-        sizes = np.bincount(labels, minlength=k)
-        min_size = int(sizes.min())
+
+        sizes = np.bincount(labels, minlength=int(k))
         sil = float(silhouette_score(x, labels, metric="euclidean"))
-        eligible = min_size >= int(cfg.min_cluster_slots)
 
-        candidate_rows.append(
-            {
-                "k": int(k),
-                "silhouette": sil,
-                "min_cluster_slots": min_size,
-                "max_cluster_slots": int(sizes.max()),
-                "eligible": bool(eligible),
-            }
+        row = {
+            "k": int(k),
+            "silhouette": sil,
+            "within_sse": float(within_sse),
+            "min_segment_slots": int(sizes.min()),
+            "max_segment_slots": int(sizes.max()),
+            "boundaries": [int(v) for v in boundaries],
+            "eligible": bool(int(sizes.min()) >= m),
+        }
+        candidates.append(row)
+        accepted.append(
+            (sil, int(k), labels.copy(), list(boundaries), float(within_sse))
         )
-
-        if eligible or cfg.k > 0:
-            accepted.append((sil, int(k), km, labels))
 
     if not accepted:
-        raise RuntimeError(
-            "no K candidate satisfies min_cluster_slots; "
-            "lower --min_cluster_slots or provide --k"
-        )
+        raise RuntimeError("no feasible contiguous K segmentation")
 
-    # With explicit --k, use it. Otherwise select the best train-only silhouette.
+    # Explicit --k fixes K. Otherwise choose the best TRAIN-only silhouette.
     accepted.sort(key=lambda item: (-item[0], item[1]))
-    best_sil, selected_k, best_km, raw_labels = accepted[0]
+    best_sil, selected_k, labels, boundaries, within_sse = accepted[0]
 
-    labels, remap = canonicalize_labels(slots, raw_labels)
-
-    # Build complete 288-slot mapping. Missing TRAIN slots, if any, inherit the
-    # nearest observed slot in circular time. No validation/test data is used.
-    slot_to_context = np.full(288, -1, dtype=np.int16)
-    for slot, c in zip(slots, labels):
-        slot_to_context[int(slot)] = int(c)
-
-    missing_slots: list[int] = []
-    for slot in range(288):
-        if slot_to_context[slot] >= 0:
-            continue
-        missing_slots.append(slot)
-        circular = np.minimum(
-            np.abs(slots - slot),
-            288 - np.abs(slots - slot),
+    segments: list[dict[str, Any]] = []
+    for context_id, (a, b) in enumerate(zip(boundaries[:-1], boundaries[1:])):
+        segments.append(
+            {
+                "context_id": int(context_id),
+                "start_slot": int(a),
+                "end_slot": int(b - 1),
+                "start": slot_label(int(a)),
+                "end": slot_label(int(b - 1)),
+                "n_slots": int(b - a),
+            }
         )
-        nearest_pos = int(np.argmin(circular))
-        slot_to_context[slot] = int(labels[nearest_pos])
-
-    centers = np.empty_like(best_km.cluster_centers_)
-    for old, new in remap.items():
-        centers[new] = best_km.cluster_centers_[old]
 
     return {
         "selected_k": int(selected_k),
         "selected_silhouette": float(best_sil),
-        "slot_to_context": slot_to_context,
-        "observed_slots": slots,
-        "observed_labels": labels,
-        "missing_slots": missing_slots,
-        "candidate_scores": sorted(candidate_rows, key=lambda r: r["k"]),
-        "cluster_centers_scaled": centers,
+        "selected_within_sse": float(within_sse),
+        "slot_to_context": labels.astype(np.int16),
+        "segments": segments,
+        "boundaries": [int(v) for v in boundaries],
+        "missing_slots": list(slot_info.get("missing_slots") or []),
+        "candidate_scores": sorted(candidates, key=lambda r: r["k"]),
     }
 
 
@@ -756,19 +853,21 @@ def context_summary(
     return rows
 
 
-def clustering_payload(
-    cluster_info: dict[str, Any],
+def segmentation_payload(
+    segment_info: dict[str, Any],
 ) -> dict[str, Any]:
-    slot_to_context = cluster_info["slot_to_context"]
+    slot_to_context = segment_info["slot_to_context"]
     return {
-        "method": "train_only_robust_slot_profile_kmeans",
-        "selected_k": int(cluster_info["selected_k"]),
+        "method": "train_only_robust_profile_contiguous_dp",
+        "selected_k": int(segment_info["selected_k"]),
         "selected_silhouette": float(
-            cluster_info["selected_silhouette"]
+            segment_info["selected_silhouette"]
         ),
-        "candidate_scores": cluster_info["candidate_scores"],
+        "candidate_scores": segment_info["candidate_scores"],
+        "selected_within_sse": float(segment_info["selected_within_sse"]),
+        "segments": segment_info["segments"],
         "missing_train_slots": [
-            slot_label(int(x)) for x in cluster_info["missing_slots"]
+            slot_label(int(x)) for x in segment_info["missing_slots"]
         ],
         "slot_to_context": {
             slot_label(slot): int(slot_to_context[slot])
@@ -782,7 +881,7 @@ def save_checkpoint(
     artifacts: dict[int, ContextArtifacts],
     cols: list[str],
     cfg: Config,
-    cluster_info: dict[str, Any],
+    segment_info: dict[str, Any],
 ) -> str:
     path = MODEL_DIR / plmn / "paperib" / "context_ae.pt"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -791,7 +890,7 @@ def save_checkpoint(
         {
             "feature_columns": cols,
             "config": asdict(cfg),
-            "clustering": clustering_payload(cluster_info),
+            "segmentation": segmentation_payload(segment_info),
             "contexts": {
                 str(context_id): {
                     "final_state": art.final_state,
@@ -833,7 +932,7 @@ def write_prediction(
     cols: list[str],
     cfg: Config,
     artifacts: dict[int, ContextArtifacts],
-    cluster_info: dict[str, Any],
+    segment_info: dict[str, Any],
     split_meta: dict[str, str],
 ) -> str:
     pred = np.isfinite(scores) & (scores > threshold)
@@ -857,7 +956,7 @@ def write_prediction(
             "per_context_clean_train_mse_mean_plus_sigma"
         ),
         "timezone": cfg.timezone,
-        "n_context_models": int(cluster_info["selected_k"]),
+        "n_context_models": int(segment_info["selected_k"]),
         "feature_columns": cols,
         "feature_mode": "all_raw",
         "n_scores": int(np.isfinite(scores).sum()),
@@ -872,22 +971,22 @@ def write_prediction(
             "validation_labels_used_for_training": False,
             "validation_labels_used_for_context_selection": False,
         },
-        "clustering": clustering_payload(cluster_info),
+        "segmentation": segmentation_payload(segment_info),
         "training": {
             "method": (
-                "train_only_context_clustering_plus_"
+                "train_only_contiguous_context_segmentation_plus_"
                 "iterative_decontamination_autoencoder"
             ),
             "config": asdict(cfg),
             "context_models": context_summary(
                 artifacts,
-                cluster_info["slot_to_context"],
+                segment_info["slot_to_context"],
                 cfg,
             ),
             "note": (
-                "K and time-slot contexts are determined from TRAIN profiles "
+                "K and contiguous time boundaries are determined from TRAIN profiles "
                 "only. Direction-aware scoring is not included in this run so "
-                "the context-partition effect can be isolated."
+                "the temporal-segmentation effect can be isolated."
             ),
         },
         "score_series": {
@@ -919,38 +1018,35 @@ def write_prediction(
 
 
 def print_context_map(
-    cluster_info: dict[str, Any],
+    segment_info: dict[str, Any],
     train_context_ids: np.ndarray,
 ) -> None:
-    k = int(cluster_info["selected_k"])
-    mapping = cluster_info["slot_to_context"]
+    k = int(segment_info["selected_k"])
     print(
         f"selected K={k} "
-        f"silhouette={cluster_info['selected_silhouette']:.4f}",
+        f"silhouette={segment_info['selected_silhouette']:.4f} "
+        f"within_SSE={segment_info['selected_within_sse']:.4f}",
         flush=True,
     )
 
-    print("K candidates (train-only):", flush=True)
-    for row in cluster_info["candidate_scores"]:
+    print("K candidates (TRAIN-only contiguous segmentation):", flush=True)
+    for row in segment_info["candidate_scores"]:
         mark = "*" if row["k"] == k else " "
         print(
             f" {mark} K={row['k']:02d} "
             f"sil={row['silhouette']:.4f} "
-            f"min_slots={row['min_cluster_slots']} "
-            f"eligible={row['eligible']}",
+            f"SSE={row['within_sse']:.2f} "
+            f"min_slots={row['min_segment_slots']}",
             flush=True,
         )
 
-    print("discovered contexts:", flush=True)
-    for c in range(k):
-        slots = np.flatnonzero(mapping == c)
+    print("discovered contiguous contexts:", flush=True)
+    for seg in segment_info["segments"]:
+        c = int(seg["context_id"])
         n_train = int(np.sum(train_context_ids == c))
-        preview = ", ".join(slot_label(int(s)) for s in slots[:12])
-        if len(slots) > 12:
-            preview += ", ..."
         print(
-            f"  context={c} slots={len(slots)} "
-            f"train_points={n_train} [{preview}]",
+            f"  context={c} {seg['start']} ~ {seg['end']} "
+            f"slots={seg['n_slots']} train_points={n_train}",
             flush=True,
         )
 
@@ -971,7 +1067,7 @@ def run(
         flush=True,
     )
     print(
-        "building robust 5-minute slot profiles from TRAIN only",
+        "building robust 5-minute slot profiles and contiguous contexts from TRAIN only",
         flush=True,
     )
 
@@ -980,22 +1076,22 @@ def run(
         prep["train_slots"],
         use_mad=cfg.profile_use_mad,
     )
-    cluster_info = fit_context_clustering(slot_info, cfg)
+    segment_info = fit_context_segmentation(slot_info, cfg)
 
     train_context_ids = context_ids_from_slots(
         prep["train_slots"],
-        cluster_info["slot_to_context"],
+        segment_info["slot_to_context"],
     )
     valid_context_ids = context_ids_from_slots(
         prep["valid_slots"],
-        cluster_info["slot_to_context"],
+        segment_info["slot_to_context"],
     )
     test_context_ids = context_ids_from_slots(
         prep["test_slots"],
-        cluster_info["slot_to_context"],
+        segment_info["slot_to_context"],
     )
 
-    print_context_map(cluster_info, train_context_ids)
+    print_context_map(segment_info, train_context_ids)
 
     print(
         f"stage1 remove={cfg.stage1_remove_pct}% "
@@ -1011,7 +1107,7 @@ def run(
     t0 = time.time()
     artifacts: dict[int, ContextArtifacts] = {}
 
-    for context_id in range(int(cluster_info["selected_k"])):
+    for context_id in range(int(segment_info["selected_k"])):
         idx = np.flatnonzero(train_context_ids == context_id)
         art = fit_context_model(
             prep["train"][idx],
@@ -1060,7 +1156,7 @@ def run(
         artifacts,
         prep["cols"],
         cfg,
-        cluster_info,
+        segment_info,
     )
 
     print(
@@ -1105,15 +1201,15 @@ def run(
         cols=prep["cols"],
         cfg=cfg,
         artifacts=artifacts,
-        cluster_info=cluster_info,
+        segment_info=segment_info,
         split_meta=prep["split"],
     )
 
     result: dict[str, Any] = {
         "plmn": plmn,
-        "selected_k": int(cluster_info["selected_k"]),
+        "selected_k": int(segment_info["selected_k"]),
         "selected_silhouette": float(
-            cluster_info["selected_silhouette"]
+            segment_info["selected_silhouette"]
         ),
         "model_path": model_path,
         "valid_path": valid_path,
@@ -1182,7 +1278,7 @@ def run(
             cols=prep["cols"],
             cfg=cfg,
             artifacts=artifacts,
-            cluster_info=cluster_info,
+            segment_info=segment_info,
             split_meta=prep["split"],
         )
         result["test"] = metric_payload(test_bundle)
@@ -1210,15 +1306,15 @@ def main() -> None:
         "--k",
         type=int,
         default=0,
-        help="fixed K; 0 means train-only automatic selection",
+        help="fixed number of contiguous segments; 0 means train-only automatic K",
     )
     p.add_argument("--k_min", type=int, default=2)
     p.add_argument("--k_max", type=int, default=24)
-    p.add_argument("--min_cluster_slots", type=int, default=3)
+    p.add_argument("--min_segment_slots", type=int, default=3)
     p.add_argument(
         "--median_only_profile",
         action="store_true",
-        help="cluster slots by median only instead of median+MAD",
+        help="segment slots by median only instead of median+MAD",
     )
 
     p.add_argument("--stage1_remove_pct", type=float, default=5.0)
@@ -1243,13 +1339,13 @@ def main() -> None:
     if args.k < 0:
         p.error("--k must be 0 (auto) or >= 2")
     if args.k == 1:
-        p.error("--k=1 is the global-AE baseline, not context clustering")
+        p.error("--k=1 is the global-AE baseline, not context segmentation")
     if args.k_min < 2:
         p.error("--k_min must be >= 2")
     if args.k_max < args.k_min:
         p.error("--k_max must be >= k_min")
-    if args.min_cluster_slots < 1:
-        p.error("--min_cluster_slots must be >= 1")
+    if args.min_segment_slots < 1:
+        p.error("--min_segment_slots must be >= 1")
 
     if not (0.0 < args.stage1_remove_pct < 50.0):
         p.error("--stage1_remove_pct must be in (0,50)")
@@ -1273,7 +1369,7 @@ def main() -> None:
         k=args.k,
         k_min=args.k_min,
         k_max=args.k_max,
-        min_cluster_slots=args.min_cluster_slots,
+        min_segment_slots=args.min_segment_slots,
         profile_use_mad=not args.median_only_profile,
         stage1_remove_pct=args.stage1_remove_pct,
         final_contamination_pct=args.final_contamination_pct,
