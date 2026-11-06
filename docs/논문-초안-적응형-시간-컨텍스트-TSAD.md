@@ -53,6 +53,26 @@ $$
 
 추가적인 분석을 통해 단순히 더 복잡한 sequence model을 적용하는 것보다 정상 상태의 시간적 이질성을 먼저 분리하는 것이 중요할 가능성을 확인하였다. 실제로 하루를 24개의 시간대로 고정 분할하여 각 시간대별 AutoEncoder를 학습한 HourAE는 기존 실험들보다 높은 anomaly ranking 성능을 보였다. 이는 하나의 전역 정상 모델보다 시간대별 정상 모델이 실제 데이터에 더 적합할 수 있음을 시사한다.
 
+특히 P0480의 초기 실험에서는 긴 시간 구간의 패턴과 temporal dependency를 직접 모델링하는 window/sequence 기반 TSAD보다, 각 시점의 다변량 관측값이 해당 시간대의 정상 상태에서 얼마나 벗어났는지를 평가하는 point-wise 방식이 operational anomaly와 더 잘 정렬될 가능성이 관찰되었다. 본 연구에서 point-wise 방식은 시간 정보를 사용하지 않는 독립적인 point anomaly detection을 의미하지 않는다. 시간 $t$의 관측값 $x_t$를 그대로 평가하되, 해당 시점이 속한 temporal context $c_t$를 조건으로 정상 분포를 정의하는 **context-aware point-wise TSAD**를 의미한다.
+
+즉 기존의 window 기반 접근이 다음과 같이 긴 시퀀스를 입력으로 사용하는 반면,
+
+$
+[x_{t-L+1},\ldots,x_t]
+\rightarrow
+\text{Temporal Model}
+\rightarrow
+s_t
+$
+
+본 연구는 다음과 같이 현재 시점의 다변량 상태와 시간 컨텍스트의 관계를 중심으로 anomaly score를 정의한다.
+
+$
+s_t=f(x_t\mid c_t)
+$
+
+따라서 본 연구의 가설은 SKT 인바운드 로밍 데이터에서 모든 이상이 복잡한 subsequence pattern으로 나타난다고 가정하기보다, **시간 컨텍스트에 따라 달라지는 정상 상태로부터의 다변량 point deviation이 더 중요한 이상 단서일 수 있다**는 것이다. 현재 이 관찰은 P0480 development 결과에 기반한 가설이며, 최종적으로는 10개 사업자 실험을 통해 일반적으로 성립하는지 검증한다.
+
 하지만 고정된 24개 시간 분할에는 두 가지 문제가 있다. 첫째, 1시간이라는 구간은 데이터로부터 얻어진 것이 아니라 사람이 임의로 정한 단위이다. 둘째, 각 시간대의 학습 샘플 수가 감소하면서 정상 분포 추정이 불안정해질 수 있다. 이에 본 연구에서는 정상 패턴이 실제로 변하는 지점을 학습 데이터로부터 탐색하여, 필요한 수만큼의 연속적인 temporal context를 자동으로 구성하는 방향으로 연구를 확장하였다.
 
 ## 1.3 연구 문제
@@ -101,15 +121,17 @@ $$
 
 본 연구는 다음 연구 질문에 답하고자 한다.
 
-**RQ1.** 하나의 전역 정상 모델보다 시간 컨텍스트를 분리한 정상 모델이 실제 이동통신 시계열 이상 탐지에 유리한가?
+**RQ1.** 긴 window/sequence의 temporal dependency를 직접 모델링하는 방식과 비교했을 때, 시간 컨텍스트에 따른 정상 상태로부터의 point-wise deviation을 모델링하는 방식이 인바운드 로밍 이상 탐지에 더 적합한가?
 
-**RQ2.** 고정된 24시간 분할보다 학습 데이터에서 자동으로 발견한 적응형 temporal context가 anomaly ranking과 false alarm 측면에서 유리한가?
+**RQ2.** 하나의 전역 정상 모델보다 시간 컨텍스트를 분리한 정상 모델이 실제 이동통신 시계열 이상 탐지에 유리한가?
 
-**RQ3.** 각 temporal context 내부에서 iterative decontamination을 수행하면 contaminated training의 영향을 줄일 수 있는가?
+**RQ3.** 고정된 24시간 분할보다 학습 데이터에서 자동으로 발견한 적응형 temporal context가 anomaly ranking과 false alarm 측면에서 유리한가?
 
-**RQ4.** 제안 방법의 효과가 특정 개발용 사업자에만 국한되지 않고 서로 다른 10개 로밍 사업자에서 반복적으로 나타나는가?
+**RQ4.** 각 temporal context 내부에서 iterative decontamination을 수행하면 contaminated training의 영향을 줄일 수 있는가?
 
-**RQ5.** feature별 운영 의미에 따른 방향성을 anomaly scoring에 반영할 경우 false alarm을 추가로 감소시킬 수 있는가? `[확장 실험 예정]`
+**RQ5.** 제안 방법의 효과가 특정 개발용 사업자에만 국한되지 않고 서로 다른 10개 로밍 사업자에서 반복적으로 나타나는가?
+
+**RQ6.** feature별 운영 의미에 따른 방향성을 anomaly scoring에 반영할 경우 false alarm을 추가로 감소시킬 수 있는가? `[확장 실험 예정]`
 
 ## 1.5 연구의 기여
 
@@ -788,7 +810,19 @@ Primary metric은 VUS-PR로 한다.
 
 # 8. 논의
 
-## 8.1 왜 Adaptive Context가 필요한가
+## 8.1 Sequence 기반 TSAD와 Context-aware Point-wise 방식
+
+P0480의 preliminary 결과는 SKT 인바운드 로밍 데이터에서 긴 window의 temporal dependency를 직접 모델링하는 것보다, 현재 시점의 다변량 상태를 해당 시간대의 정상 상태와 비교하는 point-wise 방식이 더 효과적일 가능성을 보여준다. 이는 본 데이터의 anomaly가 반드시 긴 subsequence의 형태로만 나타나는 것이 아니라, 특정 시간 컨텍스트에서 기대되는 정상 상태로부터의 순간적인 다변량 편차로도 충분히 표현될 수 있음을 의미한다.
+
+다만 본 연구의 point-wise 접근은 시간 정보를 제거한 정적 이상 탐지가 아니다. 각 시점 $x_t$는 학습 데이터에서 자동으로 발견한 temporal context $c_t$에 조건화되어 평가되므로, 하루 주기와 시간대별 정상 분포의 차이를 명시적으로 사용한다.
+
+$
+s_t=f(x_t\mid c_t)
+$
+
+따라서 본 연구의 방법은 **context-aware point-wise TSAD**로 해석할 수 있다. 현재 단계에서 sequence 기반 TSAD보다 point-wise 방식이 일반적으로 우수하다고 단정하지 않으며, P0480에서 관찰된 hypothesis를 나머지 9개 사업자의 독립 평가를 통해 검증한다. 최종 10개 사업자 결과에서 동일한 경향이 반복될 경우, 인바운드 로밍 데이터의 anomaly 특성이 복잡한 subsequence modeling보다 context-dependent multivariate deviation으로 더 잘 설명된다는 근거로 해석할 수 있다.
+
+## 8.2 왜 Adaptive Context가 필요한가
 
 P0480 결과에서 24개의 독립 AutoEncoder는 anomaly recall을 높였지만 매우 많은 false alarm을 발생시켰다. 이는 시간대를 세분화할수록 각 모델이 사용할 수 있는 train sample 수가 감소하고, 해당 시간대의 정상 분포 추정이 불안정해질 수 있기 때문이다.
 
@@ -796,7 +830,7 @@ P0480 결과에서 24개의 독립 AutoEncoder는 anomaly recall을 높였지만
 
 따라서 temporal context는 단순히 많이 나눌수록 좋은 것이 아니라, 서로 다른 정상 regime을 충분히 분리하면서도 각 model이 정상 분포를 안정적으로 학습할 수 있는 수준으로 설정되어야 한다.
 
-## 8.2 Silhouette와 Anomaly Detection 성능의 차이
+## 8.3 Silhouette와 Anomaly Detection 성능의 차이
 
 현재 $K$ 선택에는 train profile의 silhouette score를 사용한다. 이는 anomaly label 없이 $K$를 선택할 수 있다는 장점이 있지만, silhouette는 정상 time profile의 분리도를 평가할 뿐 anomaly detection 성능을 직접 최적화하지 않는다.
 
@@ -812,7 +846,7 @@ $$
 
 최종 연구에서는 여러 사업자에서 silhouette 기반 $K$가 안정적으로 성능을 향상시키는지 검증하여 train-only context selection 기준의 타당성을 평가한다.
 
-## 8.3 Ranking과 Threshold Calibration
+## 8.4 Ranking과 Threshold Calibration
 
 P0480 Adaptive ContextAE의 PR-AUC는 약 0.464로 anomaly prevalence에 비해 높은 ranking 성능을 보였지만 FA/day는 여전히 12.79로 높았다.
 
@@ -828,7 +862,7 @@ $$
 
 현재 mean + $3\sigma$ threshold는 train과 validation score distribution shift에 민감하다. 따라서 최종 시스템에서는 robust train-only calibration을 별도 검토할 필요가 있다.
 
-## 8.4 Direction-aware Scoring의 필요성
+## 8.5 Direction-aware Scoring의 필요성
 
 운영 metric의 의미를 고려하면 모든 reconstruction residual을 대칭적으로 처리하는 것이 적절하지 않을 수 있다. 운영상 의미 없는 방향의 deviation까지 anomaly evidence에 포함되면 정상적인 변동이 false alarm으로 연결될 수 있다.
 
@@ -860,7 +894,7 @@ direction-aware scoring은 모델 입력값을 임의로 clipping하는 대신 �
 
 본 연구는 anomaly label 없이 contaminated multivariate time series를 학습해야 하는 실제 이동통신 환경에서, 정상 상태가 시간에 따라 달라진다는 점에 주목하였다.
 
-초기 실험에서 기존 TSAD 및 global normal modeling만으로는 operational GT와 충분한 정렬을 얻기 어렵거나 많은 false alarm이 발생하였다. 고정된 24시간 context 모델은 anomaly ranking을 개선했지만 지나친 세분화로 false alarm이 증가하였다.
+초기 실험에서 기존 sequence/window 기반 TSAD 및 global normal modeling만으로는 operational GT와 충분한 정렬을 얻기 어렵거나 많은 false alarm이 발생하였다. 반면 temporal context를 조건으로 각 시점의 다변량 deviation을 평가하는 point-wise 접근은 P0480에서 더 높은 anomaly ranking 성능을 보여, 본 인바운드 로밍 데이터에서는 긴 temporal dependency 자체보다 context-dependent normality가 중요한 단서일 가능성을 확인하였다. 고정된 24시간 context 모델은 이러한 가설을 뒷받침했지만 지나친 세분화로 false alarm이 증가하였다.
 
 이를 해결하기 위해 본 연구는 train data에서 robust temporal profile을 구성하고 시간 순서를 유지하는 adaptive contiguous segmentation을 통해 temporal context의 수와 경계를 자동으로 결정하는 방법을 제안하였다. 또한 각 context 내부에서 iterative decontamination을 수행하여 anomaly label 없이 정상 모델을 재학습하였다.
 
