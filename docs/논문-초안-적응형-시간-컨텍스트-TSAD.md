@@ -57,19 +57,19 @@ $$
 
 즉 기존의 window 기반 접근이 다음과 같이 긴 시퀀스를 입력으로 사용하는 반면,
 
-$
+$$
 [x_{t-L+1},\ldots,x_t]
 \rightarrow
 \text{Temporal Model}
 \rightarrow
 s_t
-$
+$$
 
 본 연구는 다음과 같이 현재 시점의 다변량 상태와 시간 컨텍스트의 관계를 중심으로 anomaly score를 정의한다.
 
-$
+$$
 s_t=f(x_t\mid c_t)
-$
+$$
 
 따라서 본 연구의 가설은 SKT 인바운드 로밍 데이터에서 모든 이상이 복잡한 subsequence pattern으로 나타난다고 가정하기보다, **시간 컨텍스트에 따라 달라지는 정상 상태로부터의 다변량 point deviation이 더 중요한 이상 단서일 수 있다**는 것이다. 현재 이 관찰은 P0480 development 결과에 기반한 가설이며, 최종적으로는 10개 사업자 실험을 통해 일반적으로 성립하는지 검증한다.
 
@@ -1027,9 +1027,9 @@ P0480의 preliminary 결과는 SKT 인바운드 로밍 데이터에서 긴 windo
 
 다만 본 연구의 point-wise 접근은 시간 정보를 제거한 정적 이상 탐지가 아니다. 각 시점 $x_t$는 학습 데이터에서 자동으로 발견한 temporal context $c_t$에 조건화되어 평가되므로, 하루 주기와 시간대별 정상 분포의 차이를 명시적으로 사용한다.
 
-$
+$$
 s_t=f(x_t\mid c_t)
-$
+$$
 
 따라서 본 연구의 방법은 **context-aware point-wise TSAD**로 해석할 수 있다. 현재 단계에서 sequence 기반 TSAD보다 point-wise 방식이 일반적으로 우수하다고 단정하지 않으며, P0480에서 관찰된 hypothesis를 나머지 9개 사업자의 독립 평가를 통해 검증한다. 최종 10개 사업자 결과에서 동일한 경향이 반복될 경우, 인바운드 로밍 데이터의 anomaly 특성이 복잡한 subsequence modeling보다 context-dependent multivariate deviation으로 더 잘 설명된다는 근거로 해석할 수 있다.
 
@@ -1117,14 +1117,150 @@ P0480 development 결과에서 제안한 Adaptive ContextAE는 고정 24시간 �
 
 # 참고문헌
 
+## 참고문헌 구성 원칙
+
+본 논문의 참고문헌은 단순히 TSAD 관련 논문을 나열하는 것이 아니라, 연구의 문제 정의와 방법 선택을 뒷받침하는 관점별로 구성한다. 최종적으로는 중복을 제외하고 약 25~35편의 핵심 문헌을 확보하는 것을 목표로 한다.
+
+| 우선순위 | 관점 | 논문에서의 역할 | 목표 문헌 수 |
+|---:|---|---|---:|
+| 1 | TSAD 평가 지표 | PA의 한계, Range/Event 평가, VUS-PR, PR-AUC 선택 근거 | 5~7 |
+| 2 | Contaminated Training / Robust TSAD | clean-normal assumption의 한계와 label-free contaminated training 근거 | 4~6 |
+| 3 | Temporal Context / Seasonality | 시간에 따라 정상 분포가 달라지는 문제와 $p(x\mid c)$의 근거 | 4~6 |
+| 4 | Point-wise vs Subsequence | point/contextual/subsequence anomaly의 차이와 현재 문제 설정의 근거 | 3~5 |
+| 5 | Robust Statistics / Decontamination | median, MAD, filtering, retraining의 근거 | 3~5 |
+| 6 | Telecom / Expert Ground Truth | 실제 통신 운영 환경, false alarm, 전문가 레이블의 의미 | 3~5 |
+| 7 | 대표 TSAD 방법 및 Benchmark | 기존 reconstruction/prediction/deep TSAD의 전체 배경 | 4~6 |
+
+## 논문 읽기 순서
+
+현재 연구 방향을 기준으로 다음 순서로 문헌을 읽고 정리한다.
+
+### 1순위 — TSAD 평가 지표
+
+가장 먼저 VUS와 TSAD 평가 지표 관련 논문을 읽는다. 현재 연구에서 VUS-PR을 primary metric으로 사용하고 있으므로, **왜 Point-F1, PA-F1, AUROC만으로는 충분하지 않은지**를 먼저 명확히 이해하는 것이 중요하다.
+
+중점적으로 확인할 내용:
+
+- Point Adjustment의 정의와 한계
+- point-based metric과 range/event-based metric의 차이
+- Range-AUC, VUS의 정의와 도입 배경
+- VUS-ROC와 VUS-PR의 차이
+- anomaly imbalance에서 PR-AUC가 갖는 의미
+- tolerance window와 anomaly cardinality가 평가 결과에 미치는 영향
+
+현재 확보 문헌: **[3], [4]**
+
+### 2순위 — Contaminated Training / Robust TSAD
+
+다음으로 실제 train data에 anomaly가 포함될 수 있는 상황을 다룬 논문을 읽는다.
+
+중점적으로 확인할 내용:
+
+- clean-normal training assumption
+- contaminated training에서 기존 TSAD가 성능 저하를 겪는 원인
+- anomaly label 없이 contamination을 완화하는 방법
+- filtering, reweighting, robust loss, iterative decontamination
+- contamination ratio에 따른 성능 변화
+
+현재 확보 문헌: **[1]**
+
+추가 검토 대상: RoCA, RiAD 및 기타 contaminated-training TSAD.
+
+### 3순위 — Temporal Context / Seasonality
+
+본 연구의 핵심 가설인 **context-dependent normality**를 뒷받침하는 문헌을 검토한다.
+
+$$
+p_N(x)
+\quad\rightarrow\quad
+p_N(x\mid c)
+$$
+
+중점적으로 확인할 내용:
+
+- hour-of-day, day-of-week 등 시간 조건 사용 여부
+- seasonal anomaly detection
+- conditional AE/VAE
+- temporal regime 또는 context discovery
+- predefined context와 data-driven adaptive context의 차이
+
+현재 확보 문헌: **[2]**
+
+### 4순위 — Point-wise vs Window/Subsequence
+
+현재 연구가 sequence/window 기반 접근에서 context-aware point-wise 접근으로 이동한 근거를 정리하기 위한 문헌이다.
+
+중점적으로 확인할 내용:
+
+- point anomaly
+- contextual anomaly
+- collective/subsequence anomaly
+- point-wise와 subsequence 기반 문제 정의의 차이
+- 각 anomaly 유형에 적합한 평가 방식
+- temporal dependency를 직접 모델링해야 하는 조건
+
+현재 확보 문헌: **추가 검토 예정**
+
+### 5순위 — Robust Statistics / Decontamination
+
+제안 방법에서 사용하는 median, MAD, top-error filtering 및 retraining의 이론적·실험적 근거를 확보한다.
+
+중점적으로 확인할 내용:
+
+- median/MAD의 robustness
+- trimming 및 high-loss sample filtering
+- iterative cleaning/retraining
+- reconstruction error 기반 decontamination
+- robust loss 또는 sample reweighting과의 차이
+
+현재 확보 문헌: **추가 검토 예정**
+
+### 6순위 — Telecom / Expert Ground Truth
+
+전문가 hand labeling이 본 연구에서 중요한 차별점이므로 실제 운영 환경의 anomaly 정의와 false alarm 문제를 다루는 문헌을 검토한다.
+
+중점적으로 확인할 내용:
+
+- cellular/network KPI anomaly detection
+- telecom fault monitoring
+- statistical anomaly와 operational anomaly의 차이
+- false alarm burden / alert fatigue
+- expert labeling / human-in-the-loop anomaly detection
+
+현재 확보 문헌: **추가 검토 예정**
+
+### 7순위 — 대표 TSAD 방법 및 Benchmark
+
+마지막으로 전체 TSAD 분야에서 대표적인 방법을 정리하여 관련 연구의 배경을 보완한다.
+
+중점적으로 확인할 내용:
+
+- reconstruction-based TSAD
+- prediction-based TSAD
+- density/proximity-based TSAD
+- attention/Transformer/graph 기반 TSAD
+- benchmark에서 단순 방법과 deep model의 성능 비교
+
+현재 확보 문헌: **[4] 및 추가 검토 예정**
+
+## 현재 확보한 참고문헌
+
+### Contaminated Training / Robust TSAD
+
 [1] T. K. K. Ho and N. Armanfard, “Contaminated Multivariate Time-Series Anomaly Detection with Spatio-Temporal Graph Conditional Diffusion Models,” *Proceedings of the 41st Conference on Uncertainty in Artificial Intelligence (UAI)*, PMLR 286, pp. 1710–1729, 2025.  
 https://proceedings.mlr.press/v286/ho25a.html
+
+### Temporal Context / Seasonality
 
 [2] L. Porcelli, M. Trovati, and F. Palmieri, “Real-time anomaly detection in seasonal time series with conditional variational autoencoder,” *Applied Soft Computing*, vol. 184, Part A, 113761, 2025.  
 https://doi.org/10.1016/j.asoc.2025.113761
 
+### TSAD 평가 지표
+
 [3] P. Boniol, A. K. Krishna, M. Bruel, Q. Liu, M. Huang, T. Palpanas, R. S. Tsay, A. Elmore, M. J. Franklin, and J. Paparrizos, “VUS: effective and efficient accuracy measures for time-series anomaly detection,” *The VLDB Journal*, vol. 34, 32, 2025.  
 https://doi.org/10.1007/s00778-025-00907-x
+
+### TSAD Benchmark / 평가
 
 [4] Q. Liu and J. Paparrizos, “The Elephant in the Room: Towards A Reliable Time-Series Anomaly Detection Benchmark,” *Advances in Neural Information Processing Systems 37 (NeurIPS 2024), Datasets and Benchmarks Track*, 2024.  
 https://proceedings.neurips.cc/paper_files/paper/2024/hash/c3f3c690b7a99fba16d0efd35cb83b2c-Abstract-Datasets_and_Benchmarks_Track.html
