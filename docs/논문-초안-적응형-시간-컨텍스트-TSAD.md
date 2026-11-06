@@ -152,51 +152,262 @@ $$
 
 # 2. 관련 연구
 
-## 2.1 시계열 이상 탐지
+본 연구의 관련 연구는 단순히 기존 TSAD 모델을 나열하는 방식이 아니라, 현재 연구의 문제 설정과 방법 선택을 뒷받침하는 관점으로 구성한다. 구체적으로 (1) TSAD의 대표 접근, (2) contaminated training, (3) temporal context와 seasonality, (4) point-wise와 subsequence 기반 이상 탐지의 차이, (5) robust statistics와 decontamination, (6) TSAD 평가 지표, (7) 실제 통신 운영 환경과 전문가 ground truth의 일곱 관점에서 선행연구를 검토한다.
 
-TSAD 방법은 크게 reconstruction-based, prediction-based, density/proximity-based 방법 등으로 구분할 수 있다. Reconstruction-based 방법은 정상 패턴을 압축 및 복원하도록 학습한 뒤 입력과 복원값의 차이를 anomaly score로 사용한다. AutoEncoder는 구조가 단순하고 다변량 데이터에 쉽게 적용할 수 있기 때문에 정상 분포 자체의 구조를 분석하기 위한 baseline으로 적합하다.
+## 2.1 시계열 이상 탐지의 대표 접근
 
-최근의 deep TSAD 방법들은 긴 시간 의존성, 변수 간 관계, attention 또는 graph structure 등을 모델링하지만, 실제 환경에서 복잡한 모델이 항상 더 높은 성능을 보장하는 것은 아니다. TSB-AD benchmark에서는 다양한 TSAD 알고리즘을 통합적으로 평가한 결과, 평가 프로토콜과 데이터 품질의 중요성을 강조하였고 단순한 모델이 복잡한 신경망보다 우수한 경우도 있음을 보고하였다 [4].
+TSAD 방법은 reconstruction-based, prediction-based, density/proximity-based, representation learning 기반 방법 등으로 구분할 수 있다. Reconstruction-based 방법은 정상 패턴을 복원하도록 모델을 학습한 뒤 입력과 복원값의 차이를 anomaly score로 사용하며, prediction-based 방법은 과거 구간으로부터 미래 값을 예측한 뒤 prediction error를 이용한다. 최근에는 attention, graph neural network, Transformer 등으로 긴 temporal dependency와 변수 간 관계를 함께 모델링하는 방법들이 제안되고 있다.
 
-본 연구는 새로운 deep backbone 구조를 제안하는 것을 목표로 하지 않는다. 오히려 정상 상태의 temporal context가 적절하게 정의되지 않을 경우 복잡한 backbone 자체의 성능이 제한될 수 있다는 관점에서 문제를 접근한다.
+본 연구에서는 새로운 deep backbone 자체를 제안하는 것을 목표로 하지 않는다. 오히려 실제 인바운드 로밍 데이터에서 긴 sequence를 복잡하게 모델링하는 것이 항상 operational anomaly와의 정렬을 보장하지 않는다는 preliminary observation에서 출발한다.
 
-## 2.2 Contaminated Training 기반 TSAD
+따라서 이 절에서는 다음 질문을 중심으로 대표 문헌을 검토한다.
 
-많은 unsupervised TSAD 연구는 학습 데이터가 대부분 정상이라는 가정을 사용한다. 그러나 실제 데이터에서는 anomaly가 학습 구간에 포함될 가능성이 높다.
+- 기존 TSAD는 어떤 단위(point, window, subsequence)로 anomaly를 정의하는가?
+- reconstruction, prediction, density 기반 방법은 각각 어떤 가정을 갖는가?
+- 긴 temporal dependency를 모델링하는 것이 어떤 상황에서 유리한가?
+- 실제 benchmark에서 복잡한 deep model이 항상 우수한가?
 
-Ho와 Armanfard는 contaminated multivariate time series를 대상으로 anomaly label 없이 학습하는 TSAD-C를 제안하였다 [1]. TSAD-C는 training contamination을 제거하는 decontaminator, 변수 간 dependency를 모델링하는 모듈, anomaly scoring 모듈로 구성된다. 이 연구는 contaminated training 자체가 실제 TSAD의 독립적인 문제임을 보여준다.
+현재 TSB-AD benchmark는 다양한 TSAD 알고리즘과 평가 환경을 통합적으로 비교하였으며, 복잡한 모델이 모든 데이터셋에서 우수한 것은 아니라는 점과 평가 프로토콜의 중요성을 강조한다 [4].
 
-본 연구 역시 train anomaly label을 사용하지 않는다는 점에서 같은 현실적 문제를 다룬다. 그러나 본 연구의 초점은 복잡한 spatio-temporal dependency backbone 자체보다, **시간대에 따라 정상 분포가 달라지는 상황에서 정상성을 어떠한 temporal context로 분리해야 하는가**에 있다. 또한 decontamination을 전체 데이터에 일괄 적용하지 않고 발견된 temporal context 내부에서 수행한다.
+**추가 문헌 검토 예정:** 대표 reconstruction-based, prediction-based, Transformer/attention 기반 TSAD 4~6편.
 
-## 2.3 시간 컨텍스트와 계절성 기반 이상 탐지
+## 2.2 Contaminated Training을 고려한 TSAD
 
-시계열의 시간 정보와 계절성을 anomaly detection에 활용하는 연구도 존재한다. Porcelli 등은 seasonal time series에서 timestamp-derived condition을 이용하는 conditional VAE 기반 방법을 제안하였다 [2]. 해당 방법에서는 daily 또는 weekly seasonality를 나타내기 위해 hour-of-day 또는 day-of-week와 같은 condition을 입력으로 사용할 수 있다.
+많은 비지도 TSAD 방법은 학습 데이터가 대부분 정상이라는 가정을 사용한다. 그러나 실제 운영 데이터에서는 과거 장애나 품질 저하가 train period에 이미 포함되어 있을 수 있으며, 모든 학습 구간을 전문가가 사전에 레이블링하고 제거하는 것은 현실적으로 어렵다.
 
-이와 같은 방법은 다음 분포를 명시적으로 모델링한다는 점에서 의미가 있다.
+본 연구는 다음과 같은 contaminated training setting을 기본 문제로 둔다.
 
 $$
-p(x\mid c)
+p_{\mathrm{train}}(X)
+=
+(1-\epsilon)p_N(X)
++
+\epsilon p_A(X)
 $$
 
-그러나 일반적으로 temporal condition $c$는 hour-of-day와 같이 사전에 정의된 category를 사용한다. 반면 본 연구는 fixed hourly category를 그대로 사용하지 않고, contaminated train data의 robust temporal profile을 기반으로 필요한 context의 수와 시간 경계를 자동으로 탐색한다.
+Ho와 Armanfard는 contaminated multivariate time series에서 anomaly label 없이 학습하는 TSAD-C를 제안하였다 [1]. TSAD-C는 decontamination과 spatio-temporal modeling을 결합하여 contaminated training 자체를 독립적인 문제로 다룬다.
 
-즉 본 연구의 차이는 단순히 time information을 사용하는 것보다 다음에 있다.
+본 연구 역시 train anomaly label을 사용하지 않는다는 점에서 동일한 현실적 문제를 다루지만, 핵심 관심은 복잡한 backbone보다 **시간에 따라 달라지는 정상 분포를 어떤 context로 분리하고 학습할 것인가**에 있다.
+
+이 절에서는 다음을 검토한다.
+
+- clean-normal training assumption의 한계
+- contaminated training에서 성능이 저하되는 원인
+- label-free decontamination 및 robust training 방법
+- iterative filtering 또는 sample reweighting 방식
+- contamination ratio에 대한 민감도
+
+**추가 문헌 검토 예정:** RoCA, RiAD 및 contaminated-training/robust TSAD 관련 4~6편.
+
+## 2.3 Temporal Context, Seasonality와 Context-dependent Normality
+
+시계열의 정상 분포는 하루 전체에서 동일하지 않을 수 있다. 특히 통신 트래픽은 시간대, 요일, 생활 패턴 등의 영향을 받아 일정한 주기성을 보이며, 동일한 값이라도 어느 시간대에 발생했는지에 따라 정상 또는 이상으로 해석될 수 있다.
+
+이를 확률적으로 표현하면 전역 정상 분포
+
+$$
+p_N(x)
+$$
+
+보다 context를 조건으로 하는 분포
+
+$$
+p_N(x\mid c)
+$$
+
+가 더 적합할 수 있다.
+
+Porcelli 등은 seasonal time series에서 timestamp-derived condition을 이용하는 conditional VAE 기반 이상 탐지 방법을 제안하였다 [2]. hour-of-day 또는 day-of-week와 같은 시간 정보를 condition으로 사용한다는 점에서 본 연구와 관련이 있다.
+
+그러나 기존 방법들이 사전에 정의된 hour/day category를 사용하는 경우가 많은 반면, 본 연구는 다음과 같이 context 자체를 train data에서 자동으로 발견하는 것을 목표로 한다.
 
 $$
 \boxed{
-\text{Predefined Context}
+\text{Predefined Temporal Context}
 \rightarrow
-\text{Data-driven Adaptive Context}
+\text{Data-driven Adaptive Temporal Context}
 }
 $$
 
-## 2.4 TSAD 평가 지표
+이 절에서는 다음을 검토한다.
 
-시계열 anomaly는 단일 point뿐 아니라 일정 시간 동안 지속되는 range anomaly로 발생할 수 있다. 따라서 threshold에 따라 크게 달라지는 point-wise F1 또는 point adjustment 방식만으로 모델을 평가할 경우 실제 anomaly score 품질을 정확하게 반영하지 못할 수 있다.
+- seasonality를 anomaly detection에 반영하는 방법
+- hour-of-day, day-of-week 등을 condition으로 사용하는 방법
+- regime switching 또는 context-dependent normality
+- temporal segmentation 및 change/regime discovery
+- 고정 context와 adaptive context의 차이
 
-Boniol 등은 range 기반 anomaly 평가에서 tolerance window의 영향을 함께 고려하는 VUS 계열 지표를 제안하였다 [3]. TSB-AD benchmark 역시 다양한 지표를 비교하여 VUS-PR을 신뢰성 높은 TSAD 평가 지표로 강조하였다 [4].
+**추가 문헌 검토 예정:** seasonal anomaly detection, conditional AE/VAE, temporal regime/context discovery 관련 4~6편.
 
-본 연구에서는 VUS-PR을 primary ranking metric으로 사용하며, 추가적으로 PR-AUC, Event-F1, Event Recall, point-wise Precision/Recall/F1 및 false alarms per day를 보고한다. 특히 실제 운영 환경에서는 높은 ranking 성능뿐 아니라 지나치게 많은 false alarm을 억제하는 것이 중요하므로 FA/day를 핵심 operational metric으로 사용한다.
+## 2.4 Point-wise와 Window/Subsequence 기반 이상 탐지
+
+TSAD에서는 anomaly를 개별 시점의 이상으로 볼 것인지, 일정 길이의 subsequence 또는 range anomaly로 볼 것인지에 따라 문제 정의가 달라진다.
+
+window/sequence 기반 방법은 일반적으로
+
+$$
+[x_{t-L+1},\ldots,x_t]
+\rightarrow
+\text{Temporal Model}
+\rightarrow
+s_t
+$$
+
+와 같이 연속된 관측 구간의 temporal dependency를 모델링한다.
+
+반면 본 연구에서 검토하는 context-aware point-wise 방식은 현재 시점의 다변량 상태를 해당 시간 context의 정상 상태와 비교한다.
+
+$$
+s_t=f(x_t\mid c_t)
+$$
+
+중요한 점은 본 연구의 point-wise 방식이 시간을 무시하는 정적 anomaly detection이 아니라는 것이다. 시간 정보는 temporal context $c_t$의 형태로 명시적으로 사용된다.
+
+P0480의 preliminary experiment에서는 sequence/window 기반 모델보다 context-aware point-wise reconstruction이 operational GT anomaly의 ranking과 정렬에 더 유리할 가능성이 관찰되었다. 그러나 이는 아직 하나의 development operator에 대한 관찰이므로, 10개 사업자 실험을 통해 검증해야 할 가설로 둔다.
+
+이 절에서는 다음을 검토한다.
+
+- point anomaly, contextual anomaly, collective/subsequence anomaly의 정의
+- point-wise와 subsequence 기반 evaluation의 차이
+- contextual anomaly detection의 개념
+- 긴 temporal dependency가 반드시 필요한 경우와 그렇지 않은 경우
+
+**추가 문헌 검토 예정:** point/contextual/subsequence anomaly 정의 및 비교 관련 3~5편.
+
+## 2.5 Robust Statistics와 Decontamination
+
+본 연구에서는 contaminated train data에서 anomaly의 영향을 줄이기 위해 median, MAD, high-score filtering 및 retraining을 사용한다.
+
+평균과 표준편차는 극단값에 민감할 수 있으므로 temporal profile을 구성할 때 robust location/scale estimator인 median과 MAD를 사용한다.
+
+$$
+m_{s,f}
+=
+\operatorname{median}_{d}(x_{d,s,f})
+$$
+
+$$
+MAD_{s,f}
+=
+\operatorname{median}_{d}
+\left|
+x_{d,s,f}-m_{s,f}
+\right|
+$$
+
+또한 각 temporal context에서 1차 AutoEncoder를 학습한 후 reconstruction error가 높은 train sample을 제거하고 fresh model을 다시 학습한다.
+
+$$
+D_k
+\rightarrow
+AE_k^{(1)}
+\rightarrow
+\text{High-score filtering}
+\rightarrow
+D'_k
+\rightarrow
+AE_k^{(2)}
+$$
+
+이 절에서는 다음을 검토한다.
+
+- median/MAD와 robust estimation의 이론적 배경
+- trimming 또는 high-loss sample filtering
+- iterative cleaning/retraining
+- reconstruction error 기반 decontamination
+- robust loss, reweighting 방식과의 차이
+
+**추가 문헌 검토 예정:** robust statistics 및 iterative decontamination 관련 3~5편.
+
+## 2.6 시계열 이상 탐지 평가 지표
+
+TSAD에서는 anomaly가 단일 point뿐 아니라 일정 시간 동안 지속되는 range 형태로 발생할 수 있기 때문에, 평가 지표 선택이 결과 해석에 큰 영향을 미친다.
+
+### 2.6.1 Point-wise metric과 Point Adjustment
+
+기본적인 Precision, Recall, F1은 각 point를 독립적으로 평가한다. 그러나 range anomaly에서 일부 point만 탐지하더라도 anomaly event 자체를 탐지했다는 의미가 있을 수 있기 때문에, 기존 연구에서는 Point Adjustment(PA)가 널리 사용되어 왔다.
+
+하지만 PA는 anomaly range 내 한 점만 탐지해도 전체 range를 탐지한 것으로 보정하기 때문에 모델의 성능을 과대평가할 가능성이 있다. 따라서 본 연구에서는 PA-F1을 primary metric으로 사용하지 않는다.
+
+**추가 문헌 검토 예정:** Point Adjustment의 한계와 평가 왜곡을 분석한 논문 2~3편.
+
+### 2.6.2 Range/Event 기반 평가
+
+실제 운영에서는 anomaly point 하나보다 anomaly event를 탐지했는지가 중요하다. 따라서 range-based Precision/Recall, event-level F1, affiliation metric 등 point 독립 평가를 보완하기 위한 평가 방법들이 제안되어 왔다.
+
+본 연구에서는 GT anomaly interval과 predicted anomaly segment의 overlap을 기준으로 Event Recall과 Event-F1을 함께 보고한다. 또한 운영자가 실제로 확인해야 하는 잘못된 alert 수를 표현하기 위해 FA/day를 사용한다.
+
+**추가 문헌 검토 예정:** range-based precision/recall, affiliation, event-level metric 관련 2~4편.
+
+### 2.6.3 VUS 기반 평가
+
+Boniol 등은 range anomaly에서 tolerance window에 따라 metric이 달라지는 문제를 완화하기 위해 Volume Under the Surface(VUS)를 제안하였다 [3]. VUS는 여러 tolerance 범위에 대한 성능을 통합하여 threshold 또는 단일 tolerance 값에 지나치게 의존하지 않는 평가를 가능하게 한다.
+
+본 연구에서는 다음을 primary ranking metric으로 사용한다.
+
+$$
+\boxed{VUS\text{-}PR}
+$$
+
+특히 anomaly class imbalance가 매우 큰 실제 로밍 데이터에서는 ROC 계열보다 Precision-Recall 기반 지표가 실제 anomaly ranking의 품질을 해석하는 데 더 적합할 수 있다.
+
+TSB-AD 역시 다양한 TSAD metric을 비교하며 VUS-PR을 신뢰성 있는 평가 지표 중 하나로 사용한다 [4].
+
+**추가 문헌 검토 예정:** VUS 원 논문, range-aware AUC/VUS 후속 연구 및 benchmark 연구.
+
+### 2.6.4 PR-AUC와 Class Imbalance
+
+본 연구 데이터에서는 anomaly point의 비율이 매우 낮기 때문에 AUROC만으로 성능을 평가하면 많은 true negative의 영향으로 실제 탐지 품질이 과도하게 좋아 보일 수 있다.
+
+PR-AUC는 anomaly class를 중심으로 Precision과 Recall 사이의 trade-off를 평가하기 때문에 severe class imbalance 상황에서 중요한 보조 ranking metric으로 사용한다.
+
+이 절에서는 다음을 검토한다.
+
+- ROC-AUC와 PR-AUC의 차이
+- severe imbalance에서 PR curve가 갖는 장점
+- random PR-AUC baseline과 anomaly prevalence의 관계
+
+**추가 문헌 검토 예정:** ROC vs PR curve, imbalanced anomaly detection evaluation 관련 2~3편.
+
+## 2.7 실제 통신 운영 환경과 전문가 Ground Truth
+
+실제 이동통신 환경에서 통계적으로 희귀한 변화가 모두 운영상 중요한 anomaly는 아니다.
+
+$$
+\text{Statistical Anomaly}
+\neq
+\text{Operational Anomaly}
+$$
+
+예를 들어 count가 매우 낮은 지표가 0에서 1로 변하는 현상은 통계적으로 높은 anomaly score를 받을 수 있지만 실제 서비스 영향은 거의 없을 수 있다. 반대로 여러 주요 지표가 동시에 변화하거나 성공률이 하락하는 현상은 운영자가 확인할 가치가 높은 anomaly일 수 있다.
+
+따라서 본 연구에서는 전문가가 실제 운영 관점에서 anomaly interval을 정의한 hand-labeled ground truth를 사용한다.
+
+이 절에서는 다음을 검토한다.
+
+- cellular/network KPI anomaly detection
+- telecom fault/anomaly monitoring
+- statistical anomaly와 operational alert의 차이
+- false alarm burden과 alert fatigue
+- domain expert labeling 또는 human-in-the-loop anomaly detection
+
+**추가 문헌 검토 예정:** telecom/network anomaly detection 및 expert labeling 관련 3~5편.
+
+## 2.8 관련 연구 구성 요약
+
+최종 참고문헌은 다음과 같은 비중으로 구성하는 것을 목표로 한다.
+
+| 관점 | 주요 역할 | 목표 문헌 수 |
+|---|---|---:|
+| TSAD 대표 방법 | 기존 접근 및 backbone 배경 | 4~6 |
+| Contaminated Training | clean-normal assumption의 한계 | 4~6 |
+| Temporal Context / Seasonality | $p(x\mid c)$의 필요성 | 4~6 |
+| Point vs Subsequence | point-wise 문제 설정의 근거 | 3~5 |
+| Robust / Decontamination | median, MAD, filtering, retraining | 3~5 |
+| Evaluation Metrics | PA, Event, VUS, PR-AUC | 5~7 |
+| Telecom / Expert GT | 실제 운영 환경과 전문가 레이블 | 3~5 |
+
+중복되는 문헌을 고려하면 최종적으로 약 25~35편 수준의 핵심 참고문헌을 구성하는 것을 목표로 한다. 특히 본 연구의 핵심 문제 설정과 직접 연결되는 **Contaminated Training**, **Temporal Context**, **Evaluation Metrics** 문헌을 우선적으로 검토한다.
 
 ---
 
@@ -917,6 +1128,33 @@ https://doi.org/10.1007/s00778-025-00907-x
 
 [4] Q. Liu and J. Paparrizos, “The Elephant in the Room: Towards A Reliable Time-Series Anomaly Detection Benchmark,” *Advances in Neural Information Processing Systems 37 (NeurIPS 2024), Datasets and Benchmarks Track*, 2024.  
 https://proceedings.neurips.cc/paper_files/paper/2024/hash/c3f3c690b7a99fba16d0efd35cb83b2c-Abstract-Datasets_and_Benchmarks_Track.html
+
+---
+
+# 참고문헌 읽기 및 정리 계획
+
+앞으로 읽는 논문은 단순 요약이 아니라 아래 항목을 기준으로 정리하여 본문에 반영한다.
+
+1. 논문이 정의하는 anomaly의 단위: point / contextual / subsequence / event
+2. train data에 anomaly가 포함되는지 여부와 contamination assumption
+3. 시간 context 또는 seasonality를 사용하는지
+4. 정상 분포를 global하게 보는지 context-conditioned하게 보는지
+5. decontamination 또는 robust training 방식
+6. anomaly score와 threshold 결정 방식
+7. 평가 지표: AUROC, PR-AUC, F1, PA-F1, range metric, VUS 등
+8. 사용 데이터셋과 anomaly ratio
+9. 본 연구와 직접적으로 겹치는 부분
+10. 본 연구와 구분되는 차별점
+
+우선 읽을 문헌의 순서는 다음과 같이 한다.
+
+1. VUS 및 TSAD evaluation metric
+2. Contaminated training / robust TSAD
+3. Temporal context / seasonality / contextual anomaly detection
+4. Point-wise vs subsequence anomaly definition
+5. Robust statistics / iterative decontamination
+6. Telecom operational anomaly / expert labeling
+7. 대표 TSAD backbone 및 benchmark
 
 ---
 
