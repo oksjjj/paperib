@@ -98,6 +98,24 @@ repository root:
     cd ContextAE
     ../.venv/bin/python run_plmn.py --plmn P0480
 
+기본 실행은 두 모델을 모두 새로 학습합니다.
+
+1. TRAIN-only silhouette로 선택된 K개의 연속 context AE
+2. 고정 24개 시간대 HourAE baseline
+
+두 모델은 같은 split, AE 구조, stage1 removal, epoch, optimizer, threshold 설정을 사용합니다.
+
+실행하면 먼저 adaptive K-context 결과가 출력되고, 이어서 24-hour baseline을 학습한 뒤 다음과 같은 비교 표가 출력됩니다.
+
+    VALID COMPARISON: adaptive K=... contexts vs fixed 24 hourly AEs
+    metric                 adaptive-K          hour-24      delta(K-24)
+    VUS-PR                 ...
+    PR-AUC                 ...
+    Event-F1               ...
+    Event-Recall           ...
+    Point-F1               ...
+    FA/day                 ...
+
 실행하면 다음이 출력됩니다.
 
     K candidates (TRAIN-only contiguous segmentation):
@@ -113,10 +131,23 @@ repository root:
 결과:
 
     data/ib_data/predictions/P0480_context_ae_valid.json
+    data/ib_data/predictions/P0480_hour_ae_valid.json
+    data/ib_data/predictions/P0480_context_vs_hour24.json
 
-checkpoint:
+adaptive context checkpoint:
 
     ContextAE/model/P0480/paperib/context_ae.pt
+
+fixed 24-hour baseline checkpoint:
+
+    HourAE/model/P0480/paperib/hour_ae.pt
+
+비교 JSON에는 두 모델의 validation metric과
+adaptive-K minus hour-24 차이가 함께 저장됩니다.
+
+24시간 baseline 재학습을 생략하고 adaptive context만 실행하려면:
+
+    ../.venv/bin/python run_plmn.py --plmn P0480 --skip_hour24_compare
 
 ## Profile ablation
 
