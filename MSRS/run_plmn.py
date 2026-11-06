@@ -409,6 +409,32 @@ def sparse_score(
     return scores, k
 
 
+def calibrate_scale_score(
+    train_score: np.ndarray,
+    other_scores: list[np.ndarray],
+) -> tuple[np.ndarray, list[np.ndarray], dict[str, float]]:
+    """Put each temporal scale on a comparable robust train-score scale."""
+    finite = np.asarray(train_score, dtype=np.float64)
+    finite = finite[np.isfinite(finite)]
+    if finite.size == 0:
+        raise RuntimeError("no finite train scale scores")
+    med = float(np.median(finite))
+    mad = float(np.median(np.abs(finite - med)))
+    scale = max(1.4826 * mad, 1e-8)
+
+    def transform(arr: np.ndarray) -> np.ndarray:
+        x = np.asarray(arr, dtype=np.float64).copy()
+        ok = np.isfinite(x)
+        x[ok] = np.log1p(np.maximum((x[ok] - med) / scale, 0.0))
+        return x
+
+    return (
+        transform(train_score),
+        [transform(x) for x in other_scores],
+        {"median": med, "robust_scale": scale},
+    )
+
+
 def combine_scale_scores(
     scores_by_scale: dict[int, np.ndarray],
     *,
@@ -682,6 +708,13 @@ def run(
             feature_scale=feat_scale,
             topk_ratio=cfg.topk_ratio,
         )
+
+        train_score, calibrated, scale_score_ref = calibrate_scale_score(
+            train_score,
+            [valid_score, test_score],
+        )
+        valid_score, test_score = calibrated
+        train_meta[str(window)]["score_reference"] = scale_score_ref
 
         score_train_by_scale[window] = train_score
         score_valid_by_scale[window] = valid_score
