@@ -29,19 +29,19 @@
 
 그러나 실제 운영 데이터는 공개 benchmark와 다른 특성을 가진다. 첫째, 학습 구간 전체가 정상이라고 보장하기 어렵다. 장애 또는 품질 이상이 과거 학습 데이터에 이미 포함되어 있을 수 있으며, 모든 학습 데이터를 전문가가 사전에 레이블링하는 것은 비용이 크다. 따라서 실제 환경에서는 다음과 같은 contaminated training setting이 자연스럽다.
 
-$
+$$
 p_{\mathrm{train}}(X)
 =
 (1-\epsilon)p_N(X)+\epsilon p_A(X)
-$
+$$
 
 여기서 $p_N$은 정상 분포, $p_A$는 이상 분포이며, $\epsilon$은 학습 데이터에 포함된 anomaly contamination 비율이다.
 
 둘째, 정상 상태 자체가 하나의 고정된 분포를 따르지 않을 수 있다. 특히 로밍 트래픽은 시간대에 따라 트래픽 규모와 실패/성공 패턴이 달라질 수 있다. 따라서 하나의 전역 분포 $p(X)$를 학습하는 것보다 시간 컨텍스트 $C$를 조건으로 하는 다음 분포가 실제 정상성을 더 잘 표현할 수 있다.
 
-$
+$$
 p_N(X\mid C)
-$
+$$
 
 셋째, 통계적으로 드문 변화가 모두 운영상 중요한 이상은 아니다. 일부 지표에서는 증가와 감소가 모두 중요하지만, 다른 지표에서는 특정 방향의 변화만 장애 또는 품질 저하와 관련될 수 있다. 따라서 단순한 reconstruction error만으로는 운영자의 판단 기준과 모델의 anomaly score 사이에 차이가 발생할 수 있다.
 
@@ -59,29 +59,29 @@ $
 
 본 연구의 핵심 문제는 다음과 같이 정의한다.
 
-$
+$$
 \boxed{
 \text{Unlabeled Contaminated Training}
 +
 \text{Context-dependent Normality}
 }
-$
+$$
 
 사업자 $j$의 시간 $t$에서 관측되는 $F$차원 다변량 시계열을
 
-$
+$$
 x_t\in\mathbb{R}^{F}
-$
+$$
 
 라고 하자. 시간 $t$가 속하는 temporal context를 $c_t$라고 하면 학습 데이터는 다음과 같은 conditional contamination model로 표현할 수 있다.
 
-$
+$$
 p_{\mathrm{train}}(x\mid c)
 =
 (1-\epsilon_c)p_N(x\mid c)
 +
 \epsilon_c p_A(x\mid c)
-$
+$$
 
 본 연구의 목표는 anomaly label을 사용하지 않고 다음을 동시에 추정하는 것이다.
 
@@ -91,9 +91,9 @@ $
 
 최종적으로 다음과 같은 anomaly score를 생성하는 것을 목표로 한다.
 
-$
+$$
 s_t = f(x_t,c_t)
-$
+$$
 
 여기서 $c_t$ 역시 사람이 고정적으로 정의하는 것이 아니라 학습 데이터에서 자동으로 결정한다.
 
@@ -152,21 +152,21 @@ Ho와 Armanfard는 contaminated multivariate time series를 대상으로 anomaly
 
 이와 같은 방법은 다음 분포를 명시적으로 모델링한다는 점에서 의미가 있다.
 
-$
+$$
 p(x\mid c)
-$
+$$
 
 그러나 일반적으로 temporal condition $c$는 hour-of-day와 같이 사전에 정의된 category를 사용한다. 반면 본 연구는 fixed hourly category를 그대로 사용하지 않고, contaminated train data의 robust temporal profile을 기반으로 필요한 context의 수와 시간 경계를 자동으로 탐색한다.
 
 즉 본 연구의 차이는 단순히 time information을 사용하는 것보다 다음에 있다.
 
-$
+$$
 \boxed{
 \text{Predefined Context}
 \rightarrow
 \text{Data-driven Adaptive Context}
 }
-$
+$$
 
 ## 2.4 TSAD 평가 지표
 
@@ -221,15 +221,15 @@ Boniol 등은 range 기반 anomaly 평가에서 tolerance window의 영향을 �
 
 각 사업자의 전체 시계열은 시간 순서를 유지하여 다음과 같이 분할한다.
 
-$
+$$
 Train:60\%,\qquad Validation:20\%,\qquad Test:20\%
-$
+$$
 
 Train set에는 실제 anomaly가 포함될 수 있으며, train anomaly label은 모델 학습이나 context discovery 과정에서 사용하지 않는다.
 
-$
+$$
 \boxed{\text{Train anomaly labels used}=0}
-$
+$$
 
 Validation set은 development 단계의 분석과 method 설계 검증에 사용하며, Test set은 최종 방법을 확정한 후 최종 성능 평가에만 사용한다.
 
@@ -269,49 +269,49 @@ Operational anomaly detection
 
 5분 간격 시계열의 경우 하루는 총 288개의 time slot으로 구성된다.
 
-$
+$$
 S=\{0,1,\ldots,287\}
-$
+$$
 
 각 slot $s$에 대해 train period의 여러 날짜에서 동일한 시간대의 관측치를 수집한다.
 
-$
+$$
 X_s
 =
 \{x_{d,s}\mid d\in D_{\mathrm{train}}\}
-$
+$$
 
 학습 데이터에 anomaly가 포함될 수 있으므로 평균보다 outlier의 영향을 적게 받는 median과 MAD를 사용한다.
 
 feature $f$에 대한 slot $s$의 중심은 다음과 같다.
 
-$
+$$
 m_{s,f}
 =
 \operatorname{median}_{d}(x_{d,s,f})
-$
+$$
 
 변동성은 다음과 같이 정의한다.
 
-$
+$$
 MAD_{s,f}
 =
 \operatorname{median}_{d}
 \left|
 x_{d,s,f}-m_{s,f}
 \right|
-$
+$$
 
 최종 temporal profile은 다음과 같이 구성한다.
 
-$
+$$
 p_s
 =
 [
 m_{s,1},\ldots,m_{s,F},
 MAD_{s,1},\ldots,MAD_{s,F}
 ]
-$
+$$
 
 feature별 scale 차이가 segmentation을 지배하지 않도록 train-only RobustScaler를 적용한다.
 
@@ -321,40 +321,40 @@ feature별 scale 차이가 segmentation을 지배하지 않도록 train-only Rob
 
 하루의 288개 profile을 $K$개의 연속 segment로 나눈다고 하자.
 
-$
+$$
 \mathcal{S}
 =
 \{S_1,S_2,\ldots,S_K\}
-$
+$$
 
 각 segment 내부의 profile이 최대한 유사하도록 다음 within-segment SSE를 최소화한다.
 
-$
+$$
 J_K
 =
 \sum_{k=1}^{K}
 \sum_{s\in S_k}
 \|p_s-\mu_k\|_2^2
-$
+$$
 
 여기서 $\mu_k$는 $k$번째 segment의 평균 profile이다.
 
 각 후보 $K$에 대해 시간 순서를 보존하는 최적 partition을 dynamic programming으로 계산한다. 현재 후보 범위는 다음과 같다.
 
-$
+$$
 K\in\{2,\ldots,24\}
-$
+$$
 
 너무 짧은 segment가 생성되는 것을 방지하기 위해 최소 segment 길이를 설정한다. 현재 구현에서는 3개의 slot, 즉 15분을 최소 단위로 사용한다.
 
 각 $K$에 대해 최적 contiguous partition을 얻은 후 train profile에 대한 silhouette score를 계산한다.
 
-$
+$$
 K^*
 =
 \arg\max_K
 Silhouette(K)
-$
+$$
 
 이 과정에는 validation/test label이 사용되지 않는다.
 
@@ -366,31 +366,31 @@ $
 
 현재 구조는 다음과 같다.
 
-$
+$$
 F
 \rightarrow 32
 \rightarrow 8
 \rightarrow 32
 \rightarrow F
-$
+$$
 
 P0480에서 $F=46$이며 ReLU activation과 Adam optimizer를 사용한다.
 
 context $k$에 속하는 train sample 집합을
 
-$
+$$
 D_k
 =
 \{x_t\mid c_t=k\}
-$
+$$
 
 라고 하면 각 context마다 별도의 scaler와 AutoEncoder를 학습한다.
 
 이와 같이 context를 분리하면 다음과 같은 조건부 정상 분포를 모델링하는 효과를 가진다.
 
-$
+$$
 p_N(x\mid c=k)
-$
+$$
 
 ## 4.5 Context-wise Iterative Decontamination
 
@@ -400,32 +400,32 @@ $
 
 context $k$의 모든 train point를 이용해 첫 번째 AutoEncoder를 학습한다.
 
-$
+$$
 AE_k^{(1)}
 =
 fit(D_k)
-$
+$$
 
 각 train sample의 reconstruction MSE를 계산한다.
 
-$
+$$
 e_{t}^{(1)}
 =
 \frac{1}{F}
 \sum_{f=1}^{F}
 (x_{t,f}-\hat{x}_{t,f}^{(1)})^2
-$
+$$
 
 현재 구현에서는 reconstruction error 상위 5%를 contamination candidate로 간주한다.
 
-$
+$$
 D'_k
 =
 \{x_t\in D_k
 \mid
 e_t^{(1)}
 \le Q_{0.95}(e^{(1)}_k)\}
-$
+$$
 
 중요한 점은 이 과정에서 실제 anomaly label을 사용하지 않는다는 것이다.
 
@@ -433,11 +433,11 @@ $
 
 제거 후 남은 데이터 $D'_k$를 사용하여 새로운 scaler를 학습하고, 새로운 AutoEncoder를 처음부터 재학습한다.
 
-$
+$$
 AE_k^{(2)}
 =
 fit(D'_k)
-$
+$$
 
 Stage 2 모델은 최종 anomaly scoring에 사용된다.
 
@@ -447,30 +447,30 @@ Stage 2 모델은 최종 anomaly scoring에 사용된다.
 
 최종 AutoEncoder의 reconstruction MSE를
 
-$
+$$
 e_t
 =
 \frac{1}{F}
 \sum_{f=1}^{F}
 (x_{t,f}-\hat{x}_{t,f})^2
-$
+$$
 
 라고 한다.
 
 각 context에서 decontamination 후 train reconstruction error의 평균과 표준편차를 이용해 z-score 형태로 정규화한다.
 
-$
+$$
 s_t
 =
 \frac{e_t-\mu_{e,c_t}}
 {\sigma_{e,c_t}+\epsilon}
-$
+$$
 
 현재 기본 anomaly decision은 다음 기준을 사용한다.
 
-$
+$$
 s_t>3
-$
+$$
 
 다만 P0480 preliminary 결과에서 ranking metric에 비해 FA/day가 여전히 높게 나타났기 때문에, mean + standard deviation 기반 calibration은 최종 방법의 한계로 남아 있다. 최종 연구에서는 train-only empirical quantile 또는 robust calibration을 추가로 비교할 예정이다.
 
@@ -480,13 +480,13 @@ $
 
 최종 reconstruction residual을 다음과 같이 정의한다.
 
-$
+$$
 r_{t,f}=x_{t,f}-\hat{x}_{t,f}
-$
+$$
 
 context와 feature별 train residual의 median과 MAD를 이용해 정규화하면
 
-$
+$$
 z_{t,f}
 =
 \frac{
@@ -496,20 +496,20 @@ r_{t,f}
 }{
 1.4826\cdot MAD(r_{c_t,f}^{train})+\epsilon
 }
-$
+$$
 
 으로 표현할 수 있다.
 
 양방향 변화가 중요한 feature 집합을 $\mathcal{F}_{\pm}$, 증가 방향만 중요한 feature 집합을 $\mathcal{F}_{+}$라 하면 direction-aware evidence는 다음과 같이 정의할 수 있다.
 
-$
+$$
 D_{t,f}
 =
 \begin{cases}
 |z_{t,f}|, & f\in\mathcal{F}_{\pm}\\
 \max(z_{t,f},0), & f\in\mathcal{F}_{+}
 \end{cases}
-$
+$$
 
 본 확장에서는 이 score를 최종 inference뿐 아니라 Stage 1 decontamination에도 동일하게 적용하여, 운영적으로 정상인 방향의 변화가 train에서 불필요하게 제거되는 것을 방지하고자 한다.
 
@@ -573,12 +573,12 @@ threshold를 적용한 이후 point 수준의 오탐 및 미탐을 분석한다.
 
 GT와 겹치지 않는 predicted event 수를 관측 일수로 나눈다.
 
-$
+$$
 FA/day
 =
 \frac{N_{\mathrm{false\ alarm\ events}}}
 {N_{\mathrm{observation\ days}}}
-$
+$$
 
 운영 환경에서는 높은 recall뿐 아니라 false alarm burden을 낮추는 것이 중요하므로 핵심 operational metric으로 사용한다.
 
@@ -642,19 +642,19 @@ HourAE는 기존 sequence-based pilot보다 GT anomaly ranking을 향상시켰�
 
 train-only robust profile에 대해 $K=2,\ldots,24$의 contiguous segmentation을 수행한 결과 P0480에서는 silhouette score 기준으로 다음 $K$가 선택되었다.
 
-$
+$$
 K^*=2
-$
+$$
 
 선택된 temporal context는 다음과 같다.
 
-$
+$$
 C_1=00{:}00\sim07{:}20
-$
+$$
 
-$
+$$
 C_2=07{:}25\sim23{:}55
-$
+$$
 
 선택된 silhouette score는 약 0.332였다.
 
@@ -681,13 +681,13 @@ Adaptive context는 고정 24시간 모델보다 VUS-PR을 약 38% 상대 향상
 
 즉 본 문제에서는 다음 trade-off가 존재한다.
 
-$
+$$
 \boxed{
 \text{Context granularity}
 \leftrightarrow
 \text{Normal-model stability}
 }
-$
+$$
 
 ## 6.4 Event-wise Ranking
 
@@ -804,11 +804,11 @@ P0480 결과에서 24개의 독립 AutoEncoder는 anomaly recall을 높였지만
 
 따라서 다음 두 목표는 동일하지 않다.
 
-$
+$$
 \text{Temporal profile separation}
 \neq
 \text{Anomaly detection optimum}
-$
+$$
 
 최종 연구에서는 여러 사업자에서 silhouette 기반 $K$가 안정적으로 성능을 향상시키는지 검증하여 train-only context selection 기준의 타당성을 평가한다.
 
@@ -818,13 +818,13 @@ P0480 Adaptive ContextAE의 PR-AUC는 약 0.464로 anomaly prevalence에 비해 
 
 이는 다음 두 문제가 구분되어야 함을 의미한다.
 
-$
+$$
 \boxed{
 \text{Anomaly Ranking}
 \neq
 \text{Operational Decision Calibration}
 }
-$
+$$
 
 현재 mean + $3\sigma$ threshold는 train과 validation score distribution shift에 민감하다. 따라서 최종 시스템에서는 robust train-only calibration을 별도 검토할 필요가 있다.
 
