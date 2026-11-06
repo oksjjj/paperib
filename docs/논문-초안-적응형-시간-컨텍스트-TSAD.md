@@ -1117,9 +1117,9 @@ P0480 development 결과에서 제안한 Adaptive ContextAE는 고정 24시간 �
 
 # 참고문헌
 
-## 참고문헌 구성 원칙
+## 참고문헌 구성 및 읽기 우선순위
 
-본 논문의 참고문헌은 단순히 TSAD 관련 논문을 나열하는 것이 아니라, 연구의 문제 정의와 방법 선택을 뒷받침하는 관점별로 구성한다. 최종적으로는 중복을 제외하고 약 25~35편의 핵심 문헌을 확보하는 것을 목표로 한다.
+본 논문의 참고문헌은 단순히 TSAD 관련 논문을 나열하는 방식이 아니라, 현재 연구의 문제 정의와 방법 선택을 뒷받침하는 관점별로 구성한다. 우선순위는 현재 연구에서 필요한 개념의 중요도와 실험 설계와의 직접적인 연관성을 기준으로 정하였다.
 
 | 우선순위 | 관점 | 논문에서의 역할 | 목표 문헌 수 |
 |---:|---|---|---:|
@@ -1131,139 +1131,312 @@ P0480 development 결과에서 제안한 Adaptive ContextAE는 고정 24시간 �
 | 6 | Telecom / Expert Ground Truth | 실제 통신 운영 환경, false alarm, 전문가 레이블의 의미 | 3~5 |
 | 7 | 대표 TSAD 방법 및 Benchmark | 기존 reconstruction/prediction/deep TSAD의 전체 배경 | 4~6 |
 
-## 논문 읽기 순서
+## 1순위 — TSAD 평가 지표
 
-현재 연구 방향을 기준으로 다음 순서로 문헌을 읽고 정리한다.
+현재 연구에서 VUS-PR을 primary metric으로 사용하고 있으므로 가장 먼저 읽는다. 특히 Point Adjustment의 문제점, point-based metric과 range/event-based metric의 차이, VUS의 도입 배경, severe class imbalance에서 PR-AUC가 갖는 의미를 정리한다.
 
-### 1순위 — TSAD 평가 지표
+### 반드시 읽을 논문
 
-가장 먼저 VUS와 TSAD 평가 지표 관련 논문을 읽는다. 현재 연구에서 VUS-PR을 primary metric으로 사용하고 있으므로, **왜 Point-F1, PA-F1, AUROC만으로는 충분하지 않은지**를 먼저 명확히 이해하는 것이 중요하다.
+[3] P. Boniol, A. K. Krishna, M. Bruel, Q. Liu, M. Huang, T. Palpanas, R. S. Tsay, A. Elmore, M. J. Franklin, and J. Paparrizos,  
+**“VUS: effective and efficient accuracy measures for time-series anomaly detection,”** *The VLDB Journal*, 2025.  
+- 역할: VUS-ROC / VUS-PR의 정의와 tolerance 개념
+- 주소: https://doi.org/10.1007/s00778-025-00907-x
 
-중점적으로 확인할 내용:
+[4] Q. Liu and J. Paparrizos,  
+**“The Elephant in the Room: Towards A Reliable Time-Series Anomaly Detection Benchmark,”** *NeurIPS 2024, Datasets and Benchmarks Track*, 2024.  
+- 역할: TSB-AD, TSAD benchmark 문제, VUS-PR의 평가 신뢰성
+- 주소: https://proceedings.neurips.cc/paper_files/paper/2024/hash/c3f3c690b7a99fba16d0efd35cb83b2c-Abstract-Datasets_and_Benchmarks_Track.html
 
-- Point Adjustment의 정의와 한계
-- point-based metric과 range/event-based metric의 차이
-- Range-AUC, VUS의 정의와 도입 배경
-- VUS-ROC와 VUS-PR의 차이
-- anomaly imbalance에서 PR-AUC가 갖는 의미
-- tolerance window와 anomaly cardinality가 평가 결과에 미치는 영향
+[5] S. Kim, K. Choi, H.-S. Choi, B. Lee, and S. Yoon,  
+**“Towards a Rigorous Evaluation of Time-Series Anomaly Detection,”** *AAAI*, 2022.  
+- 역할: Point Adjustment가 성능을 과대평가할 수 있다는 근거
+- 주소: https://doi.org/10.1609/aaai.v36i7.20680
 
-현재 확보 문헌: **[3], [4]**
+[6] N. Tatbul, T. J. Lee, S. Zdonik, M. Alam, and J. Gottschlich,  
+**“Precision and Recall for Time Series,”** *NeurIPS*, 2018.  
+- 역할: point anomaly가 아닌 range anomaly를 평가하기 위한 Precision/Recall 확장
+- 주소: https://proceedings.neurips.cc/paper_files/paper/2018/hash/8f468c873a32bb0619eaeb2050ba45d1-Abstract.html
 
-### 2순위 — Contaminated Training / Robust TSAD
+[7] A. Huet, J. M. Navarro, and D. Rossi,  
+**“Local Evaluation of Time Series Anomaly Detection Algorithms,”** *KDD*, 2022.  
+- 역할: Affiliation Precision/Recall, event-local evaluation
+- 주소: https://doi.org/10.1145/3534678.3539339
+- arXiv: https://arxiv.org/abs/2206.13167
 
-다음으로 실제 train data에 anomaly가 포함될 수 있는 상황을 다룬 논문을 읽는다.
+[8] T. Saito and M. Rehmsmeier,  
+**“The Precision-Recall Plot Is More Informative than the ROC Plot When Evaluating Binary Classifiers on Imbalanced Datasets,”** *PLOS ONE*, 2015.  
+- 역할: severe class imbalance에서 PR-AUC를 사용하는 근거
+- 주소: https://doi.org/10.1371/journal.pone.0118432
 
-중점적으로 확인할 내용:
+### 읽을 때 확인할 항목
 
-- clean-normal training assumption
-- contaminated training에서 기존 TSAD가 성능 저하를 겪는 원인
-- anomaly label 없이 contamination을 완화하는 방법
-- filtering, reweighting, robust loss, iterative decontamination
-- contamination ratio에 따른 성능 변화
+- Point Adjustment가 왜 문제가 되는가?
+- range detection과 existence detection은 어떻게 다른가?
+- anomaly cardinality와 tolerance가 metric에 어떤 영향을 주는가?
+- VUS-PR은 단일 threshold 또는 단일 tolerance metric과 무엇이 다른가?
+- PR-AUC의 random baseline이 anomaly prevalence와 어떤 관계가 있는가?
 
-현재 확보 문헌: **[1]**
+---
 
-추가 검토 대상: RoCA, RiAD 및 기타 contaminated-training TSAD.
+## 2순위 — Contaminated Training / Robust TSAD
 
-### 3순위 — Temporal Context / Seasonality
+본 연구의 핵심 설정인 **anomaly label을 사용하지 않는 contaminated training**을 직접 다루는 문헌이다.
 
-본 연구의 핵심 가설인 **context-dependent normality**를 뒷받침하는 문헌을 검토한다.
+[1] T. K. K. Ho and N. Armanfard,  
+**“Contaminated Multivariate Time-Series Anomaly Detection with Spatio-Temporal Graph Conditional Diffusion Models,”** *UAI*, 2025.  
+- 역할: TSAD-C, label-free contaminated training과 decontamination
+- 주소: https://proceedings.mlr.press/v286/ho25a.html
+- arXiv: https://arxiv.org/abs/2308.12563
 
-$$
-p_N(x)
-\quad\rightarrow\quad
-p_N(x\mid c)
-$$
+[9] X. Mou, R. Wang, B. Li, T. Wo, J. Sun, H. Wang, and X. Liu,  
+**“RoCA: Robust Contrastive One-Class Time Series Anomaly Detection With Contaminated Data,”** *IEEE Transactions on Neural Networks and Learning Systems*, 2026.  
+- 역할: contaminated train에서 contrastive learning + one-class learning
+- DOI: https://doi.org/10.1109/TNNLS.2026.3702237
+- arXiv: https://arxiv.org/abs/2503.18385
 
-중점적으로 확인할 내용:
+[10] Z. Chen, Z. Li, X. Chen, X. Chen, H. Fan, and R. Hu,  
+**“Rectifying inaccurate unsupervised learning for robust time series anomaly detection,”** *Information Sciences*, vol. 662, 120222, 2024.  
+- 역할: RiAD, contaminated training에서 uncertainty와 adaptive reconstruction loss 활용
+- 주소: https://doi.org/10.1016/j.ins.2024.120222
 
-- hour-of-day, day-of-week 등 시간 조건 사용 여부
-- seasonal anomaly detection
-- conditional AE/VAE
-- temporal regime 또는 context discovery
-- predefined context와 data-driven adaptive context의 차이
+[11] W. Li, C. Feng, T. Chen, and J. Zhu,  
+**“Robust Learning of Deep Time Series Anomaly Detection Models with Contaminated Training Data,”** 2022.  
+- 역할: 여러 deep TSAD가 contamination에 얼마나 민감한지 분석하고 model-agnostic robust learning 제안
+- 주소: https://arxiv.org/abs/2208.01841
 
-현재 확보 문헌: **[2]**
+[12] C. Qiu, A. Li, M. Kloft, M. Rudolph, and S. Mandt,  
+**“Latent Outlier Exposure for Anomaly Detection with Contaminated Data,”** *ICML*, 2022.  
+- 역할: latent label을 반복적으로 추정하는 contaminated anomaly detection
+- 주소: https://proceedings.mlr.press/v162/qiu22b.html
+- arXiv: https://arxiv.org/abs/2202.08088
 
-### 4순위 — Point-wise vs Window/Subsequence
+[13] S. Zhang, Y. Lai, P. Zheng, B. Yu, X. Tang, Q. Fu, and P. He,  
+**“CLEANet: Robust and Efficient Anomaly Detection in Contaminated Multivariate Time Series,”** 2025.  
+- 역할: contaminated MTS에서 adaptive reconstruction weighting과 robust representation
+- 주소: https://arxiv.org/abs/2510.22619
 
-현재 연구가 sequence/window 기반 접근에서 context-aware point-wise 접근으로 이동한 근거를 정리하기 위한 문헌이다.
+### 읽을 때 확인할 항목
 
-중점적으로 확인할 내용:
+- train이 clean-normal이라고 가정하는가?
+- contamination ratio를 알고 있어야 하는가?
+- anomaly label 없이 contamination을 어떻게 추정하는가?
+- filtering, reweighting, robust loss 중 어떤 방식을 사용하는가?
+- contamination을 제거한 뒤 모델을 재학습하는가?
+- 본 연구의 context-wise decontamination과 어떤 차이가 있는가?
 
-- point anomaly
-- contextual anomaly
-- collective/subsequence anomaly
-- point-wise와 subsequence 기반 문제 정의의 차이
-- 각 anomaly 유형에 적합한 평가 방식
-- temporal dependency를 직접 모델링해야 하는 조건
+---
 
-현재 확보 문헌: **추가 검토 예정**
+## 3순위 — Temporal Context / Seasonality / Context-dependent Normality
 
-### 5순위 — Robust Statistics / Decontamination
+본 연구의 핵심 아이디어인 **시간에 따라 정상 분포가 달라진다**는 가정을 뒷받침하는 문헌이다.
 
-제안 방법에서 사용하는 median, MAD, top-error filtering 및 retraining의 이론적·실험적 근거를 확보한다.
+[2] L. Porcelli, M. Trovati, and F. Palmieri,  
+**“Real-time anomaly detection in seasonal time series with conditional variational autoencoder,”** *Applied Soft Computing*, vol. 184, 113761, 2025.  
+- 역할: timestamp-derived context와 conditional VAE
+- 주소: https://doi.org/10.1016/j.asoc.2025.113761
 
-중점적으로 확인할 내용:
+[14] Z. Li, W. Chen, and D. Pei,  
+**“Robust and Unsupervised KPI Anomaly Detection Based on Conditional Variational Autoencoder,”** *IEEE IPCCC*, 2018.  
+- 역할: Bagel, time information을 condition으로 사용하는 KPI anomaly detection
+- 주소: https://doi.org/10.1109/PCCC.2018.8710885
 
-- median/MAD의 robustness
-- trimming 및 high-loss sample filtering
-- iterative cleaning/retraining
-- reconstruction error 기반 decontamination
-- robust loss 또는 sample reweighting과의 차이
+[15] H. Xu, W. Chen, N. Zhao, Z. Li, J. Bu, Z. Li, Y. Liu, Y. Zhao, D. Pei, Y. Feng, J. Chen, Z. Wang, and H. Qiao,  
+**“Unsupervised Anomaly Detection via Variational Auto-Encoder for Seasonal KPIs in Web Applications,”** *The Web Conference (WWW)*, 2018.  
+- 역할: Donut, seasonal KPI에 대한 unsupervised anomaly detection
+- 주소: https://doi.org/10.1145/3178876.3185996
+- arXiv: https://arxiv.org/abs/1802.03903
 
-현재 확보 문헌: **추가 검토 예정**
+[16] H. Kim and H. Kim,  
+**“Contextual anomaly detection for multivariate time series data,”** *Quality Engineering*, vol. 35, no. 4, pp. 686–695, 2023.  
+- 역할: contextual variable에 따라 정상 패턴이 달라지는 multivariate time series
+- 주소: https://doi.org/10.1080/08982112.2023.2179404
 
-### 6순위 — Telecom / Expert Ground Truth
+[17] C. U. Carmona, F.-X. Aubet, V. Flunkert, and J. Gasthaus,  
+**“Neural Contextual Anomaly Detection for Time Series,”** *IJCAI*, 2022.  
+- 역할: NCAD, contextual anomaly 개념과 time-series representation
+- 주소: https://doi.org/10.24963/ijcai.2022/394
 
-전문가 hand labeling이 본 연구에서 중요한 차별점이므로 실제 운영 환경의 anomaly 정의와 false alarm 문제를 다루는 문헌을 검토한다.
+### 읽을 때 확인할 항목
 
-중점적으로 확인할 내용:
+- context를 hour/day처럼 고정적으로 정의하는가?
+- context가 timestamp에서 직접 주어지는가, 데이터로부터 학습되는가?
+- $p(x)$ 대신 $p(x\mid c)$를 어떻게 모델링하는가?
+- point별 condition과 sequence context의 차이는 무엇인가?
+- 본 연구의 adaptive contiguous context discovery와 어떤 차이가 있는가?
 
-- cellular/network KPI anomaly detection
-- telecom fault monitoring
-- statistical anomaly와 operational anomaly의 차이
-- false alarm burden / alert fatigue
-- expert labeling / human-in-the-loop anomaly detection
+---
 
-현재 확보 문헌: **추가 검토 예정**
+## 4순위 — Point-wise vs Window/Subsequence / Contextual Anomaly
 
-### 7순위 — 대표 TSAD 방법 및 Benchmark
+본 연구가 sequence/window 기반 접근보다 **context-aware point-wise 방식이 더 적합할 가능성**을 검증하기 때문에 anomaly type 자체를 정리할 필요가 있다.
 
-마지막으로 전체 TSAD 분야에서 대표적인 방법을 정리하여 관련 연구의 배경을 보완한다.
+[18] V. Chandola, A. Banerjee, and V. Kumar,  
+**“Anomaly Detection: A Survey,”** *ACM Computing Surveys*, vol. 41, no. 3, Article 15, 2009.  
+- 역할: point anomaly, contextual anomaly, collective anomaly의 기본 정의
+- 주소: https://doi.org/10.1145/1541880.1541882
 
-중점적으로 확인할 내용:
+[6] N. Tatbul et al.,  
+**“Precision and Recall for Time Series,”** *NeurIPS*, 2018.  
+- 역할: point anomaly와 range anomaly의 평가 단위 차이
+- 주소: https://proceedings.neurips.cc/paper_files/paper/2018/hash/8f468c873a32bb0619eaeb2050ba45d1-Abstract.html
 
-- reconstruction-based TSAD
-- prediction-based TSAD
-- density/proximity-based TSAD
-- attention/Transformer/graph 기반 TSAD
-- benchmark에서 단순 방법과 deep model의 성능 비교
+[17] C. U. Carmona et al.,  
+**“Neural Contextual Anomaly Detection for Time Series,”** *IJCAI*, 2022.  
+- 역할: contextual anomaly detection 관점
+- 주소: https://doi.org/10.24963/ijcai.2022/394
 
-현재 확보 문헌: **[4] 및 추가 검토 예정**
+### 읽을 때 확인할 항목
 
-## 현재 확보한 참고문헌
+- point anomaly / contextual anomaly / collective anomaly를 어떻게 정의하는가?
+- subsequence anomaly에서 temporal dependency가 왜 필요한가?
+- 현재 SKT 인바운드 anomaly가 어느 유형에 더 가까운가?
+- point-wise detection이라도 temporal context를 사용하면 contextual anomaly로 볼 수 있는가?
 
-### Contaminated Training / Robust TSAD
+---
 
-[1] T. K. K. Ho and N. Armanfard, “Contaminated Multivariate Time-Series Anomaly Detection with Spatio-Temporal Graph Conditional Diffusion Models,” *Proceedings of the 41st Conference on Uncertainty in Artificial Intelligence (UAI)*, PMLR 286, pp. 1710–1729, 2025.  
-https://proceedings.mlr.press/v286/ho25a.html
+## 5순위 — Robust Statistics / Decontamination
 
-### Temporal Context / Seasonality
+본 연구의 robust temporal profile, median/MAD, high-score filtering 및 retraining을 뒷받침하는 문헌이다.
 
-[2] L. Porcelli, M. Trovati, and F. Palmieri, “Real-time anomaly detection in seasonal time series with conditional variational autoencoder,” *Applied Soft Computing*, vol. 184, Part A, 113761, 2025.  
-https://doi.org/10.1016/j.asoc.2025.113761
+[19] P. J. Rousseeuw and C. Croux,  
+**“Alternatives to the Median Absolute Deviation,”** *Journal of the American Statistical Association*, vol. 88, no. 424, pp. 1273–1283, 1993.  
+- 역할: MAD의 robustness, 1.4826 scaling, breakdown point
+- 주소: https://doi.org/10.1080/01621459.1993.10476408
+- PDF: https://wis.kuleuven.be/stat/robust/papers/publications-1993/rousseeuwcroux-alternativestomedianad-jasa-1993.pdf
 
-### TSAD 평가 지표
+[12] C. Qiu et al.,  
+**“Latent Outlier Exposure for Anomaly Detection with Contaminated Data,”** *ICML*, 2022.  
+- 역할: contaminated data에서 반복적 latent outlier 추정
+- 주소: https://proceedings.mlr.press/v162/qiu22b.html
 
-[3] P. Boniol, A. K. Krishna, M. Bruel, Q. Liu, M. Huang, T. Palpanas, R. S. Tsay, A. Elmore, M. J. Franklin, and J. Paparrizos, “VUS: effective and efficient accuracy measures for time-series anomaly detection,” *The VLDB Journal*, vol. 34, 32, 2025.  
-https://doi.org/10.1007/s00778-025-00907-x
+[11] W. Li et al.,  
+**“Robust Learning of Deep Time Series Anomaly Detection Models with Contaminated Training Data,”** 2022.  
+- 역할: robust learning / contamination mitigation
+- 주소: https://arxiv.org/abs/2208.01841
 
-### TSAD Benchmark / 평가
+[10] Z. Chen et al.,  
+**“Rectifying inaccurate unsupervised learning for robust time series anomaly detection,”** *Information Sciences*, 2024.  
+- 역할: adaptive reconstruction loss와 anomaly candidate 억제
+- 주소: https://doi.org/10.1016/j.ins.2024.120222
 
-[4] Q. Liu and J. Paparrizos, “The Elephant in the Room: Towards A Reliable Time-Series Anomaly Detection Benchmark,” *Advances in Neural Information Processing Systems 37 (NeurIPS 2024), Datasets and Benchmarks Track*, 2024.  
-https://proceedings.neurips.cc/paper_files/paper/2024/hash/c3f3c690b7a99fba16d0efd35cb83b2c-Abstract-Datasets_and_Benchmarks_Track.html
+### 읽을 때 확인할 항목
+
+- median과 MAD를 쓰는 이론적 이유
+- high-error sample을 제거하는 것이 trimming과 어떤 관계가 있는가?
+- 고정 top-k% 제거와 robust cutoff 방식의 장단점
+- scaler를 contamination 제거 전/후 어느 시점에 fit하는 것이 적절한가?
+
+---
+
+## 6순위 — Telecom / KPI / Expert Ground Truth
+
+실제 통신 환경에서 statistical anomaly와 operational anomaly가 다를 수 있다는 점, 그리고 expert labeling과 false alarm burden이 중요하다는 근거를 확보하기 위한 문헌이다.
+
+[20] Z. Li, W. Chen, and D. Pei,  
+**“Robust and Unsupervised KPI Anomaly Detection Based on Conditional Variational Autoencoder,”** *IEEE IPCCC*, 2018.  
+- 역할: 실제 KPI monitoring, 운영자 관점의 자동 anomaly detection
+- 주소: https://doi.org/10.1109/PCCC.2018.8710885
+
+[21] H. Xu et al.,  
+**“Unsupervised Anomaly Detection via Variational Auto-Encoder for Seasonal KPIs in Web Applications,”** *WWW*, 2018.  
+- 역할: 대규모 KPI monitoring과 seasonal anomaly
+- 주소: https://doi.org/10.1145/3178876.3185996
+
+[22]  
+**“A Framework for AI-Based Large-Scale Time-Series Anomaly Detection in 5G Core Networks,”** *IEEE ICTC*, 2025.  
+- 역할: 실제 5G core KPI에서 large-scale TSAD, point-level anomaly amplification 및 threshold 문제
+- 주소: https://doi.org/10.1109/ICTC66702.2025.11388910
+- IEEE Xplore: https://ieeexplore.ieee.org/abstract/document/11388910
+
+[23] D. Kim, Y. S. Sim, S. Yoon, S. Yoon, S. Yoa, S. Lee, and W. Lim,  
+**“AEGIS: Toward Expert-in-the-loop Industrial Anomaly Detection,”** *AAAI*, 2026.  
+- 역할: domain expert feedback과 anomaly detection system의 상호작용
+- 주소: https://doi.org/10.1609/aaai.v40i48.42359
+
+[24]  
+**“Beyond the Norm: Unsupervised Anomaly Detection in Telecommunications with Mahalanobis Distance,”** *Computers*, vol. 14, no. 12, 561, 2025.  
+- 역할: telecom KPI의 multivariate unsupervised anomaly detection
+- 주소: https://doi.org/10.3390/computers14120561
+
+### 읽을 때 확인할 항목
+
+- 실제 통신/KPI 환경에서 false alarm을 어떻게 다루는가?
+- anomaly GT는 누가 어떤 기준으로 정의하는가?
+- threshold를 어떻게 운영적으로 정하는가?
+- expert feedback이 모델 학습에 직접 들어가는가, 평가에만 쓰이는가?
+- statistical anomaly와 operational anomaly를 구분하는가?
+
+---
+
+## 7순위 — 대표 TSAD 모델 및 Benchmark
+
+최종적으로 기존 TSAD 분야의 대표적인 방법을 읽어 현재 연구가 어떤 계열과 다른지 정리한다.
+
+[25] Y. Su, Y. Zhao, C. Niu, R. Liu, W. Sun, and D. Pei,  
+**“Robust Anomaly Detection for Multivariate Time Series through Stochastic Recurrent Neural Network,”** *KDD*, 2019.  
+- 모델: OmniAnomaly
+- 역할: stochastic RNN 기반 multivariate sequence modeling
+- 주소: https://www.kdd.org/kdd2019/accepted-papers/view/robust-anomaly-detection-for-multivariate-time-series-through-stochastic-re
+
+[26] J. Audibert, P. Michiardi, F. Guyard, S. Marti, and M. A. Zuluaga,  
+**“USAD: UnSupervised Anomaly Detection on Multivariate Time Series,”** *KDD Workshop*, 2020.  
+- 역할: adversarially trained AutoEncoder 기반 unsupervised MTS anomaly detection
+- 주소: https://www.kdd.org/kdd2020/accepted-papers/view/usad-unsupervised-anomaly-detection-on-multivariate-time-series.html
+
+[27] S. Tuli, G. Casale, and N. R. Jennings,  
+**“TranAD: Deep Transformer Networks for Anomaly Detection in Multivariate Time Series Data,”** *PVLDB*, vol. 15, no. 6, pp. 1201–1214, 2022.  
+- 역할: Transformer 기반 broad temporal context modeling
+- 주소: https://doi.org/10.14778/3514061.3514067
+- PDF: https://vldb.org/pvldb/vol15/p1201-tuli.pdf
+
+[28] J. Xu, H. Wu, J. Wang, and M. Long,  
+**“Anomaly Transformer: Time Series Anomaly Detection with Association Discrepancy,”** *ICLR*, 2022.  
+- 역할: attention association discrepancy 기반 sequence anomaly detection
+- 주소: https://openreview.net/forum?id=LzQQ89U1qm_
+- arXiv: https://arxiv.org/abs/2110.02642
+
+[4] Q. Liu and J. Paparrizos,  
+**“The Elephant in the Room: Towards A Reliable Time-Series Anomaly Detection Benchmark,”** *NeurIPS*, 2024.  
+- 역할: 40개 알고리즘을 포함한 benchmark와 단순/복잡 모델 비교
+- 주소: https://proceedings.neurips.cc/paper_files/paper/2024/hash/c3f3c690b7a99fba16d0efd35cb83b2c-Abstract-Datasets_and_Benchmarks_Track.html
+
+---
+
+## 우선 읽을 핵심 논문
+
+전체 문헌을 한 번에 읽기보다 현재 연구에 직접 필요한 순서로 다음 논문부터 우선 읽는다.
+
+1. **VUS: effective and efficient accuracy measures for time-series anomaly detection**  
+   https://doi.org/10.1007/s00778-025-00907-x
+
+2. **The Elephant in the Room: Towards A Reliable Time-Series Anomaly Detection Benchmark**  
+   https://proceedings.neurips.cc/paper_files/paper/2024/hash/c3f3c690b7a99fba16d0efd35cb83b2c-Abstract-Datasets_and_Benchmarks_Track.html
+
+3. **Towards a Rigorous Evaluation of Time-Series Anomaly Detection**  
+   https://doi.org/10.1609/aaai.v36i7.20680
+
+4. **Precision and Recall for Time Series**  
+   https://proceedings.neurips.cc/paper_files/paper/2018/hash/8f468c873a32bb0619eaeb2050ba45d1-Abstract.html
+
+5. **Contaminated Multivariate Time-Series Anomaly Detection with Spatio-Temporal Graph Conditional Diffusion Models**  
+   https://proceedings.mlr.press/v286/ho25a.html
+
+6. **RoCA: Robust Contrastive One-Class Time Series Anomaly Detection With Contaminated Data**  
+   https://doi.org/10.1109/TNNLS.2026.3702237
+
+7. **Rectifying inaccurate unsupervised learning for robust time series anomaly detection**  
+   https://doi.org/10.1016/j.ins.2024.120222
+
+8. **Real-time anomaly detection in seasonal time series with conditional variational autoencoder**  
+   https://doi.org/10.1016/j.asoc.2025.113761
+
+9. **Robust and Unsupervised KPI Anomaly Detection Based on Conditional Variational Autoencoder**  
+   https://doi.org/10.1109/PCCC.2018.8710885
+
+10. **Anomaly Detection: A Survey**  
+    https://doi.org/10.1145/1541880.1541882
+
+이 10편을 먼저 읽은 뒤, point/contextual anomaly, robust statistics, telecom operational evaluation 및 대표 TSAD 모델 문헌으로 확장한다.
 
 ---
 
