@@ -4,7 +4,7 @@
   "model": "context_ae",
   "run_name": "k_context_iterative",
   "eval_split": "valid",
-  "updated_at": "2026-11-06T09:08:50.157660+00:00",
+  "updated_at": "2026-11-06T09:21:11.078466+00:00",
   "score_polarity": "higher_is_anomaly",
   "threshold": 3.0,
   "threshold_method": "per_context_clean_train_mse_mean_plus_sigma",

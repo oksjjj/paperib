@@ -4,7 +4,7 @@
   "model": "hour_ae",
   "run_name": "24h_iterative",
   "eval_split": "valid",
-  "updated_at": "2026-11-06T08:15:08.233507+00:00",
+  "updated_at": "2026-11-06T09:21:50.245512+00:00",
   "score_polarity": "higher_is_anomaly",
   "threshold": 3.0,
   "threshold_method": "per_hour_clean_train_mse_mean_plus_sigma",
