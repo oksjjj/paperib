@@ -858,11 +858,19 @@ def _metrics_by_view_sum() -> list[str]:
 
 
 def _metric_filter_ui() -> tuple[list[dict], list[str]]:
-    """Checklist options (= metric universe) + checked values."""
+    """Checklist options (= metric universe) + checked values.
+
+    Currently visible metrics are always kept in ``options`` even if they are
+    zero in the zoomed window. Otherwise rewriting options after zoom drops
+    them from the checklist value and the plot goes blank.
+    """
     ranked = _metrics_by_view_sum()
-    opts = [{"label": display_metric(m), "value": m} for m in ranked]
-    selected = set(state.get("visible_metrics") or [])
-    vals = [m for m in ranked if m in selected]
+    selected = [m for m in (state.get("visible_metrics") or []) if m]
+    keep = [m for m in selected if m not in ranked]
+    ordered = ranked + keep
+    opts = [{"label": display_metric(m), "value": m} for m in ordered]
+    selected_set = set(selected)
+    vals = [m for m in ordered if m in selected_set]
     return opts, vals
 
 
@@ -3313,7 +3321,13 @@ app.layout = html.Div(
 )
 def _sync_model_pred_source(plmn):
     opts = _model_pred_source_options()
-    return opts, _default_pred_source(opts)
+    preferred = _default_pred_source(opts)
+    # Keep the already-loaded source on refresh so we don't cascade into
+    # _switch_model_pred_source → metric-filter clear → blank graph.
+    cur = state.get("pred_source")
+    if cur and any(o.get("value") == cur for o in opts):
+        return opts, cur
+    return opts, preferred
 
 
 @app.callback(
@@ -3337,6 +3351,13 @@ def _sync_model_pred_source(plmn):
 def _switch_model_pred_source(source, click_mode):
     plmn = state.get("plmn")
     if not plmn or not source:
+        return (no_update,) * 13
+    # Skip no-op reloads (e.g. startup sync rewriting the same dropdown value).
+    if (
+        source == state.get("pred_source")
+        and state.get("predictions") is not None
+        and state.get("df") is not None
+    ):
         return (no_update,) * 13
     state["pred_source"] = source
     preds = load_predictions(plmn, source=source)
@@ -3790,9 +3811,23 @@ def _main(
     if result is None:
         return (no_update,) * 10
     out = list(result) if len(result) == 9 else list(result) + [no_update, no_update]
-    # Keep filter order in sync with the current on-screen window whenever the
-    # figure is rebuilt (zoom / pan / PLMN load already set options explicitly).
-    if out[0] is not no_update and state.get("df") is not None and out[7] is no_update:
+    # Only refresh metric-filter option labels on explicit PLMN loads.
+    # Zoom/pan/overlay rebuilds must not rewrite options — that races the
+    # checklist value and can clear all traces.
+    prop = ""
+    if callback_context.triggered:
+        prop = callback_context.triggered[0].get("prop_id") or ""
+    refresh_filter = prop in (
+        "dd-plmn.value",
+        "btn-prev.n_clicks",
+        "btn-next.n_clicks",
+    )
+    if (
+        refresh_filter
+        and out[0] is not no_update
+        and state.get("df") is not None
+        and out[7] is no_update
+    ):
         m_opts, _ = _metric_filter_ui()
         out[7] = m_opts
     out.append(state.pop("_range_label_done", no_update))
@@ -4143,19 +4178,20 @@ def _main_body(
             # Echo after Prev/Next wrote the same value back.
             return (no_update,) * 7
         if already:
-            # Startup prefetch already loaded rank #1 — keep it, clear status.
+            # Startup prefetch already loaded rank #1 — keep the prebuilt figure.
+            # Do NOT rewrite metric-filter options/value here: Dash may briefly
+            # clear the checklist, which empties visible_metrics and blanks the plot.
             opts = _label_options()
-            m_opts, m_vals = _metric_filter_ui()
             return (
-                _build_graph(click_mode),
+                no_update,
                 opts,
                 no_update,
                 "",
                 _cancel_style(click_mode),
                 no_update,
                 no_update,
-                m_opts,
-                m_vals,
+                no_update,
+                no_update,
             )
         return _do_load(target, click_mode)
 
@@ -4625,6 +4661,11 @@ def _metric_filter_changed(selected, _n_all, _n_none, click_mode):
             "metric 전체 해제 (Y축 유지)",
             _refresh_hover_panel(),
         )
+    # When options/value are rewritten by another callback, Dash may emit an
+    # intermediate empty checklist. Ignore that — full clear is btn-metrics-none.
+    if tid == "metric-filter" and not selected:
+        if state.get("visible_metrics"):
+            return no_update, no_update, no_update, no_update
     new_vis = _visible_from_filter_selection(selected)
     if new_vis == list(state.get("visible_metrics") or []):
         return no_update, no_update, no_update, no_update
@@ -4839,14 +4880,16 @@ def _rebuild_after_axis(trigger, click_mode):
     if not trigger or state["df"] is None:
         return no_update, no_update, no_update
     _arm_zoom_guard(3.0)
-    m_opts, _ = _metric_filter_ui()
+    # Do not rewrite metric-filter options on zoom/pan rebuild. Updating options
+    # after a narrow window can drop zero-valued series from the checklist and
+    # blank the graph (especially with 사람+모델 overlays).
     # Sync dropdown when zoom-in cleared an off-screen selection — but only if
     # the user has not already re-selected something before this deferred rebuild.
     cleared = state.pop("_offscreen_cleared", False)
     list_val = (
         None if (cleared and state.get("highlight_id") is None) else no_update
     )
-    return _build_graph(click_mode or "zoom"), m_opts, list_val
+    return _build_graph(click_mode or "zoom"), no_update, list_val
 
 
 app.clientside_callback(
