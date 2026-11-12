@@ -13,9 +13,9 @@
 
 본 연구는 anomaly label을 사용하지 않는 contaminated training 환경에서 시간에 따른 정상성의 변화를 자동으로 발견하고, 각 시간 컨텍스트에 적합한 정상 모델을 학습하는 적응형 시간 컨텍스트 기반 이상 탐지 방법을 제안한다. 먼저 학습 데이터의 각 5분 time slot에 대해 여러 날짜의 관측치를 이용하여 median과 MAD 기반의 robust temporal profile을 구성한다. 이후 시간 순서를 유지하는 연속 분할을 적용하여 후보 컨텍스트 수 $K$별 최적 경계를 탐색하고, 학습 데이터만을 이용한 silhouette score를 기준으로 $K$를 선택한다. 각 컨텍스트에서는 AutoEncoder를 이용해 정상 패턴을 모델링하며, 1차 학습 후 높은 reconstruction error를 갖는 학습 샘플을 제거하고 새로운 AutoEncoder를 재학습하는 iterative decontamination을 적용한다.
 
-개발용 사업자 P0480의 validation set에서 제안한 적응형 컨텍스트 모델은 고정된 24개 시간대별 AutoEncoder와 비교하여 VUS-PR을 0.1202에서 0.1662로 향상시키고, PR-AUC를 0.4456에서 0.4638로 향상시켰다. 동시에 false alarms per day는 24.51에서 12.79로 감소하였다. 반면 Event Recall은 0.667에서 0.500으로 감소하여, 시간 컨텍스트의 세분화 정도와 정상 모델의 안정성 사이에 trade-off가 존재함을 확인하였다.
+초기 탐색 단계에서는 전체 feature 집합을 이용하여 여러 TSAD 및 context-aware 모델을 비교하였다. 그러나 전문가가 실제로 anomaly를 판단하는 핵심 운영 지표와 모델이 학습하는 feature 공간이 서로 다를 경우, ground truth가 의미하는 이상과 모델이 탐지하는 이상이 일치하지 않을 수 있다. 이에 최종 실험에서는 전문가 레이블링과 모든 모델 학습에 동일한 11개 core feature를 사용하여 평가 대상을 일치시킨다. 11개 core feature는 validation 성능을 기준으로 선택한 것이 아니라, 접속 시도와 주요 실패/timeout 계열의 사전 operational semantics를 기준으로 고정한다.
 
-최종 연구에서는 서로 다른 국가의 10개 인바운드 로밍 사업자를 대상으로 전문가가 운영 관점의 anomaly interval을 레이블링하고, Global AE, 고정 24시간 모델, 적응형 시간 컨텍스트 모델 및 decontamination ablation을 동일한 평가 프로토콜에서 비교한다. 또한 feature별 이상 방향성을 고려하는 direction-aware anomaly scoring을 확장 모듈로 검증할 예정이다.
+최종 연구에서는 서로 다른 국가의 10개 인바운드 로밍 사업자를 대상으로 동일한 11개 core feature를 이용해 전문가가 operational anomaly interval을 레이블링하고, Global AE, 기존 contaminated-training TSAD, 고정 24시간 모델, 적응형 시간 컨텍스트 모델 및 decontamination ablation을 동일한 평가 프로토콜에서 비교한다. 초기 전체-feature 실험 결과는 연구 방향을 설정한 exploratory evidence로만 사용하며, 최종 성능 수치는 11개 core feature 조건에서 모든 방법을 재실행하여 보고한다.
 
 **주요어:** Time Series Anomaly Detection, Multivariate Time Series, Contaminated Training, Temporal Context, AutoEncoder, Decontamination, Inbound Roaming
 
@@ -72,6 +72,10 @@ s_t=f(x_t\mid c_t)
 $$
 
 따라서 본 연구의 가설은 SKT 인바운드 로밍 데이터에서 모든 이상이 복잡한 subsequence pattern으로 나타난다고 가정하기보다, **시간 컨텍스트에 따라 달라지는 정상 상태로부터의 다변량 point deviation이 더 중요한 이상 단서일 수 있다**는 것이다. 현재 이 관찰은 P0480 development 결과에 기반한 가설이며, 최종적으로는 10개 사업자 실험을 통해 일반적으로 성립하는지 검증한다.
+
+또한 초기 실험에서는 전체 48개 feature를 모델 입력으로 사용했지만, 전문가 레이블은 실제 운영 판단에 직접 사용하는 일부 핵심 지표를 중심으로 작성되었다. 이 경우 전문가가 정의한 anomaly의 의미와 모델이 전체 feature 공간에서 학습하는 anomaly의 의미가 달라질 수 있다. 예를 들어 core 운영 지표에는 특이한 변화가 없지만 비핵심 feature만 크게 변한 경우 모델은 높은 anomaly score를 부여할 수 있으나, 전문가는 이를 operational anomaly로 레이블링하지 않을 수 있다.
+
+따라서 본 연구에서는 **ground truth를 생성하는 feature 공간과 모델이 학습하는 feature 공간을 동일하게 맞추는 것**을 실험 설계의 원칙으로 추가하였다. 전문가 레이블링과 모델 학습 모두 사전에 정의한 11개 core feature만을 사용하며, 해당 feature 집합은 validation 성능을 보고 선택하지 않고 운영 의미를 기준으로 고정한다.
 
 하지만 고정된 24개 시간 분할에는 두 가지 문제가 있다. 첫째, 1시간이라는 구간은 데이터로부터 얻어진 것이 아니라 사람이 임의로 정한 단위이다. 둘째, 각 시간대의 학습 샘플 수가 감소하면서 정상 분포 추정이 불안정해질 수 있다. 이에 본 연구에서는 정상 패턴이 실제로 변하는 지점을 학습 데이터로부터 탐색하여, 필요한 수만큼의 연속적인 temporal context를 자동으로 구성하는 방향으로 연구를 확장하였다.
 
@@ -417,11 +421,43 @@ $$
 
 본 연구는 실제 이동통신사의 inbound roaming 운영 데이터에서 수집된 다변량 통계 시계열을 사용한다. 각 시계열은 5분 간격으로 기록되며, 사업자별 약 37,720개의 timestamp를 포함한다.
 
-현재 primary input은 약 46개의 raw counter feature로 구성된다. 이들 feature는 접속 시도, 성공, 실패, timeout 등 roaming signaling 및 품질 상태와 관련된 다변량 통계로 구성된다.
+원본 데이터에는 총 48개의 관측 feature가 존재하지만, 최종 논문의 레이블링과 모델 학습에는 이 중 **11개의 core feature**만을 사용한다. core feature는 접속 시도량 1개와 주요 signaling 단계 5종에 대한 failure/timeout 지표 10개로 구성된다.
 
-기업 데이터의 기밀성을 고려하여 논문에서는 실제 사업자명, PLMN 및 원본 metric 의미를 공개하지 않고 각각 `Operator 1`부터 `Operator 10`, `Feature 1` 등의 익명화된 표기를 사용한다.
+기업 데이터의 기밀성을 고려하여 논문에서는 실제 사업자명, PLMN 및 원본 metric ID를 공개하지 않고 각각 `Operator 1`부터 `Operator 10`, `Feature 1` 등의 익명화된 표기를 사용한다.
 
-## 3.2 사업자 선정
+## 3.2 Core Feature 선정과 Label-Model Alignment
+
+초기 연구에서는 전체 48개 feature를 이용하여 모델을 학습하였다. 그러나 전문가가 operational anomaly를 레이블링할 때 실제 판단에 사용하는 지표와 모델 입력 feature가 다르면, 동일한 timestamp를 두고도 전문가와 모델이 서로 다른 현상을 anomaly로 판단할 수 있다.
+
+이를 다음과 같이 구분할 수 있다.
+
+$$
+\mathcal{F}_{label}
+\neq
+\mathcal{F}_{model}
+$$
+
+이면 ground truth와 model score의 의미가 완전히 일치한다고 보기 어렵다. 따라서 최종 실험에서는
+
+$$
+\boxed{
+\mathcal{F}_{label}
+=
+\mathcal{F}_{model}
+=
+\mathcal{F}_{core}
+}
+$$
+
+로 설정한다.
+
+$\mathcal{F}_{core}$는 총 11개 feature로 구성되며, 접속 시도량과 AUC, DNS, Gateway, HSS, Session Management 계열의 failure/timeout counter를 포함한다. 이들은 전문가가 실제 운영 상태를 판단할 때 직접 해석 가능한 핵심 지표들이다.
+
+core feature 선택은 P0480 validation 성능이나 anomaly label을 기준으로 최적화하지 않는다. 연구자가 사전에 알고 있는 operational semantics를 기준으로 고정하고, 이후 10개 사업자의 레이블링과 모든 모델 학습에 동일하게 적용한다. 따라서 본 연구에서 평가되는 anomaly는 **11개 core operational feature 공간에서 정의되는 이상**으로 범위를 명시한다.
+
+이 선택은 단순한 차원 축소가 아니라, 전문가 ground truth가 의미하는 이상과 모델이 학습하는 이상을 동일한 대상에 대해 비교하기 위한 실험 설계이다.
+
+## 3.3 사업자 선정
 
 전체 inbound roaming 사업자 중 트래픽 규모가 충분하고 운영 중요도가 높은 사업자를 우선적으로 고려하였다. 동일 국가의 사업자가 중복되지 않도록 하여 서로 다른 10개 국가의 사업자를 선정하였다.
 
@@ -429,13 +465,15 @@ $$
 
 개발 과정에서는 `Operator 1`에 해당하는 P0480을 development operator로 사용하였다. 나머지 9개 사업자는 최종 방법을 고정한 이후 전문가 레이블링을 수행하고 독립 검증에 사용한다.
 
-## 3.3 Operational Ground Truth
+## 3.4 Operational Ground Truth
 
 본 연구의 anomaly label은 단순한 statistical outlier가 아니라 실제 운영자가 확인할 가치가 있는 이상 구간을 의미한다.
 
 본 연구에서 operational anomaly는 다음과 같이 정의한다.
 
 > 해당 사업자의 일반적인 운용 패턴에서 벗어나며, 이동통신 서비스 또는 운영 관점에서 조사·확인이 필요하다고 전문가가 판단하는 시간 구간.
+
+전문가 레이블링 화면에는 최종 모델 입력과 동일한 11개 core feature를 제시하며, 비핵심 feature는 ground truth 판단에 사용하지 않는다. 이를 통해 레이블링 단계와 학습 단계에서 anomaly의 관측 대상을 동일하게 유지한다.
 
 레이블링 시 다음 요소를 함께 고려한다.
 
@@ -450,7 +488,7 @@ $$
 
 현재 P0480 validation set에는 총 6개의 전문가 GT event가 존재한다. 나머지 9개 사업자는 동일한 원칙에 따라 레이블링을 진행할 예정이다.
 
-## 3.4 데이터 분할
+## 3.5 데이터 분할
 
 각 사업자의 전체 시계열은 시간 순서를 유지하여 다음과 같이 분할한다.
 
@@ -607,7 +645,7 @@ F
 \rightarrow F
 $$
 
-P0480에서 $F=46$이며 ReLU activation과 Adam optimizer를 사용한다.
+최종 실험에서는 모든 사업자에서 $F=11$이며 ReLU activation과 Adam optimizer를 사용한다.
 
 context $k$에 속하는 train sample 집합을
 
@@ -754,6 +792,8 @@ feature direction mapping은 validation anomaly 성능을 보고 결정하지 �
 
 ## 5.1 실험 목적
 
+최종 실험에서 모든 비교 모델은 동일한 11개 core feature를 입력으로 사용한다. 전문가 ground truth 역시 동일한 feature 집합만을 보고 작성하므로, 모델 간 차이는 feature 선택이 아니라 학습 방법과 temporal context modeling의 차이에서 발생하도록 통제한다.
+
 최종 실험은 다음 네 가지 질문을 분리하여 검증한다.
 
 1. 시간 context가 필요한가?
@@ -780,7 +820,7 @@ direction-aware scoring이 구현된 이후에는 다섯 번째 질문을 추가
 
 가능한 경우 contaminated training을 직접 다루는 기존 TSAD 방법을 external baseline으로 추가한다.
 
-P0480 개발 과정에서 사용한 RoCA, MSRS 등은 preliminary failure analysis와 연구 동기 설명에 활용하되, 최종 main comparison은 동일한 feature와 evaluation protocol에서 재실행한다.
+P0480 개발 과정에서 전체 feature를 사용해 얻은 RoCA, MSRS, HourAE, Adaptive ContextAE 결과는 preliminary failure analysis와 연구 동기 설명에만 활용한다. 최종 main comparison에서는 RoCA를 포함한 모든 baseline과 제안 방법을 동일한 11개 core feature 및 동일한 evaluation protocol에서 처음부터 재학습·재평가한다.
 
 ## 5.3 평가 지표
 
@@ -833,7 +873,9 @@ $$
 
 ---
 
-# 6. Preliminary Development Result: P0480
+# 6. 초기 탐색 실험: P0480 (전체 Feature 기준)
+
+본 절의 수치는 11개 core feature 프로토콜을 확정하기 전에 전체 feature 집합을 사용하여 수행한 탐색적 결과이다. 따라서 이후 11개 core feature 조건에서 얻는 결과와 직접적인 최종 성능 비교에 사용하지 않으며, 연구 가설을 형성한 과정만을 설명하기 위해 제시한다.
 
 ## 6.1 기존 TSAD 적용 결과
 
@@ -945,6 +987,8 @@ Event 1~3은 validation 전체에서 매우 높은 anomaly ranking을 보였다.
 
 ## 7.1 레이블링
 
+현재 P0480을 포함한 최종 평가에서는 11개 core feature를 기준으로 ground truth와 model input을 통일한다. 기존 전체-feature 조건에서 생성된 모델 결과는 최종 성능표에 사용하지 않으며, RoCA를 포함한 모든 비교 모델을 core feature 기준으로 다시 학습한다.
+
 현재 P0480을 제외한 9개 사업자에 대해 동일한 operational anomaly definition을 적용하여 전문가 레이블링을 진행한다.
 
 레이블링 과정에서는 가능하면 특정 모델의 prediction overlay를 보지 않고 원본 시계열 및 운영 metric을 기준으로 GT를 작성한다. 이후 missed anomaly와 false alarm 분석 단계에서 모델 prediction을 활용한다.
@@ -961,16 +1005,16 @@ Event 1~3은 validation 전체에서 매우 높은 anomaly ranking을 보였다.
 
 | Operator | # Points | # Features | # Valid GT Events | # Test GT Events | Test Anomaly Ratio | Selected K |
 |---|---:|---:|---:|---:|---:|---:|
-| Operator 1 | 약 37,720 | 46 | 6 | `[TBD]` | `[TBD]` | 2 |
-| Operator 2 | `[TBD]` | 46 | `[TBD]` | `[TBD]` | `[TBD]` | `[TBD]` |
-| Operator 3 | `[TBD]` | 46 | `[TBD]` | `[TBD]` | `[TBD]` | `[TBD]` |
-| Operator 4 | `[TBD]` | 46 | `[TBD]` | `[TBD]` | `[TBD]` | `[TBD]` |
-| Operator 5 | `[TBD]` | 46 | `[TBD]` | `[TBD]` | `[TBD]` | `[TBD]` |
-| Operator 6 | `[TBD]` | 46 | `[TBD]` | `[TBD]` | `[TBD]` | `[TBD]` |
-| Operator 7 | `[TBD]` | 46 | `[TBD]` | `[TBD]` | `[TBD]` | `[TBD]` |
-| Operator 8 | `[TBD]` | 46 | `[TBD]` | `[TBD]` | `[TBD]` | `[TBD]` |
-| Operator 9 | `[TBD]` | 46 | `[TBD]` | `[TBD]` | `[TBD]` | `[TBD]` |
-| Operator 10 | `[TBD]` | 46 | `[TBD]` | `[TBD]` | `[TBD]` | `[TBD]` |
+| Operator 1 | 약 37,720 | 11 | 6 | `[TBD]` | `[TBD]` | 2 |
+| Operator 2 | `[TBD]` | 11 | `[TBD]` | `[TBD]` | `[TBD]` | `[TBD]` |
+| Operator 3 | `[TBD]` | 11 | `[TBD]` | `[TBD]` | `[TBD]` | `[TBD]` |
+| Operator 4 | `[TBD]` | 11 | `[TBD]` | `[TBD]` | `[TBD]` | `[TBD]` |
+| Operator 5 | `[TBD]` | 11 | `[TBD]` | `[TBD]` | `[TBD]` | `[TBD]` |
+| Operator 6 | `[TBD]` | 11 | `[TBD]` | `[TBD]` | `[TBD]` | `[TBD]` |
+| Operator 7 | `[TBD]` | 11 | `[TBD]` | `[TBD]` | `[TBD]` | `[TBD]` |
+| Operator 8 | `[TBD]` | 11 | `[TBD]` | `[TBD]` | `[TBD]` | `[TBD]` |
+| Operator 9 | `[TBD]` | 11 | `[TBD]` | `[TBD]` | `[TBD]` | `[TBD]` |
+| Operator 10 | `[TBD]` | 11 | `[TBD]` | `[TBD]` | `[TBD]` | `[TBD]` |
 
 ## 7.3 최종 Main Result Table `[추후 작성]`
 
@@ -1087,17 +1131,19 @@ direction-aware scoring은 모델 입력값을 임의로 clipping하는 대신 �
 
 본 연구의 현재 한계는 다음과 같다.
 
-첫째, 방법 개발 과정이 P0480 한 사업자의 validation 결과를 중심으로 이루어졌다. 따라서 해당 사업자에 대한 development overfitting 가능성을 배제할 수 없다. 이를 줄이기 위해 최종 방법을 고정한 뒤 나머지 9개 사업자에서 독립적으로 검증한다.
+첫째, 초기 방법 개발 과정과 exploratory result는 전체 feature 집합을 사용한 P0480 validation 결과를 중심으로 이루어졌다. 최종 프로토콜에서는 레이블링과 모델 입력을 동일한 11개 core feature로 재정의하였으므로, 초기 수치는 최종 성능 근거로 사용하지 않고 모든 주요 모델을 다시 평가한다.
 
-둘째, 현재 temporal segmentation은 하루를 00:00부터 23:55까지 선형적으로 처리한다. 실제 daily cycle에서는 23:55와 00:00이 인접하므로 circular segmentation이 더 자연스러울 수 있다.
+둘째, 방법 개발 과정이 P0480 한 사업자의 validation 결과를 중심으로 이루어졌다. 따라서 해당 사업자에 대한 development overfitting 가능성을 배제할 수 없다. 이를 줄이기 위해 최종 방법을 고정한 뒤 나머지 9개 사업자에서 독립적으로 검증한다.
 
-셋째, 현재 iterative decontamination에서 상위 5% reconstruction error를 제거하는 고정 비율을 사용한다. 여러 사업자에서 contamination 정도가 다를 수 있으므로 제거율 sensitivity 또는 train-only robust threshold 방식에 대한 추가 분석이 필요하다.
+셋째, 현재 temporal segmentation은 하루를 00:00부터 23:55까지 선형적으로 처리한다. 실제 daily cycle에서는 23:55와 00:00이 인접하므로 circular segmentation이 더 자연스러울 수 있다.
 
-넷째, 현재 anomaly decision은 context별 reconstruction error의 mean + $3\sigma$ 형태에 기반한다. score distribution이 heavy-tailed하거나 train-validation shift가 존재할 경우 false alarm이 증가할 수 있다.
+넷째, 현재 iterative decontamination에서 상위 5% reconstruction error를 제거하는 고정 비율을 사용한다. 여러 사업자에서 contamination 정도가 다를 수 있으므로 제거율 sensitivity 또는 train-only robust threshold 방식에 대한 추가 분석이 필요하다.
 
-다섯째, 10개 사업자는 고트래픽 사업자 중심으로 선정되므로 모든 저트래픽 로밍 사업자까지 결과를 일반화하기 어렵다.
+다섯째, 현재 anomaly decision은 context별 reconstruction error의 mean + $3\sigma$ 형태에 기반한다. score distribution이 heavy-tailed하거나 train-validation shift가 존재할 경우 false alarm이 증가할 수 있다.
 
-여섯째, 실제 기업 데이터의 보안 문제로 raw time series와 사업자/feature 실명을 공개하기 어렵기 때문에 완전한 데이터셋 공개에는 제약이 있다.
+여섯째, 10개 사업자는 고트래픽 사업자 중심으로 선정되므로 모든 저트래픽 로밍 사업자까지 결과를 일반화하기 어렵다.
+
+일곱째, 실제 기업 데이터의 보안 문제로 raw time series와 사업자/feature 실명을 공개하기 어렵기 때문에 완전한 데이터셋 공개에는 제약이 있다.
 
 ---
 
@@ -1105,11 +1151,13 @@ direction-aware scoring은 모델 입력값을 임의로 clipping하는 대신 �
 
 본 연구는 anomaly label 없이 contaminated multivariate time series를 학습해야 하는 실제 이동통신 환경에서, 정상 상태가 시간에 따라 달라진다는 점에 주목하였다.
 
+또한 전문가가 레이블링하는 operational anomaly와 모델이 학습하는 anomaly의 대상을 일치시키기 위해, 전체 48개 feature 중 운영 의미가 명확한 11개 core feature를 사전에 고정하고 레이블링과 모델 학습에 동일하게 사용한다.
+
 초기 실험에서 기존 sequence/window 기반 TSAD 및 global normal modeling만으로는 operational GT와 충분한 정렬을 얻기 어렵거나 많은 false alarm이 발생하였다. 반면 temporal context를 조건으로 각 시점의 다변량 deviation을 평가하는 point-wise 접근은 P0480에서 더 높은 anomaly ranking 성능을 보여, 본 인바운드 로밍 데이터에서는 긴 temporal dependency 자체보다 context-dependent normality가 중요한 단서일 가능성을 확인하였다. 고정된 24시간 context 모델은 이러한 가설을 뒷받침했지만 지나친 세분화로 false alarm이 증가하였다.
 
 이를 해결하기 위해 본 연구는 train data에서 robust temporal profile을 구성하고 시간 순서를 유지하는 adaptive contiguous segmentation을 통해 temporal context의 수와 경계를 자동으로 결정하는 방법을 제안하였다. 또한 각 context 내부에서 iterative decontamination을 수행하여 anomaly label 없이 정상 모델을 재학습하였다.
 
-P0480 development 결과에서 제안한 Adaptive ContextAE는 고정 24시간 모델보다 VUS-PR과 PR-AUC를 향상시키고 FA/day를 약 절반 수준으로 감소시켰다. 이는 실제 데이터의 정상성을 하나의 global distribution 또는 고정 시간 단위로 정의하기보다 데이터에 적응적으로 temporal context를 발견하는 것이 유효할 가능성을 보여준다.
+전체 feature를 사용한 P0480 development 실험에서는 adaptive temporal context가 anomaly ranking과 false alarm 측면에서 가능성을 보였다. 다만 feature protocol을 11개 core feature로 변경하였으므로 해당 수치는 최종 성능 근거가 아니라 연구 가설을 형성한 exploratory evidence로만 해석한다. 최종 결론은 동일한 11개 core feature 조건에서 모든 baseline과 제안 방법을 재실행한 결과를 바탕으로 제시한다.
 
 향후 나머지 9개 사업자에 대한 전문가 레이블링을 완료한 뒤 총 10개 사업자에서 동일한 방법을 평가하고, adaptive context, decontamination, direction-aware scoring의 개별 효과를 ablation을 통해 검증한다. 최종적으로는 여러 사업자에서 일관된 성능 향상이 관찰되는지를 통해 제안 방법의 일반성을 평가하고자 한다.
 
@@ -1469,7 +1517,10 @@ P0480 development 결과에서 제안한 Adaptive ContextAE는 고정 24시간 �
 
 # 작성 메모
 
-- 현재 수치 결과는 P0480 validation development 결과이며 최종 Test 성능으로 표현하지 않는다.
+- 기존 전체-feature P0480 수치는 exploratory result이며 최종 성능으로 사용하지 않는다.
+- 최종 레이블링과 모든 모델 학습은 동일한 11개 core feature로 수행한다.
+- 11개 core feature는 validation label 기반 feature selection이 아니라 사전 operational semantics로 고정한다.
+- RoCA, HourAE, ContextAE 등 기존 결과는 11개 core feature 기준으로 모두 재실행한다.
 - 나머지 9개 사업자 레이블링 후 최종 main table을 갱신한다.
 - 최종 방법을 확정한 이후 P0480 Test와 나머지 사업자 Test를 평가한다.
 - direction-aware scoring은 구현 및 ablation 완료 전까지 확정 contribution으로 과장하지 않는다.
