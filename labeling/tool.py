@@ -69,6 +69,14 @@ CORE_FEATURES: tuple[str, ...] = (
 CORE_FEATURE_SET: frozenset[str] = frozenset(CORE_FEATURES)
 CORE_FEATURE_MODE = "core"
 
+# Figure layout: metrics panel keeps a fixed height; score band is always
+# reserved above it; human/model label bars live in a bottom track so they
+# do not cover metric/score traces.
+FIGURE_METRICS_HEIGHT = 320
+FIGURE_SCORE_HEIGHT = 100
+FIGURE_LABEL_HEIGHT = 56
+FIGURE_HEIGHT = FIGURE_METRICS_HEIGHT + FIGURE_SCORE_HEIGHT + FIGURE_LABEL_HEIGHT
+
 ANOMALY_FILL = "rgba(201, 162, 39, 0.28)"
 ANOMALY_LINE = "#c9a227"
 # OmniAnomaly (and other model) predictions — distinct from human labels.
@@ -2350,10 +2358,12 @@ def add_model_indicator(
     *,
     highlight: bool = False,
     draw_edges: bool = True,
+    row: int | None = None,
 ) -> bool:
     """Draw a model-prediction overlay (purple) — read-only.
 
     ``draw_edges=False`` skips start/end lines (cheaper when many segments).
+    When ``row`` is set, draw inside that subplot (label track); else paper.
     """
     s_utc = pd.to_datetime(item["start"], utc=True)
     e_utc = pd.to_datetime(item["end"], utc=True)
@@ -2365,35 +2375,46 @@ def add_model_indicator(
     edge_w = 3 if highlight else 2
     lid = str(item.get("id") or "")
 
+    def _add(shape: dict[str, Any]) -> None:
+        if row is not None:
+            fig.add_shape(shape, row=row, col=1)
+        else:
+            shape = {
+                **shape,
+                "xref": shape.get("xref", "x"),
+                "yref": "paper",
+            }
+            fig.add_shape(shape)
+
     def _edge(x, which: str) -> None:
-        fig.add_shape(
-            type="line",
-            xref="x",
-            yref="paper",
-            x0=x,
-            x1=x,
-            y0=0,
-            y1=1,
-            line=dict(color=line, width=edge_w, dash="dot"),
-            layer="above",
-            editable=False,
-            name=f"model_edge_{which}:{lid}" if lid else None,
+        _add(
+            dict(
+                type="line",
+                x0=x,
+                x1=x,
+                y0=0,
+                y1=1,
+                line=dict(color=line, width=edge_w, dash="dot"),
+                layer="above",
+                editable=False,
+                name=f"model_edge_{which}:{lid}" if lid else None,
+            )
         )
 
     if is_range:
-        fig.add_shape(
-            type="rect",
-            xref="x",
-            yref="paper",
-            x0=s,
-            x1=e,
-            y0=0,
-            y1=1,
-            fillcolor=fill,
-            line=dict(width=0),
-            layer="above",
-            editable=False,
-            name=f"model_fill:{lid}" if lid else None,
+        _add(
+            dict(
+                type="rect",
+                x0=s,
+                x1=e,
+                y0=0,
+                y1=1,
+                fillcolor=fill,
+                line=dict(width=0),
+                layer="above",
+                editable=False,
+                name=f"model_fill:{lid}" if lid else None,
+            )
         )
         if draw_edges or highlight:
             _edge(s, "start")
@@ -2492,7 +2513,6 @@ def labels_to_frame(doc: dict[str, Any]) -> pd.DataFrame:
 
 
 LABEL_REASON_DEFS: list[tuple[str, str]] = [
-    ("rate_degrade", "SUCCESS/ACCEPT rate 급락·낮은 지속"),
     ("attempt_drop", "M971 급락"),
     ("attempt_spike", "M971 급증"),
     ("fail_surge", "FAIL/TO 등 실패·타임아웃 폭증"),
@@ -3159,12 +3179,16 @@ def plot_series_window(
 
 
 def add_label_indicator(
-    fig: go.Figure, item: dict[str, Any], *, highlight: bool = False
+    fig: go.Figure,
+    item: dict[str, Any],
+    *,
+    highlight: bool = False,
+    row: int | None = None,
 ) -> bool:
     """Draw a label overlay; return True for a range label.
 
-    Unselected = yellow fill + edge lines above traces;
-    selected = crimson fill/edges (also above).
+    Unselected = yellow fill + edge lines; selected = crimson.
+    When ``row`` is set, draw inside that subplot (bottom label track).
     """
     s_utc = pd.to_datetime(item["start"], utc=True)
     e_utc = pd.to_datetime(item["end"], utc=True)
@@ -3181,36 +3205,48 @@ def add_label_indicator(
         line = ANOMALY_LINE
         line_w = 2
 
+    def _add(shape: dict[str, Any]) -> None:
+        if row is not None:
+            fig.add_shape(shape, row=row, col=1)
+        else:
+            fig.add_shape(
+                {
+                    **shape,
+                    "xref": shape.get("xref", "x"),
+                    "yref": "paper",
+                }
+            )
+
     def _edge(x, which: str, label_id: str) -> None:
-        fig.add_shape(
-            type="line",
-            xref="x",
-            yref="paper",
-            x0=x,
-            x1=x,
-            y0=0,
-            y1=1,
-            line=dict(color=line, width=line_w),
-            layer="above",
-            editable=False,
-            name=f"label_edge_{which}:{label_id}" if label_id else None,
+        _add(
+            dict(
+                type="line",
+                x0=x,
+                x1=x,
+                y0=0,
+                y1=1,
+                line=dict(color=line, width=line_w),
+                layer="above",
+                editable=False,
+                name=f"label_edge_{which}:{label_id}" if label_id else None,
+            )
         )
 
     if is_range:
         lid = str(item.get("id") or "")
-        fig.add_shape(
-            type="rect",
-            xref="x",
-            yref="paper",
-            x0=s,
-            x1=e,
-            y0=0,
-            y1=1,
-            fillcolor=color,
-            line=dict(width=0),
-            layer="above",
-            editable=False,
-            name=f"label_fill:{lid}" if lid else None,
+        _add(
+            dict(
+                type="rect",
+                x0=s,
+                x1=e,
+                y0=0,
+                y1=1,
+                fillcolor=color,
+                line=dict(width=0),
+                layer="above",
+                editable=False,
+                name=f"label_fill:{lid}" if lid else None,
+            )
         )
         _edge(s, "start", lid)
         _edge(e, "end", lid)
@@ -3345,21 +3381,29 @@ def label_highlight_overlays(
     *,
     editable: bool = False,
     line_width: int = 1,
+    row: int | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Thin red edges for the selected label.
 
     Keep editable=False; the app installs a custom horizontal drag on these edges
     in 구간 편집 mode (Plotly native shape edit shows handles everywhere).
+    When ``row`` is set, shapes target that subplot's axes (label track).
     """
     s = to_plot_time(pd.to_datetime(item["start"], utc=True))
     e = to_plot_time(pd.to_datetime(item["end"], utc=True))
     is_range = item.get("kind") == "range" or s != e
+    if row is None:
+        xref, yref = "x", "paper"
+    elif row <= 1:
+        xref, yref = "x", "y"
+    else:
+        xref, yref = f"x{row}", f"y{row}"
 
     def _edge(x, name: str) -> dict[str, Any]:
         return dict(
             type="line",
-            xref="x",
-            yref="paper",
+            xref=xref,
+            yref=yref,
             x0=x,
             x1=x,
             y0=0,
@@ -3392,13 +3436,19 @@ def value_cursor_overlays(ts) -> dict[str, Any]:
     )
 
 
-def pending_anchor_shape(ts) -> dict[str, Any]:
+def pending_anchor_shape(ts, *, row: int | None = None) -> dict[str, Any]:
     """Dotted guide marking a range label's first click (start / left)."""
     x = to_plot_time(ts)
+    if row is None:
+        xref, yref = "x", "paper"
+    elif row <= 1:
+        xref, yref = "x", "y"
+    else:
+        xref, yref = f"x{row}", f"y{row}"
     return dict(
         type="line",
-        xref="x",
-        yref="paper",
+        xref=xref,
+        yref=yref,
         x0=x,
         x1=x,
         y0=0,
@@ -3426,15 +3476,23 @@ def pending_anchor_annotation(ts) -> dict[str, Any]:
     )
 
 
-def pending_range_fill_shape(start_ts, end_ts=None) -> dict[str, Any]:
+def pending_range_fill_shape(
+    start_ts, end_ts=None, *, row: int | None = None
+) -> dict[str, Any]:
     """Crimson band preview from start → end (transparent until end > start)."""
     x0 = to_plot_time(start_ts)
     x1 = to_plot_time(end_ts) if end_ts is not None else x0
     show = end_ts is not None and end_ts > start_ts
+    if row is None:
+        xref, yref = "x", "paper"
+    elif row <= 1:
+        xref, yref = "x", "y"
+    else:
+        xref, yref = f"x{row}", f"y{row}"
     return dict(
         type="rect",
-        xref="x",
-        yref="paper",
+        xref=xref,
+        yref=yref,
         x0=x0,
         x1=x1 if show else x0,
         y0=0,
@@ -3549,31 +3607,39 @@ def build_figure(
     series_hoverinfo = "skip" if embed_ranked else None
 
     show_rate = bool(rate_cols)
-    if show_score and show_rate:
+    # Always reserve score (top) + label track (bottom). Metrics height is fixed;
+    # score/label bands are extra rows so bars never cover metric traces.
+    reserve_score = True
+    reserve_labels = True
+    has_score_data = bool(show_score and len(score_x))
+    score_frac = FIGURE_SCORE_HEIGHT / FIGURE_HEIGHT
+    metrics_frac = FIGURE_METRICS_HEIGHT / FIGURE_HEIGHT
+    label_frac = FIGURE_LABEL_HEIGHT / FIGURE_HEIGHT
+    if reserve_score and show_rate and reserve_labels:
+        n_rows = 4
+        row_heights = [score_frac, 0.14, metrics_frac * 0.85, label_frac]
+        s = sum(row_heights)
+        row_heights = [h / s for h in row_heights]
+        titles = ("Anomaly score", "SUCCESS / COMB rate", "Metric 값", "Labels")
+        rate_row, metric_row, label_row = 2, 3, 4
+        spacing = 0.06
+    elif reserve_score and reserve_labels:
         n_rows = 3
-        row_heights = [0.22, 0.28, 0.50]
-        titles = ("Anomaly score", "SUCCESS / COMB rate", "Metric 값")
-        rate_row, metric_row = 2, 3
-        spacing = 0.08
-    elif show_score:
-        # Core-feature mode: metrics panel ≈ one half of the old 2-row chart.
+        row_heights = [score_frac, metrics_frac, label_frac]
+        titles = ("Anomaly score", "Metric 값", "Labels")
+        rate_row, metric_row, label_row = None, 2, 3
+        spacing = 0.06
+    elif reserve_score:
         n_rows = 2
-        row_heights = [0.35, 0.65]
+        row_heights = [score_frac / (score_frac + metrics_frac), metrics_frac / (score_frac + metrics_frac)]
         titles = ("Anomaly score", "Metric 값")
-        rate_row, metric_row = None, 2
-        spacing = 0.10
-    elif show_rate:
-        n_rows = 2
-        row_heights = [0.5, 0.5]
-        titles = ("SUCCESS / COMB rate", "Metric 값")
-        rate_row, metric_row = 1, 2
-        spacing = 0.13
+        rate_row, metric_row, label_row = None, 2, None
+        spacing = 0.08
     else:
-        # Single metrics row at the old half-panel height (see fig height below).
         n_rows = 1
         row_heights = [1.0]
         titles = ("Metric 값",)
-        rate_row, metric_row = None, 1
+        rate_row, metric_row, label_row = None, 1, None
         spacing = 0.08
 
     fig = make_subplots(
@@ -3585,7 +3651,7 @@ def build_figure(
         subplot_titles=titles,
     )
 
-    if show_score and len(score_x):
+    if has_score_data:
         fig.add_trace(
             go.Scattergl(
                 x=score_x,
@@ -3676,7 +3742,7 @@ def build_figure(
             f"{data_rev}:{pd.to_datetime(start, utc=True).value}:"
             f"{pd.to_datetime(end, utc=True).value}"
         )
-    if show_score:
+    if reserve_score:
         data_rev = f"{data_rev}:score"
 
     if embed_ranked and len(view):
@@ -3735,36 +3801,31 @@ def build_figure(
             col=1,
         )
 
-    y_ref = view[primary_cols].max(axis=1) if len(view) and primary_cols else None
+    if label_row is not None:
+        # Keep the Labels subplot alive even when no bars are drawn.
+        fig.add_trace(
+            go.Scatter(
+                x=[None],
+                y=[None],
+                mode="markers",
+                marker=dict(opacity=0, size=1),
+                name="labels",
+                showlegend=False,
+                hoverinfo="skip",
+                uid="__label_track__",
+            ),
+            row=label_row,
+            col=1,
+        )
 
-    if show_labels:
+    if show_labels and label_row is not None:
         hi = str(highlight_id) if highlight_id is not None else None
         for item in doc.get("labels", []):
-            s_utc = pd.to_datetime(item["start"], utc=True)
             label_id = item.get("id", "")
             selected = hi is not None and str(label_id) == hi
-            line = "crimson" if selected else ANOMALY_LINE
-            add_label_indicator(fig, item, highlight=selected)
-
-            if y_ref is not None and len(view):
-                nearest = (view["time"] - s_utc).abs().idxmin()
-                fig.add_trace(
-                    go.Scatter(
-                        x=[to_plot_time(view.loc[nearest, "time"])],
-                        y=[float(y_ref.loc[nearest])],
-                        mode="markers",
-                        marker=dict(
-                            size=14 if selected else 10,
-                            color=line,
-                            symbol="x",
-                        ),
-                        name=f"anomaly:{label_id}",
-                        hoverinfo="skip",
-                        showlegend=False,
-                    ),
-                    row=metric_row,
-                    col=1,
-                )
+            add_label_indicator(
+                fig, item, highlight=selected, row=label_row
+            )
 
     if show_predictions and predictions:
         hid_pred = str(highlight_pred_id) if highlight_pred_id is not None else None
@@ -3784,13 +3845,13 @@ def build_figure(
                 item,
                 highlight=is_hi,
                 draw_edges=draw_all_edges or is_hi,
+                row=label_row,
             )
 
     fig.update_layout(
         title=title or f"{display_plmn(str(doc.get('plmn')))} anomaly labeling",
-        # Old rate+metrics was height=420 at 50/50 → one row ≈ 210.
-        # Keep that metrics-panel height; add a compact score row when present.
-        height=320 if show_score else 210,
+        # Metrics keep FIGURE_METRICS_HEIGHT; score + label tracks are extra.
+        height=FIGURE_HEIGHT if reserve_score else FIGURE_METRICS_HEIGHT,
         autosize=True,
         # Ranked hover uses shared-x tips; otherwise closest (one series).
         hovermode="x" if embed_ranked else "closest",
@@ -3815,7 +3876,7 @@ def build_figure(
     else:
         fig.update_layout(autosize=True)
 
-    if show_score:
+    if reserve_score:
         fig.update_yaxes(
             title_text="score",
             autorange=True,
@@ -3864,6 +3925,23 @@ def build_figure(
         row=metric_row,
         col=1,
     )
+    if label_row is not None:
+        fig.update_yaxes(
+            title_text="label",
+            range=[0, 1],
+            autorange=False,
+            fixedrange=True,
+            showticklabels=False,
+            showgrid=False,
+            zeroline=False,
+            showline=True,
+            mirror=True,
+            linewidth=1.5,
+            linecolor="#a16207",
+            title_font=dict(size=11, color="#854d0e"),
+            row=label_row,
+            col=1,
+        )
 
     tmin, tmax = data_time_bounds(view if len(view) else df)
     x0 = pd.to_datetime(start, utc=True) if start is not None else tmin
@@ -3896,16 +3974,27 @@ def build_figure(
             kw["title_font"] = dict(size=11, color="#5c5346")
         elif row_i == 1:
             kw["matches"] = None
-            kw["linecolor"] = "#6d28d9" if show_score else "#5f8499"
+            kw["linecolor"] = "#6d28d9" if reserve_score else "#5f8499"
             kw["tickfont"] = dict(
-                size=10, color="#5b21b6" if show_score else "#3d6578"
+                size=10, color="#5b21b6" if reserve_score else "#3d6578"
             )
+            kw["showticklabels"] = False
         elif row_i == n_rows:
             kw["matches"] = "x"
             kw["title_text"] = "시간 (KST)"
+            if label_row is not None and row_i == label_row:
+                kw["linecolor"] = "#a16207"
+                kw["tickfont"] = dict(size=10, color="#854d0e")
+                kw["title_font"] = dict(size=11, color="#854d0e")
+            else:
+                kw["linecolor"] = "#8a7f6e"
+                kw["tickfont"] = dict(size=10, color="#5c5346")
+                kw["title_font"] = dict(size=11, color="#5c5346")
+        elif metric_row is not None and row_i == metric_row:
+            kw["matches"] = "x"
             kw["linecolor"] = "#8a7f6e"
             kw["tickfont"] = dict(size=10, color="#5c5346")
-            kw["title_font"] = dict(size=11, color="#5c5346")
+            kw["showticklabels"] = False
         else:
             kw["matches"] = "x"
             kw["linecolor"] = "#5f8499"
@@ -3915,7 +4004,11 @@ def build_figure(
 
     # Panel fills first, then train|valid|test tints (same layer=below → later wins).
     _style_panel_separation(
-        fig, n_rows=n_rows, show_score=show_score, show_rate=show_rate
+        fig,
+        n_rows=n_rows,
+        show_score=reserve_score,
+        show_rate=show_rate,
+        show_labels=reserve_labels,
     )
     add_split_region_overlays(fig, chrono_split_bounds(df, predictions))
     return fig
@@ -3927,6 +4020,7 @@ def _style_panel_separation(
     n_rows: int = 2,
     show_score: bool = False,
     show_rate: bool = True,
+    show_labels: bool = False,
 ) -> None:
     """Distinct fills / frames / subtitle chips for subplot rows."""
     domains = []
@@ -3935,12 +4029,17 @@ def _style_panel_separation(
         axis = getattr(fig.layout, key, None)
         dom = getattr(axis, "domain", None) if axis is not None else None
         domains.append(dom)
-    if n_rows == 3:
+    if n_rows == 4:
+        defaults = [(0.82, 1.0), (0.66, 0.78), (0.14, 0.62), (0.0, 0.10)]
+    elif show_score and show_labels and n_rows == 3:
+        # score / metrics / labels (FIGURE_* proportions).
+        defaults = [(0.82, 1.0), (0.14, 0.78), (0.0, 0.10)]
+    elif n_rows == 3:
         defaults = [(0.72, 1.0), (0.38, 0.64), (0.0, 0.30)]
     elif n_rows == 1:
         defaults = [(0.0, 1.0)]
     elif show_score and not show_rate:
-        defaults = [(0.62, 1.0), (0.0, 0.54)]
+        defaults = [(0.78, 1.0), (0.0, 0.70)]
     else:
         defaults = [(0.565, 1.0), (0.0, 0.435)]
     for i, dom in enumerate(domains):
@@ -3952,7 +4051,20 @@ def _style_panel_separation(
     x_dom = getattr(x_axis, "domain", None) or (0.0, 1.0)
 
     styles = []
-    if show_score and show_rate and n_rows == 3:
+    if show_score and show_rate and show_labels and n_rows == 4:
+        styles = [
+            ("#efe7ff", "#6d28d9", "panel_bg_score"),
+            ("#e7f1f7", "#5f8499", "panel_bg_rate"),
+            ("#f7f5f1", "#8a7f6e", "panel_bg_metrics"),
+            ("#fef9c3", "#a16207", "panel_bg_labels"),
+        ]
+    elif show_score and show_labels and n_rows == 3:
+        styles = [
+            ("#efe7ff", "#6d28d9", "panel_bg_score"),
+            ("#f7f5f1", "#8a7f6e", "panel_bg_metrics"),
+            ("#fef9c3", "#a16207", "panel_bg_labels"),
+        ]
+    elif show_score and show_rate and n_rows == 3:
         styles = [
             ("#efe7ff", "#6d28d9", "panel_bg_score"),
             ("#e7f1f7", "#5f8499", "panel_bg_rate"),
@@ -4008,31 +4120,46 @@ def _style_panel_separation(
             name=f"panel_divider_{i}",
         )
 
-    title_styles = (
-        dict(
-            font=dict(size=12, color="#5b21b6", family="sans-serif"),
-            bgcolor="rgba(239,231,255,0.96)",
-            bordercolor="#6d28d9",
-            borderwidth=1,
-            borderpad=4,
-        ),
-        dict(
-            font=dict(size=12, color="#1f4f63", family="sans-serif"),
-            bgcolor="rgba(231,241,247,0.96)",
-            bordercolor="#5f8499",
-            borderwidth=1,
-            borderpad=4,
-        ),
-        dict(
-            font=dict(size=12, color="#4a4338", family="sans-serif"),
-            bgcolor="rgba(247,245,241,0.96)",
-            bordercolor="#8a7f6e",
-            borderwidth=1,
-            borderpad=4,
-        ),
+    score_title = dict(
+        font=dict(size=12, color="#5b21b6", family="sans-serif"),
+        bgcolor="rgba(239,231,255,0.96)",
+        bordercolor="#6d28d9",
+        borderwidth=1,
+        borderpad=4,
     )
-    if not show_score:
-        title_styles = title_styles[1:]
+    rate_title = dict(
+        font=dict(size=12, color="#1f4f63", family="sans-serif"),
+        bgcolor="rgba(231,241,247,0.96)",
+        bordercolor="#5f8499",
+        borderwidth=1,
+        borderpad=4,
+    )
+    metrics_title = dict(
+        font=dict(size=12, color="#4a4338", family="sans-serif"),
+        bgcolor="rgba(247,245,241,0.96)",
+        bordercolor="#8a7f6e",
+        borderwidth=1,
+        borderpad=4,
+    )
+    labels_title = dict(
+        font=dict(size=12, color="#854d0e", family="sans-serif"),
+        bgcolor="rgba(254,249,195,0.96)",
+        bordercolor="#a16207",
+        borderwidth=1,
+        borderpad=4,
+    )
+    if show_score and show_rate and show_labels:
+        title_styles = (score_title, rate_title, metrics_title, labels_title)
+    elif show_score and show_labels:
+        title_styles = (score_title, metrics_title, labels_title)
+    elif show_score and show_rate:
+        title_styles = (score_title, rate_title, metrics_title)
+    elif show_score:
+        title_styles = (score_title, metrics_title)
+    elif show_rate:
+        title_styles = (rate_title, metrics_title)
+    else:
+        title_styles = (metrics_title,)
     anns = list(fig.layout.annotations or ())
     for i, style in enumerate(title_styles):
         if i >= len(anns):

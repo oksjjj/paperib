@@ -75,6 +75,7 @@ from tool import (  # noqa: E402
     pending_range_fill_shape,
     ranked_hover_html,
     ranked_metric_pairs,
+    FIGURE_HEIGHT,
     remove_label,
     save_labels,
     to_plot_time,
@@ -167,7 +168,7 @@ def _empty_figure():
 
     fig = go.Figure()
     fig.update_layout(
-        height=210,
+        height=FIGURE_HEIGHT,
         autosize=True,
         margin=dict(l=40, r=20, t=40, b=40),
         annotations=[
@@ -995,7 +996,9 @@ def _interval_hit_at_time(
         win_sec = max((zoom_end - zoom_start).total_seconds(), 1.0)
         edge_tol = max(15 * 60.0, win_sec * 0.012)
     else:
-        edge_tol = float(point_tol_seconds if point_tol_seconds is not None else 150.0)
+        edge_tol = 150.0
+    if point_tol_seconds is not None:
+        edge_tol = max(edge_tol, float(point_tol_seconds))
 
     edge_hits: list[tuple[float, dict]] = []
     range_hits: list[tuple[float, dict]] = []
@@ -1316,15 +1319,8 @@ def _has_score_panel() -> bool:
 
 
 def _score_subplot_active() -> bool:
-    """Match ``build_figure``: score row only when this x-window has finite scores.
-
-    If we assume a 3-row layout while the figure is 2-row (train / no-score
-    zoom), metrics Y-auto is written to a missing yaxis3 and the metrics panel
-    (yaxis2) gets the rate scale instead — Y 자동 looks broken after anomaly zoom.
-    """
-    if not _has_score_panel():
-        return False
-    return _visible_score_y_bounds() is not None
+    """Score band is always reserved in the figure (may be empty)."""
+    return True
 
 
 def _rate_subplot_active() -> bool:
@@ -1333,19 +1329,20 @@ def _rate_subplot_active() -> bool:
 
 
 def _metric_axis_row() -> int:
-    score = _score_subplot_active()
-    rate = _rate_subplot_active()
-    if score and rate:
+    # score=1, metrics=2, labels=3 (rate inserts before metrics if present).
+    if _rate_subplot_active():
         return 3
-    if score or rate:
-        return 2
-    return 1
+    return 2
+
+
+def _label_axis_row() -> int:
+    return 4 if _rate_subplot_active() else 3
 
 
 def _rate_axis_row() -> int | None:
     if not _rate_subplot_active():
         return None
-    return 2 if _score_subplot_active() else 1
+    return 2
 
 
 def _build_graph(click_mode: str):
@@ -1415,10 +1412,8 @@ def _build_graph(click_mode: str):
             f":m{metric_rev}:l{label_rev}:p{place_rev}:c{cursor_rev}"
             f":h{hi_rev}:x{x_gen}{force_bit}"
         ),
-        # Match dcc.Graph style height so select/redraw never shrinks the plot.
-        # autosize stays True so width keeps filling the host.
-        # Match build_figure: metrics panel ≈ old half-row (210); +score → 320.
-        height=320 if _score_subplot_active() else 210,
+        # Metrics + score + bottom Labels track (see FIGURE_* in tool.py).
+        height=FIGURE_HEIGHT,
         autosize=True,
     )
 
@@ -1439,8 +1434,8 @@ def _build_graph(click_mode: str):
     y_locked = True
     y_bounds = _effective_y_bounds()
     rate_bounds = _visible_rate_y_bounds()
-    score_active = _score_subplot_active()
-    score_bounds = _visible_score_y_bounds() if score_active else None
+    # Score band is always present; bounds may be None when empty / no preds.
+    score_bounds = _visible_score_y_bounds() if _has_score_panel() else None
     state["y_rendered"] = y_bounds
     state["rate_y_rendered"] = rate_bounds
     state["score_y_rendered"] = score_bounds
@@ -1448,26 +1443,25 @@ def _build_graph(click_mode: str):
     metric_row = _metric_axis_row()
     # Include score in y_gen uirevision so Y 자동 / zoom refresh the score panel.
     score_rev = f"ys:{state.get('y_gen', 0)}"
-    if score_active:
-        if score_bounds is None:
-            fig.update_yaxes(
-                title_text="score",
-                autorange=True,
-                fixedrange=True,
-                uirevision=score_rev,
-                row=1,
-                col=1,
-            )
-        else:
-            fig.update_yaxes(
-                title_text="score",
-                range=list(score_bounds),
-                autorange=False,
-                fixedrange=True,
-                uirevision=score_rev,
-                row=1,
-                col=1,
-            )
+    if score_bounds is None:
+        fig.update_yaxes(
+            title_text="score",
+            autorange=True,
+            fixedrange=True,
+            uirevision=score_rev,
+            row=1,
+            col=1,
+        )
+    else:
+        fig.update_yaxes(
+            title_text="score",
+            range=list(score_bounds),
+            autorange=False,
+            fixedrange=True,
+            uirevision=score_rev,
+            row=1,
+            col=1,
+        )
     if rate_row is not None:
         if rate_bounds is None:
             fig.update_yaxes(
@@ -1507,12 +1501,27 @@ def _build_graph(click_mode: str):
             row=metric_row,
             col=1,
         )
+    fig.update_yaxes(
+        title_text="label",
+        range=[0, 1],
+        autorange=False,
+        fixedrange=True,
+        showticklabels=False,
+        uirevision="label-track",
+        row=_label_axis_row(),
+        col=1,
+    )
 
     if state["label_range_anchor"] is not None:
         before_shapes = len(fig.layout.shapes or ())
-        fig.add_shape(**pending_range_fill_shape(state["label_range_anchor"]))
+        lab_row = _label_axis_row()
+        fig.add_shape(
+            **pending_range_fill_shape(state["label_range_anchor"], row=lab_row)
+        )
         state["_pending_fill_index"] = before_shapes
-        fig.add_shape(**pending_anchor_shape(state["label_range_anchor"]))
+        fig.add_shape(
+            **pending_anchor_shape(state["label_range_anchor"], row=lab_row)
+        )
         # No on-plot tooltip annotation — it covers the series while placing.
     else:
         state["_pending_fill_index"] = None
@@ -1526,6 +1535,7 @@ def _build_graph(click_mode: str):
                 item,
                 editable=False,
                 line_width=4 if click_mode == "edit_range" else 1,
+                row=_label_axis_row(),
             )
             for s in hs:
                 fig.add_shape(**s)
@@ -1601,7 +1611,7 @@ def _build_graph(click_mode: str):
         # edit_range always gets sample_ms so edge drag can snap to samples.
         meta["hover_cache_seq"] = int(state.get("hover_cache_seq") or 0)
         # Clientside tip: only the real score subplot may show score text.
-        meta["score_panel"] = bool(_score_subplot_active())
+        meta["score_panel"] = True
         if not state.get("_hover_arrays_pushed") or click_mode == "edit_range":
             meta["sample_ms"] = samples
             state["_hover_arrays_pushed"] = True
@@ -2398,10 +2408,19 @@ def _make_axis_cmd(
     *,
     apply_x: bool = True,
     touch_y: bool = True,
+    live_axes: bool = True,
+    bump_x_gen: bool = True,
     guard_seconds: float = 4.0,
     rebuild_ms: int = 300,
 ) -> dict:
-    """Payload for instant client relayout + deferred high-res rebuild."""
+    """Payload for instant client relayout + deferred high-res rebuild.
+
+    ``live_axes=False`` updates server Y state but skips browser ``Plotly.relayout``
+    so a just-finished pan/zoom is not yanked by a Y patch before rebuild.
+
+    ``bump_x_gen=False`` keeps ``layout.uirevision`` stable so Plotly.react can
+    refresh traces after pan without resetting the live camera.
+    """
     if state["df"] is None:
         return {}
     tmin, tmax = data_time_bounds(state["df"])
@@ -2416,7 +2435,9 @@ def _make_axis_cmd(
             state["zoom_rendered_prev"] = prev
         # Bump so Plotly accepts the new x range on rebuild (stable layout
         # uirevision otherwise restores the previous zoom — 「전체」 needed 2 clicks).
-        state["x_gen"] = int(state.get("x_gen") or 0) + 1
+        # Pan keeps x_gen stable — otherwise every rebuild snaps the camera back.
+        if bump_x_gen:
+            state["x_gen"] = int(state.get("x_gen") or 0) + 1
     state["zoom_rendered"] = rendered
     _arm_zoom_guard(guard_seconds)
     score_payload = None
@@ -2450,6 +2471,7 @@ def _make_axis_cmd(
         "y_rate": rate_payload,
         "y_score": score_payload,
         "touch_y": bool(touch_y),
+        "live_axes": bool(live_axes),
         "status": status,
         "rebuild_ms": int(rebuild_ms),
     }
@@ -2464,11 +2486,14 @@ def _relayout_x_window(relayout) -> tuple[Any, Any] | str | None:
     """
     if not relayout:
         return None
-    if relayout.get("xaxis.autorange") or relayout.get("xaxis2.autorange") or relayout.get(
-        "xaxis3.autorange"
+    if (
+        relayout.get("xaxis.autorange")
+        or relayout.get("xaxis2.autorange")
+        or relayout.get("xaxis3.autorange")
+        or relayout.get("xaxis4.autorange")
     ):
         return "autorange"
-    for prefix in ("xaxis", "xaxis2", "xaxis3"):
+    for prefix in ("xaxis", "xaxis2", "xaxis3", "xaxis4"):
         k0, k1 = f"{prefix}.range[0]", f"{prefix}.range[1]"
         if k0 in relayout and k1 in relayout:
             return relayout[k0], relayout[k1]
@@ -3304,7 +3329,7 @@ app.layout = html.Div(
                 "displayModeBar": True,
                 "showTips": False,
             },
-            style={"width": "100%", "height": "320px"},
+            style={"width": "100%", "height": f"{FIGURE_HEIGHT}px"},
         ),
         html.Div(id="status", style={"display": "none"}),
         html.B("이 시점 특성값 (값 내림차순)"),
@@ -3314,8 +3339,8 @@ app.layout = html.Div(
                 "그래프에 커서를 올리면 이 시점의 특성값이 내림차순으로 표시됩니다."
             ),
             style={
-                # Header + at most 2 metric grid rows.
-                "height": "72px",
+                # Timestamp header + 2 metric grid rows (with padding).
+                "height": "108px",
                 "overflow": "hidden",
                 "border": "1px solid #ddd",
                 "padding": "6px 8px",
@@ -3346,6 +3371,8 @@ app.layout = html.Div(
         dcc.Store(id="axis-cmd"),
         dcc.Store(id="axis-cmd-ack"),
         dcc.Store(id="rebuild-trigger"),
+        # Pan data refresh without touching graph.figure (avoids camera snap).
+        dcc.Store(id="pan-plot-apply"),
         dcc.Store(id="range-label-done"),
     ],
     style={"fontFamily": "sans-serif", "padding": "12px", "maxWidth": "100%"},
@@ -4594,7 +4621,14 @@ def _main_body(
             return placed if placed is not None else (no_update,) * 7
 
         # Prefer anomaly selection even in 값 탐색; empty area keeps value cursor.
-        hit = _label_at_time(ts) if state.get("show_anomalies", True) else None
+        # Labels-track clicks: wider edge tolerance (thin strip + 5-min snap).
+        on_label_track = bool(shape_click.get("label_track"))
+        hit = None
+        if state.get("show_anomalies", True):
+            hit = _label_at_time(
+                ts,
+                point_tol_seconds=(45 * 60.0) if on_label_track else None,
+            )
         if hit is not None:
             return _select_or_toggle_label_hit(hit, click_mode)
 
@@ -4919,6 +4953,7 @@ def _drag_axis_nav(relayout, click_mode):
     click_mode = click_mode or "zoom"
     # 이동(Y고정) only: keep y. Zoom / 이동(Y자동) / others: Y 자동.
     y_auto = click_mode != "pan_keep_y"
+    is_pan = click_mode in ("pan", "pan_keep_y")
     # After select/zoom-to-label, respect zoom_guard so delayed plotly_relayout
     # echoes cannot overwrite the window / clear the red highlight. Outside that
     # window keep ignore_guard so toolbar-zoom guards do not block real drags.
@@ -4927,12 +4962,17 @@ def _drag_axis_nav(relayout, click_mode):
         relayout, ignore_guard=not protect, y_auto=y_auto
     ):
         return no_update
+    # Pan: never live-patch axes (fights the gesture). Keep uirevision stable
+    # (bump_x_gen=False) so the deferred data rebuild does not reset the camera.
+    # Idle debounce so continuous drags finish before high-res refresh.
     return _make_axis_cmd(
         "",
         apply_x=False,
         touch_y=y_auto,
+        live_axes=False,
+        bump_x_gen=not is_pan,
         guard_seconds=0.5,
-        rebuild_ms=80 if click_mode in ("pan", "pan_keep_y") else 300,
+        rebuild_ms=250 if is_pan else 300,
     )
 
 
@@ -4957,7 +4997,11 @@ def _rebuild_after_axis(trigger, click_mode):
     list_val = (
         None if (cleared and state.get("highlight_id") is None) else no_update
     )
-    return _build_graph(click_mode or "zoom"), no_update, list_val
+    mode = click_mode or "zoom"
+    # Pan keeps layout.uirevision stable (bump_x_gen=False in axis-cmd) so
+    # Dash/Plotly.react refreshes high-res traces without resetting the camera.
+    # Clientside must not re-apply meta.zoom_x / Plots.resize in pan mode.
+    return _build_graph(mode), no_update, list_val
 
 
 app.clientside_callback(
@@ -5026,11 +5070,10 @@ app.clientside_callback(
         var hasYRate = cmd.y_rate && cmd.y_rate.length === 2;
         var hasYScore = cmd.y_score && cmd.y_score.length === 2;
         var touchY = (cmd.touch_y !== false);
-        if (!hasX && !touchY) {
-            // Still allow rebuild-only commands (pan with Y fixed).
-        } else if (!hasX && !hasY && !hasYRate && !hasYScore && cmd.y !== null && touchY) {
-            return window.dash_clientside.no_update;
-        }
+        // Pan drag-end: skip live axis patches — they yank X back before rebuild.
+        var liveAxes = (cmd.live_axes !== false);
+        // Always allow rebuild-only cmds (pan high-res refresh). Do not early-return
+        // when Y bounds are missing — that skipped pan refine entirely.
         var host = document.getElementById('graph');
         var gd = host && host.querySelector('.js-plotly-plot');
         if (!gd || !window.Plotly) {
@@ -5040,16 +5083,16 @@ app.clientside_callback(
             window.__ignoreDataXClampUntil = Date.now() + 4000;
         }
         var patch = {};
-        if (hasX) {
+        if (liveAxes && hasX) {
             patch['xaxis.autorange'] = false;
             patch['xaxis.range'] = [cmd.x[0], cmd.x[1]];
-            // Shared time axis across 2–3 subplot rows.
-            patch['xaxis2.autorange'] = false;
-            patch['xaxis2.range'] = [cmd.x[0], cmd.x[1]];
-            patch['xaxis3.autorange'] = false;
-            patch['xaxis3.range'] = [cmd.x[0], cmd.x[1]];
+            // Shared time axis across score / metrics / labels (± rate).
+            ['xaxis2', 'xaxis3', 'xaxis4'].forEach(function(ax) {
+                patch[ax + '.autorange'] = false;
+                patch[ax + '.range'] = [cmd.x[0], cmd.x[1]];
+            });
         }
-        if (touchY) {
+        if (liveAxes && touchY) {
             var fl = gd._fullLayout || {};
             var hasY3 = !!fl.yaxis3;
             var hasY2 = !!fl.yaxis2;
@@ -5061,10 +5104,27 @@ app.clientside_callback(
             var metricsKey = 'yaxis';
             var rateKey = null;
             var scoreKey = null;
+            // Layouts (core): score + metrics + labels → y / y2 / y3
+            // Legacy rate: score + rate + metrics → y / y2 / y3
+            // Labels track is never Y-auto'd from metrics commands.
             if (hasY3) {
                 scoreKey = 'yaxis';
-                rateKey = 'yaxis2';
-                metricsKey = 'yaxis3';
+                var y2title = '';
+                var y3title = '';
+                try {
+                    y2title = (fl.yaxis2 && fl.yaxis2.title && fl.yaxis2.title.text) || '';
+                    y3title = (fl.yaxis3 && fl.yaxis3.title && fl.yaxis3.title.text) || '';
+                } catch (err) {}
+                if (/label/i.test(String(y3title))) {
+                    metricsKey = 'yaxis2';
+                    rateKey = null;
+                } else if (/rate/i.test(String(y2title))) {
+                    rateKey = 'yaxis2';
+                    metricsKey = 'yaxis3';
+                } else {
+                    metricsKey = 'yaxis2';
+                    rateKey = null;
+                }
             } else if (hasY2) {
                 var y1title = '';
                 try {
@@ -5107,20 +5167,30 @@ app.clientside_callback(
                 }
             }
         }
-        var apply = function() {
+        var scheduleRebuild = function() {
             if (window.__rebuildTimer) {
                 clearTimeout(window.__rebuildTimer);
                 window.__rebuildTimer = null;
             }
             var delay = (cmd.rebuild_ms != null) ? cmd.rebuild_ms : 300;
             // rebuild_ms < 0 → Y-only / no remount (keeps plot height & x-axis put).
-            if (delay >= 0) {
-                window.__rebuildTimer = setTimeout(function() {
-                    window.dash_clientside.set_props('rebuild-trigger', {
-                        data: {seq: cmd.seq, t: Date.now()}
-                    });
-                }, delay);
-            }
+            if (delay < 0) return;
+            var seq = cmd.seq;
+            var fire = function() {
+                window.__rebuildTimer = null;
+                // Another pan started — wait until the pointer is up again.
+                if (window.__graphPointerDown) {
+                    window.__rebuildTimer = setTimeout(fire, 120);
+                    return;
+                }
+                window.dash_clientside.set_props('rebuild-trigger', {
+                    data: {seq: seq, t: Date.now()}
+                });
+            };
+            window.__rebuildTimer = setTimeout(fire, delay);
+        };
+        var apply = function() {
+            scheduleRebuild();
             if (cmd.status) {
                 window.dash_clientside.set_props('status', {children: cmd.status});
             }
@@ -5156,6 +5226,112 @@ app.clientside_callback(
     """,
     Output("view-range", "data"),
     Input("graph", "relayoutData"),
+)
+
+
+app.clientside_callback(
+    """
+    function(payload) {
+        // Silent pan rebuild: refresh traces without Dash graph.figure (no snap).
+        if (!payload || !window.Plotly) {
+            return window.dash_clientside.no_update;
+        }
+        var fig = payload.figure || payload;
+        if (!fig || !fig.data) {
+            return window.dash_clientside.no_update;
+        }
+        var host = document.getElementById('graph');
+        var gd = host && host.querySelector('.js-plotly-plot');
+        if (!gd) return window.dash_clientside.no_update;
+
+        window.__applyPanFigureSilent = function(figIn) {
+            var host2 = document.getElementById('graph');
+            var gd2 = host2 && host2.querySelector('.js-plotly-plot');
+            if (!figIn || !figIn.data || !gd2 || !window.Plotly) return;
+            if (window.__graphPointerDown) {
+                window.__queuedPanFigure = figIn;
+                return;
+            }
+            var liveX = null;
+            try {
+                var fl = gd2._fullLayout || {};
+                var xr = (fl.xaxis && fl.xaxis.range)
+                    || (fl.xaxis2 && fl.xaxis2.range)
+                    || (fl.xaxis3 && fl.xaxis3.range);
+                if (xr && xr.length === 2) liveX = [xr[0], xr[1]];
+            } catch (err) {}
+            var hostH = (host2 && host2.clientHeight) || 420;
+            var wantH = Math.max(hostH > 40 ? hostH : 420, 260);
+            var layout = Object.assign({}, figIn.layout || {}, {
+                autosize: true,
+                height: wantH
+            });
+            // Keep the live camera; bump datarevision so Scattergl replaces buffers.
+            if (gd2.layout && gd2.layout.uirevision != null) {
+                layout.uirevision = gd2.layout.uirevision;
+            }
+            layout.datarevision = String(
+                (layout.datarevision != null ? layout.datarevision : 'pan')
+                + ':' + Date.now()
+            );
+            if (liveX) {
+                layout.xaxis = Object.assign({}, layout.xaxis || {}, {
+                    range: liveX, autorange: false
+                });
+                ['xaxis2', 'xaxis3', 'xaxis4'].forEach(function(ax) {
+                    if (layout[ax] || (gd2.layout && gd2.layout[ax])) {
+                        layout[ax] = Object.assign({}, layout[ax] || {}, {
+                            range: liveX, autorange: false
+                        });
+                    }
+                });
+                if (layout.meta) {
+                    layout.meta = Object.assign({}, layout.meta, {zoom_x: liveX});
+                }
+            }
+            if (window.__withCachedHoverMeta) {
+                layout = window.__withCachedHoverMeta(layout);
+            }
+            var cfg = gd2.config || {responsive: true, displayModeBar: true};
+            window.__clampingDataX = true;
+            window.__ignoreDataXClampUntil = Date.now() + 1500;
+            // Y from the rebuilt figure (Y 자동); never touch X after react.
+            var yPatch = {};
+            ['yaxis', 'yaxis2', 'yaxis3', 'yaxis4'].forEach(function(key) {
+                var ax = layout[key];
+                if (!ax || !ax.range || ax.range.length !== 2) return;
+                if (ax.autorange) return;
+                yPatch[key + '.autorange'] = false;
+                yPatch[key + '.range'] = [ax.range[0], ax.range[1]];
+                yPatch[key + '.fixedrange'] = true;
+            });
+            window.Plotly.react(gd2, figIn.data, layout, cfg).then(function() {
+                if (Object.keys(yPatch).length) {
+                    return window.Plotly.relayout(gd2, yPatch);
+                }
+            }).finally(function() {
+                window.__clampingDataX = false;
+                if (window.__desiredDragmode !== undefined) {
+                    var cur = gd2._fullLayout && gd2._fullLayout.dragmode;
+                    if (cur !== window.__desiredDragmode) {
+                        window.Plotly.relayout(gd2, {dragmode: window.__desiredDragmode});
+                    }
+                }
+                if (window.__queuedPanFigure && !window.__graphPointerDown) {
+                    var q = window.__queuedPanFigure;
+                    window.__queuedPanFigure = null;
+                    window.__applyPanFigureSilent(q);
+                }
+            });
+        };
+
+        window.__applyPanFigureSilent(fig);
+        return {t: Date.now(), pan_apply: true};
+    }
+    """,
+    Output("axis-cmd-ack", "data", allow_duplicate=True),
+    Input("pan-plot-apply", "data"),
+    prevent_initial_call=True,
 )
 
 
@@ -5546,13 +5722,27 @@ app.clientside_callback(
                 if (!layout) return null;
                 var xr = (layout.xaxis && layout.xaxis.range)
                     || (layout.xaxis2 && layout.xaxis2.range)
-                    || (layout.xaxis3 && layout.xaxis3.range);
+                    || (layout.xaxis3 && layout.xaxis3.range)
+                    || (layout.xaxis4 && layout.xaxis4.range);
                 if (!xr) return null;
                 var view = {
                     x: [String(xr[0]), String(xr[1])]
                 };
-                // Metrics panel is the bottom subplot (yaxis3 with score, else yaxis2).
-                var yAxis = layout.yaxis3 || layout.yaxis2 || layout.yaxis;
+                // Metrics = title "value" (never the bottom Labels track).
+                var yAxis = null;
+                ['yaxis', 'yaxis2', 'yaxis3', 'yaxis4'].forEach(function(key) {
+                    var ax = layout[key];
+                    if (!ax) return;
+                    var t = '';
+                    try { t = (ax.title && ax.title.text) || ''; } catch (err) {}
+                    if (/value/i.test(String(t))) yAxis = ax;
+                });
+                if (!yAxis) {
+                    // Fallback: score(+rate)+metrics+labels → metrics is 2nd or 3rd.
+                    if (layout.yaxis4) yAxis = layout.yaxis3;
+                    else if (layout.yaxis3) yAxis = layout.yaxis2;
+                    else yAxis = layout.yaxis2 || layout.yaxis;
+                }
                 if (yAxis && yAxis.range) {
                     view.y = [yAxis.range[0], yAxis.range[1]];
                 }
@@ -5608,14 +5798,14 @@ app.clientside_callback(
         };
 
         window.__installSharedPanelSync = function(gd) {
-                if (!gd || gd.__sharedPanelSyncV3) return;
-                gd.__sharedPanelSyncV3 = true;
+                if (!gd || gd.__sharedPanelSyncV5) return;
+                gd.__sharedPanelSyncV5 = true;
+                var X_KEYS = ['xaxis', 'xaxis2', 'xaxis3', 'xaxis4'];
 
                 function xPairFromEvent(ed) {
                     if (!ed) return null;
-                    var keys = ['xaxis', 'xaxis2', 'xaxis3'];
-                    for (var i = 0; i < keys.length; i++) {
-                        var ax = keys[i];
+                    for (var i = 0; i < X_KEYS.length; i++) {
+                        var ax = X_KEYS[i];
                         var a = ed[ax + '.range[0]'];
                         var b = ed[ax + '.range[1]'];
                         if (a === undefined || b === undefined) {
@@ -5631,16 +5821,37 @@ app.clientside_callback(
                     return null;
                 }
 
+                function rangeMs(v) {
+                    if (v == null) return NaN;
+                    if (typeof v === 'number') return v;
+                    var t = Date.parse(v);
+                    return isNaN(t) ? NaN : t;
+                }
+
                 // Final sync only. Live plotly_relayouting + Plotly.relayout during
                 // box-zoom cancels the gesture and jumps to a bad range (flat lines).
+                // Skip while panning: matched axes already follow, and re-applying
+                // ranges on mouseup causes the visible "snap back then forward".
                 gd.on('plotly_relayout', function(ed) {
                     if (window.__syncingSharedX || window.__clampingDataX || !ed) return;
-                    if (ed['xaxis.autorange'] || ed['xaxis2.autorange'] || ed['xaxis3.autorange']) return;
+                    if (window.__graphPointerDown) return;
+                    var mode = window.__currentClickMode;
+                    if (mode === 'pan' || mode === 'pan_keep_y'
+                        || window.__desiredDragmode === 'pan') return;
+                    if (ed['xaxis.autorange'] || ed['xaxis2.autorange']
+                        || ed['xaxis3.autorange'] || ed['xaxis4.autorange']) return;
                     var pair = xPairFromEvent(ed);
                     if (!pair) return;
+                    var fl = gd._fullLayout || {};
                     var patch = {};
-                    ['xaxis', 'xaxis2', 'xaxis3'].forEach(function(ax) {
+                    X_KEYS.forEach(function(ax) {
                         if (ax === pair.from) return;
+                        var cur = fl[ax] && fl[ax].range;
+                        if (cur && cur.length >= 2) {
+                            var d0 = Math.abs(rangeMs(cur[0]) - rangeMs(pair.a));
+                            var d1 = Math.abs(rangeMs(cur[1]) - rangeMs(pair.b));
+                            if (d0 < 1 && d1 < 1) return;
+                        }
                         patch[ax + '.autorange'] = false;
                         patch[ax + '.range'] = [pair.a, pair.b];
                     });
@@ -6227,9 +6438,12 @@ app.clientside_callback(
                         Date.now() < window.__ignoreDataXClampUntil) {
                         return;
                     }
+                    // Don't fight an in-progress pan gesture.
+                    if (window.__graphPointerDown) return;
                     // Never expand a deliberate zoom back via autorange echoes.
                     if (eventData['xaxis.autorange'] || eventData['xaxis2.autorange']
-                        || eventData['xaxis3.autorange']) return;
+                        || eventData['xaxis3.autorange']
+                        || eventData['xaxis4.autorange']) return;
                     var meta = (gd.layout && gd.layout.meta) || {};
                     var bounds = meta.data_x;
                     if (!bounds || bounds.length < 2) return;
@@ -6238,7 +6452,7 @@ app.clientside_callback(
                     if (!(tmax > tmin)) return;
 
                     var x0, x1;
-                    var axKeys = ['xaxis', 'xaxis2', 'xaxis3'];
+                    var axKeys = ['xaxis', 'xaxis2', 'xaxis3', 'xaxis4'];
                     for (var ai = 0; ai < axKeys.length; ai++) {
                         var ax = axKeys[ai];
                         x0 = eventData[ax + '.range[0]'];
@@ -6293,34 +6507,68 @@ app.clientside_callback(
                     var out0 = shiftRaw(x0, na - a);
                     var out1 = shiftRaw(x1, nb - b);
                     window.__clampingDataX = true;
-                    window.Plotly.relayout(gd, {
-                        'xaxis.autorange': false,
-                        'xaxis.range': [out0, out1],
-                        'xaxis2.autorange': false,
-                        'xaxis2.range': [out0, out1],
-                        'xaxis3.autorange': false,
-                        'xaxis3.range': [out0, out1]
-                    }).finally(function() {
+                    var clampPatch = {};
+                    axKeys.forEach(function(ax) {
+                        clampPatch[ax + '.autorange'] = false;
+                        clampPatch[ax + '.range'] = [out0, out1];
+                    });
+                    window.Plotly.relayout(gd, clampPatch).finally(function() {
                         window.__clampingDataX = false;
                     });
                 });
             };
         }
 
-        // Empty-area / band clicks → snapped time. Always redefine; rebind with V5.
+        // Empty-area / band clicks → snapped time. Always redefine; rebind with V6.
         window.__installPlotClickHost = function() {
                 var host = document.getElementById('graph');
                 if (!host) return;
-                if (host.__plotClickHostBoundV5) return;
-                host.__plotClickHostBoundV5 = true;
+                if (host.__plotClickHostBoundV6) return;
+                host.__plotClickHostBoundV6 = true;
                 var lastEmit = {x: null, t: 0};
                 var ptrDown = null;
 
-                function emitSnap(clientX, clientY) {
+                function labelTrackRect(gd) {
+                    try {
+                        var fl = gd._fullLayout;
+                        var plots = fl && fl._plots;
+                        if (!plots) return null;
+                        var keys = Object.keys(plots);
+                        var best = null;
+                        for (var i = 0; i < keys.length; i++) {
+                            var p = plots[keys[i]];
+                            if (!p || !p.plot || !p.plot.getBoundingClientRect) continue;
+                            var ya = p.yaxis;
+                            var title = '';
+                            try {
+                                title = (ya && ya.title && ya.title.text) || '';
+                            } catch (err) {}
+                            var r = p.plot.getBoundingClientRect();
+                            if (!(r.width > 2 && r.height > 2)) continue;
+                            if (/label/i.test(String(title))) return r;
+                            // Fallback: bottom-most subplot.
+                            if (!best || r.top > best.top) best = r;
+                        }
+                        return best;
+                    } catch (err2) {
+                        return null;
+                    }
+                }
+
+                function overLabelTrack(gd, clientX, clientY) {
+                    var r = labelTrackRect(gd);
+                    if (!r) return false;
+                    return clientX >= r.left && clientX <= r.right
+                        && clientY >= r.top && clientY <= r.bottom;
+                }
+
+                function emitSnap(clientX, clientY, opts) {
+                    opts = opts || {};
                     var gd = host.querySelector('.js-plotly-plot');
                     if (!gd || !gd._fullLayout || !window.__plotPlaceUtils) return false;
                     var plot = window.__plotPlaceUtils(gd);
-                    if (!plot.inPlotArea(clientX, clientY)) return false;
+                    var onLabels = overLabelTrack(gd, clientX, clientY);
+                    if (!onLabels && !plot.inPlotArea(clientX, clientY)) return false;
                     var xVal = plot.snapClientX(clientX);
                     if (xVal == null) return false;
                     var now = Date.now();
@@ -6328,14 +6576,23 @@ app.clientside_callback(
                     lastEmit = {x: xVal, t: now};
                     if (!window.dash_clientside || !window.dash_clientside.set_props) return false;
                     window.dash_clientside.set_props('shape-click-event', {
-                        data: {x: xVal, sequence: now}
+                        data: {
+                            x: xVal,
+                            sequence: now,
+                            label_track: !!onLabels || !!opts.labelTrack
+                        }
                     });
                     return true;
                 }
 
                 host.addEventListener('pointerdown', function(ev) {
                     if (ev.button !== 0) return;
-                    ptrDown = {x: ev.clientX, y: ev.clientY};
+                    var gd0 = host.querySelector('.js-plotly-plot');
+                    ptrDown = {
+                        x: ev.clientX,
+                        y: ev.clientY,
+                        labelTrack: !!(gd0 && overLabelTrack(gd0, ev.clientX, ev.clientY))
+                    };
                 }, true);
 
                 host.addEventListener('click', function(ev) {
@@ -6361,7 +6618,7 @@ app.clientside_callback(
                 }, true);
 
                 // Short clicks: select labels even when Plotly zoom/pan swallows click.
-                // Also covers 값 탐색 WebGL score-panel picks.
+                // Labels track: allow slightly larger movement (thin strip + pan mode).
                 host.addEventListener('pointerup', function(ev) {
                     if (ev.button !== 0) return;
                     if (window.__edgeDragging) return;
@@ -6374,13 +6631,46 @@ app.clientside_callback(
                     var mode = window.__currentClickMode;
                     // Placement modes use click (empty) + clickData (traces).
                     if (mode === 'label_range' || mode === 'label_point') return;
+                    var gd1 = host.querySelector('.js-plotly-plot');
+                    var onLabels = (down && down.labelTrack)
+                        || (gd1 && overLabelTrack(gd1, ev.clientX, ev.clientY));
                     if (down) {
                         var dx = Math.abs(ev.clientX - down.x);
                         var dy = Math.abs(ev.clientY - down.y);
-                        if (dx > 6 || dy > 6) return; // pan/zoom drag
+                        var maxMove = onLabels ? 28 : 6;
+                        if (dx > maxMove || dy > maxMove) return;
                     }
-                    emitSnap(ev.clientX, ev.clientY);
+                    emitSnap(ev.clientX, ev.clientY, {labelTrack: onLabels});
                 }, true);
+            };
+
+        // Labels subplot: never pan/zoom — clicks must select anomaly bars.
+        window.__disableLabelTrackDrag = function(gd) {
+                if (!gd || !gd._fullLayout) return;
+                try {
+                    var plots = gd._fullLayout._plots || {};
+                    Object.keys(plots).forEach(function(key) {
+                        var p = plots[key];
+                        var ya = p && p.yaxis;
+                        var title = '';
+                        try {
+                            title = (ya && ya.title && ya.title.text) || '';
+                        } catch (err) {}
+                        if (!/label/i.test(String(title))) return;
+                        var nodes = gd.querySelectorAll(
+                            '.draglayer .' + key + ' .nsewdrag, .draglayer > .' + key + ' > .nsewdrag'
+                        );
+                        if (!nodes.length) {
+                            // Fallback: bottom-most nsewdrag.
+                            var all = gd.querySelectorAll('.draglayer .nsewdrag');
+                            if (all.length) nodes = [all[all.length - 1]];
+                        }
+                        for (var i = 0; i < nodes.length; i++) {
+                            nodes[i].style.pointerEvents = 'none';
+                            nodes[i].style.cursor = 'pointer';
+                        }
+                    });
+                } catch (err2) {}
             };
 
         if (!window.__installPendingRangePreview) {
@@ -6980,10 +7270,48 @@ app.clientside_callback(
                 };
             }
 
+            // Track pan/zoom pointer so deferred rebuilds wait for continuous drags.
+            // Do NOT fire rebuild on pointerup — that races plotly_relayout and
+            // briefly paints the pre-pan window before the real refine lands.
+            if (!window.__installGraphPointerGuard) {
+                window.__installGraphPointerGuard = function(root) {
+                    if (!root || root.__graphPointerGuardBound) return;
+                    root.__graphPointerGuardBound = true;
+                    var down = function(ev) {
+                        if (ev.button !== 0) return;
+                        window.__graphPointerDown = true;
+                        if (window.__rebuildTimer) {
+                            clearTimeout(window.__rebuildTimer);
+                            window.__rebuildTimer = null;
+                            window.__pendingPanRebuild = true;
+                        }
+                    };
+                    var up = function() {
+                        if (!window.__graphPointerDown) return;
+                        window.__graphPointerDown = false;
+                        // Resume a rebuild that was deferred mid-drag; axis-cmd
+                        // after relayout is preferred, this is only a fallback.
+                        if (window.__pendingPanRebuild) {
+                            window.__pendingPanRebuild = false;
+                            // Relayout → axis-cmd will schedule; if it already
+                            // ran while pointer was down, fire() retries — nothing
+                            // to do here except clear the flag.
+                        }
+                    };
+                    root.addEventListener('pointerdown', down, true);
+                    window.addEventListener('pointerup', up, true);
+                    window.addEventListener('pointercancel', up, true);
+                };
+            }
+
             function afterGraphReady() {
                 window.__clampPanToData(gd);
                 window.__installSharedPanelSync(gd);
+                window.__installGraphPointerGuard(host);
                 window.__installPlotClickHost();
+                if (window.__disableLabelTrackDrag) {
+                    window.__disableLabelTrackDrag(gd);
+                }
                 window.__installCustomEdgeEdit();
                 if (window.__installPendingRangePreview) {
                     window.__installPendingRangePreview();
@@ -7004,6 +7332,12 @@ app.clientside_callback(
                     if (cur !== window.__desiredDragmode) {
                         window.Plotly.relayout(gd, {dragmode: window.__desiredDragmode});
                     }
+                }
+                // Relayout can recreate drag nodes — re-disable Labels track.
+                if (window.__disableLabelTrackDrag) {
+                    setTimeout(function() {
+                        window.__disableLabelTrackDrag(gd);
+                    }, 0);
                 }
                 window.__inspectInFlight = false;
                 clearTimeout(window.__inspectInFlightWatchdog);
@@ -7032,23 +7366,87 @@ app.clientside_callback(
                 } else if (window.__ingestHoverMeta && layout.meta) {
                     window.__ingestHoverMeta(layout.meta);
                 }
+                var isPanMode = (
+                    window.__currentClickMode === 'pan'
+                    || window.__currentClickMode === 'pan_keep_y'
+                    || window.__desiredDragmode === 'pan'
+                );
+                // Pan refine: Dash already Plotly.react'd this figure. A second
+                // react (especially after setTimeout) briefly flashes the pre-pan
+                // traces, then the refined ones. Only sync Y; leave X/data alone.
+                if (isPanMode && !window.__graphPointerDown && !window.__edgeDragging) {
+                    try {
+                        var yOnly = {};
+                        ['yaxis', 'yaxis2', 'yaxis3', 'yaxis4'].forEach(function(key) {
+                            var ax = layout[key];
+                            if (!ax || !ax.range || ax.range.length !== 2) return;
+                            if (ax.autorange) return;
+                            yOnly[key + '.autorange'] = false;
+                            yOnly[key + '.range'] = [ax.range[0], ax.range[1]];
+                            yOnly[key + '.fixedrange'] = true;
+                        });
+                        var done = function() { afterGraphReady(); };
+                        if (Object.keys(yOnly).length) {
+                            window.__clampingDataX = true;
+                            window.Plotly.relayout(gd, yOnly).finally(function() {
+                                window.__clampingDataX = false;
+                                done();
+                            });
+                        } else {
+                            done();
+                        }
+                    } catch (errPan) {
+                        afterGraphReady();
+                    }
+                    return;
+                }
+                // While the pointer is down, keep the live camera; otherwise use
+                // the rebuilt figure's zoom_x (matches the pan that just finished).
+                var keepX = null;
+                try {
+                    if (window.__graphPointerDown) {
+                        var fl0 = gd._fullLayout || {};
+                        var xr0 = (fl0.xaxis && fl0.xaxis.range)
+                            || (fl0.xaxis2 && fl0.xaxis2.range)
+                            || (fl0.xaxis3 && fl0.xaxis3.range);
+                        if (xr0 && xr0.length === 2) keepX = [xr0[0], xr0[1]];
+                    }
+                } catch (errLive) {}
+                if (!keepX && layout.meta && layout.meta.zoom_x
+                    && layout.meta.zoom_x.length === 2) {
+                    keepX = [layout.meta.zoom_x[0], layout.meta.zoom_x[1]];
+                }
+                if (keepX) {
+                    layout = Object.assign({}, layout);
+                    layout.xaxis = Object.assign({}, layout.xaxis || {}, {
+                        range: keepX, autorange: false
+                    });
+                    ['xaxis2', 'xaxis3', 'xaxis4'].forEach(function(ax) {
+                        if (layout[ax]) {
+                            layout[ax] = Object.assign({}, layout[ax], {
+                                range: keepX, autorange: false
+                            });
+                        }
+                    });
+                    if (layout.meta) {
+                        layout.meta = Object.assign({}, layout.meta, {zoom_x: keepX});
+                    }
+                }
                 window.Plotly.react(gd, figure.data, layout, cfg).then(function() {
-                    // Re-apply server axis ranges after react. Stable/layout races
+                    // Re-apply axis ranges after react. Stable/layout races
                     // (e.g. anomaly select→줌) can leave the previous Y scale even
                     // when the figure JSON already has Y-auto bounds for the window.
                     try {
                         var patch = {};
                         var meta = layout.meta || {};
-                        var zx = meta.zoom_x;
-                        if (zx && zx.length === 2) {
-                            patch['xaxis.autorange'] = false;
-                            patch['xaxis.range'] = [zx[0], zx[1]];
-                            patch['xaxis2.autorange'] = false;
-                            patch['xaxis2.range'] = [zx[0], zx[1]];
-                            patch['xaxis3.autorange'] = false;
-                            patch['xaxis3.range'] = [zx[0], zx[1]];
+                        var zx = keepX || meta.zoom_x;
+                        if (zx && zx.length === 2 && !window.__graphPointerDown) {
+                            ['xaxis', 'xaxis2', 'xaxis3', 'xaxis4'].forEach(function(ax) {
+                                patch[ax + '.autorange'] = false;
+                                patch[ax + '.range'] = [zx[0], zx[1]];
+                            });
                         }
-                        ['yaxis', 'yaxis2', 'yaxis3'].forEach(function(key) {
+                        ['yaxis', 'yaxis2', 'yaxis3', 'yaxis4'].forEach(function(key) {
                             var ax = layout[key];
                             if (!ax || !ax.range || ax.range.length !== 2) return;
                             if (ax.autorange) return;

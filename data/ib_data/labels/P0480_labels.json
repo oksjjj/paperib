@@ -1,16 +1,15 @@
 {
   "plmn": "P0480",
   "rank": 1,
-  "updated_at": "2026-09-24T13:44:04.168303+00:00",
+  "updated_at": "2026-11-12T16:06:45.356084+00:00",
   "labels": [
     {
       "id": "acf1caca",
       "kind": "range",
       "start": "2026-05-01T13:05:00+00:00",
       "end": "2026-05-01T13:45:00+00:00",
-      "updated_at": "2026-09-24T13:41:08.551824+00:00",
+      "updated_at": "2026-11-12T16:01:37.500232+00:00",
       "reasons": [
-        "rate_degrade",
         "attempt_drop"
       ],
       "fail_metrics": [],
@@ -89,13 +88,26 @@
       "note": ""
     },
     {
+      "id": "7d5d03f8",
+      "kind": "range",
+      "start": "2026-05-07T21:30:00+00:00",
+      "end": "2026-05-07T22:30:00+00:00",
+      "updated_at": "2026-11-12T16:06:31.107555+00:00",
+      "reasons": [
+        "fail_surge"
+      ],
+      "fail_metrics": [
+        "M185"
+      ],
+      "note": ""
+    },
+    {
       "id": "254e4023",
       "kind": "range",
       "start": "2026-05-11T11:55:00+00:00",
       "end": "2026-05-11T12:30:00+00:00",
       "updated_at": "2026-09-24T12:31:52.397654+00:00",
       "reasons": [
-        "rate_degrade",
         "attempt_drop"
       ],
       "fail_metrics": [],
@@ -113,6 +125,20 @@
       "fail_metrics": [
         "M855",
         "M037"
+      ],
+      "note": ""
+    },
+    {
+      "id": "99449bca",
+      "kind": "point",
+      "start": "2026-05-12T16:05:00+00:00",
+      "end": "2026-05-12T16:05:00+00:00",
+      "updated_at": "2026-11-12T16:06:45.356036+00:00",
+      "reasons": [
+        "fail_surge"
+      ],
+      "fail_metrics": [
+        "M185"
       ],
       "note": ""
     },
@@ -219,7 +245,6 @@
       "end": "2026-06-01T17:35:00+00:00",
       "updated_at": "2026-09-24T12:30:46.911629+00:00",
       "reasons": [
-        "rate_degrade",
         "attempt_drop"
       ],
       "fail_metrics": [],
@@ -244,7 +269,6 @@
       "end": "2026-06-11T13:55:00+00:00",
       "updated_at": "2026-09-24T12:31:25.252133+00:00",
       "reasons": [
-        "rate_degrade",
         "attempt_drop"
       ],
       "fail_metrics": [],
@@ -257,7 +281,6 @@
       "end": "2026-06-14T13:35:00+00:00",
       "updated_at": "2026-09-24T12:32:21.988513+00:00",
       "reasons": [
-        "rate_degrade",
         "attempt_drop"
       ],
       "fail_metrics": [],
@@ -270,7 +293,6 @@
       "end": "2026-06-28T18:20:00+00:00",
       "updated_at": "2026-09-24T12:33:24.010597+00:00",
       "reasons": [
-        "rate_degrade",
         "attempt_drop"
       ],
       "fail_metrics": [],
@@ -283,7 +305,6 @@
       "end": "2026-06-30T05:15:00+00:00",
       "updated_at": "2026-09-24T12:34:27.672411+00:00",
       "reasons": [
-        "rate_degrade",
         "attempt_drop"
       ],
       "fail_metrics": [],
@@ -296,8 +317,43 @@
       "end": "2026-06-30T06:05:00+00:00",
       "updated_at": "2026-09-24T12:37:22.785289+00:00",
       "reasons": [
-        "rate_degrade",
         "attempt_drop"
+      ],
+      "fail_metrics": [],
+      "note": ""
+    },
+    {
+      "id": "696f967f",
+      "kind": "range",
+      "start": "2026-06-30T07:40:00+00:00",
+      "end": "2026-06-30T11:35:00+00:00",
+      "updated_at": "2026-11-12T15:50:22.462586+00:00",
+      "reasons": [
+        "attempt_drop"
+      ],
+      "fail_metrics": [],
+      "note": ""
+    },
+    {
+      "id": "52b52a78",
+      "kind": "range",
+      "start": "2026-06-30T13:05:00+00:00",
+      "end": "2026-06-30T15:10:00+00:00",
+      "updated_at": "2026-11-12T15:50:56.348444+00:00",
+      "reasons": [
+        "attempt_drop"
+      ],
+      "fail_metrics": [],
+      "note": ""
+    },
+    {
+      "id": "d6f48042",
+      "kind": "range",
+      "start": "2026-07-03T02:35:00+00:00",
+      "end": "2026-07-03T02:50:00+00:00",
+      "updated_at": "2026-11-12T15:54:20.813465+00:00",
+      "reasons": [
+        "attempt_spike"
       ],
       "fail_metrics": [],
       "note": ""
@@ -363,7 +419,6 @@
       "end": "2026-07-24T08:55:00+00:00",
       "updated_at": "2026-09-24T12:56:42.909699+00:00",
       "reasons": [
-        "rate_degrade",
         "fail_surge",
         "attempt_spike"
       ],
@@ -411,7 +466,6 @@
       "end": "2026-07-29T15:25:00+00:00",
       "updated_at": "2026-09-24T13:01:20.845277+00:00",
       "reasons": [
-        "rate_degrade",
         "attempt_drop"
       ],
       "fail_metrics": [],
@@ -424,7 +478,6 @@
       "end": "2026-08-02T13:50:00+00:00",
       "updated_at": "2026-09-24T13:05:03.781418+00:00",
       "reasons": [
-        "rate_degrade",
         "attempt_drop"
       ],
       "fail_metrics": [],
@@ -449,7 +502,6 @@
       "end": "2026-08-18T17:35:00+00:00",
       "updated_at": "2026-09-24T13:06:09.255250+00:00",
       "reasons": [
-        "rate_degrade",
         "attempt_drop"
       ],
       "fail_metrics": [],
@@ -468,32 +520,98 @@
       "note": ""
     },
     {
+      "id": "e6929930",
+      "kind": "range",
+      "start": "2026-08-27T21:30:00+00:00",
+      "end": "2026-08-27T21:45:00+00:00",
+      "updated_at": "2026-11-12T15:54:59.092312+00:00",
+      "reasons": [],
+      "fail_metrics": [],
+      "note": ""
+    },
+    {
+      "id": "e90c8b97",
+      "kind": "range",
+      "start": "2026-08-27T22:00:00+00:00",
+      "end": "2026-08-27T22:20:00+00:00",
+      "updated_at": "2026-11-12T15:57:47.512857+00:00",
+      "reasons": [
+        "attempt_drop"
+      ],
+      "fail_metrics": [],
+      "note": ""
+    },
+    {
+      "id": "76fe6742",
+      "kind": "range",
+      "start": "2026-08-27T22:30:00+00:00",
+      "end": "2026-08-27T22:45:00+00:00",
+      "updated_at": "2026-11-12T15:58:08.973964+00:00",
+      "reasons": [
+        "attempt_drop"
+      ],
+      "fail_metrics": [],
+      "note": ""
+    },
+    {
+      "id": "abc3f422",
+      "kind": "range",
+      "start": "2026-08-27T23:00:00+00:00",
+      "end": "2026-08-27T23:20:00+00:00",
+      "updated_at": "2026-11-12T15:58:16.344903+00:00",
+      "reasons": [],
+      "fail_metrics": [],
+      "note": ""
+    },
+    {
+      "id": "840a5d59",
+      "kind": "range",
+      "start": "2026-08-27T23:00:00+00:00",
+      "end": "2026-08-27T23:20:00+00:00",
+      "updated_at": "2026-11-12T15:58:29.062966+00:00",
+      "reasons": [
+        "attempt_drop"
+      ],
+      "fail_metrics": [],
+      "note": ""
+    },
+    {
+      "id": "4f86ba0a",
+      "kind": "range",
+      "start": "2026-08-27T23:40:00+00:00",
+      "end": "2026-08-28T00:30:00+00:00",
+      "updated_at": "2026-11-12T15:58:57.239430+00:00",
+      "reasons": [
+        "attempt_drop"
+      ],
+      "fail_metrics": [],
+      "note": ""
+    },
+    {
+      "id": "9c20c827",
+      "kind": "range",
+      "start": "2026-08-28T15:00:00+00:00",
+      "end": "2026-08-28T15:35:00+00:00",
+      "updated_at": "2026-11-12T15:59:46.139776+00:00",
+      "reasons": [
+        "attempt_drop"
+      ],
+      "fail_metrics": [],
+      "note": ""
+    },
+    {
       "id": "18003820",
       "kind": "range",
       "start": "2026-08-31T13:55:00+00:00",
       "end": "2026-08-31T15:15:00+00:00",
-      "updated_at": "2026-09-24T13:35:26.601477+00:00",
+      "updated_at": "2026-11-12T16:01:43.654693+00:00",
       "reasons": [
         "fail_surge"
       ],
       "fail_metrics": [
         "M855",
-        "M037",
-        "M841"
+        "M037"
       ],
-      "note": ""
-    },
-    {
-      "id": "5bab95e6",
-      "kind": "range",
-      "start": "2026-08-31T15:30:00+00:00",
-      "end": "2026-08-31T16:35:00+00:00",
-      "updated_at": "2026-09-24T13:07:12.602185+00:00",
-      "reasons": [
-        "rate_degrade",
-        "attempt_drop"
-      ],
-      "fail_metrics": [],
       "note": ""
     },
     {
@@ -517,9 +635,8 @@
       "kind": "range",
       "start": "2026-09-02T13:35:00+00:00",
       "end": "2026-09-02T15:30:00+00:00",
-      "updated_at": "2026-09-24T13:17:23.791397+00:00",
+      "updated_at": "2026-11-12T16:03:49.498487+00:00",
       "reasons": [
-        "rate_degrade",
         "fail_surge"
       ],
       "fail_metrics": [
