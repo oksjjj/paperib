@@ -1151,7 +1151,10 @@ def _zoom_to_chrono_split(which: str) -> bool:
         state["zoom_start"], state["zoom_end"] = data_time_bounds(df)
         state["x_full_view"] = True
         state["label_range_anchor"] = None
+        state.pop("_offscreen_cleared", None)
         _reset_y()
+        state["x_gen"] = int(state.get("x_gen") or 0) + 1
+        state["_force_ui_rev"] = time.time()
         return True
     bounds = chrono_split_bounds(df, state.get("predictions"))
     if not bounds:
@@ -1169,6 +1172,9 @@ def _zoom_to_chrono_split(which: str) -> bool:
     state["label_range_anchor"] = None
     state.pop("_offscreen_cleared", None)
     _reset_y()
+    # Hard figure replace needs a new uirevision; soft axis-cmd alone is ignored.
+    state["x_gen"] = int(state.get("x_gen") or 0) + 1
+    state["_force_ui_rev"] = time.time()
     return True
 
 
@@ -4688,10 +4694,6 @@ def _metric_filter_changed(selected, _n_all, _n_none, click_mode):
     Input("btn-y-in", "n_clicks"),
     Input("btn-y-out", "n_clicks"),
     Input("btn-y-auto", "n_clicks"),
-    Input("btn-zoom-train", "n_clicks"),
-    Input("btn-zoom-valid", "n_clicks"),
-    Input("btn-zoom-test", "n_clicks"),
-    Input("btn-zoom-full-split", "n_clicks"),
     State("click-mode", "value"),
     State("view-range", "data"),
     prevent_initial_call=True,
@@ -4702,18 +4704,14 @@ def _axis_nav(
     n_y_in,
     n_y_out,
     n_y_auto,
-    n_train,
-    n_valid,
-    n_test,
-    n_full_split,
     click_mode,
     view_range,
 ):
     """Instant axis moves: update state only; browser relayouts, then rebuilds.
 
-    Zoom-in / zoom-out / 「전체」 replace the figure directly (see
-    ``_zoom_x_hard`` / ``_reset_zoom_hard``) so Plotly uirevision cannot
-    swallow the new time window.
+    Zoom-in / zoom-out / 「전체」 / Train·Valid·Test replace the figure directly
+    (see ``_zoom_x_hard`` / ``_reset_zoom_hard`` / ``_zoom_chrono_hard``) so
+    Plotly uirevision cannot swallow the new time window.
     """
     if state["df"] is None:
         return no_update
@@ -4746,23 +4744,42 @@ def _axis_nav(
     if prop == "btn-y-auto.n_clicks":
         _reset_y()
         return _make_axis_cmd("세로축 자동 맞춤", apply_x=False, rebuild_ms=-1)
-    if prop == "btn-zoom-train.n_clicks":
-        if not _zoom_to_chrono_split("train"):
-            return no_update
-        return _make_axis_cmd("Train 구간", rebuild_ms=80)
-    if prop == "btn-zoom-valid.n_clicks":
-        if not _zoom_to_chrono_split("valid"):
-            return no_update
-        return _make_axis_cmd("Valid 구간", rebuild_ms=80)
-    if prop == "btn-zoom-test.n_clicks":
-        if not _zoom_to_chrono_split("test"):
-            return no_update
-        return _make_axis_cmd("Test 구간", rebuild_ms=80)
-    if prop == "btn-zoom-full-split.n_clicks":
-        if not _zoom_to_chrono_split("full"):
-            return no_update
-        return _make_axis_cmd("전체 구간", rebuild_ms=80)
     return no_update
+
+
+@app.callback(
+    Output("graph", "figure", allow_duplicate=True),
+    Output("status", "children", allow_duplicate=True),
+    Input("btn-zoom-train", "n_clicks"),
+    Input("btn-zoom-valid", "n_clicks"),
+    Input("btn-zoom-test", "n_clicks"),
+    Input("btn-zoom-full-split", "n_clicks"),
+    State("click-mode", "value"),
+    prevent_initial_call=True,
+)
+def _zoom_chrono_hard(_n_train, _n_valid, _n_test, _n_full, click_mode):
+    """Train / Valid / Test / 전체(split): hard figure replace like 「전체」."""
+    if state.get("df") is None:
+        return no_update, no_update
+    prop = callback_context.triggered[0]["prop_id"] if callback_context.triggered else ""
+    which = {
+        "btn-zoom-train.n_clicks": "train",
+        "btn-zoom-valid.n_clicks": "valid",
+        "btn-zoom-test.n_clicks": "test",
+        "btn-zoom-full-split.n_clicks": "full",
+    }.get(prop)
+    if not which:
+        return no_update, no_update
+    if not _zoom_to_chrono_split(which):
+        return no_update, f"{which} 구간을 찾을 수 없습니다."
+    status = {
+        "train": "Train 구간",
+        "valid": "Valid 구간",
+        "test": "Test 구간",
+        "full": "전체 구간",
+    }.get(which, which)
+    _arm_zoom_guard(4.0)
+    return _build_graph(click_mode or "zoom"), status
 
 
 @app.callback(
