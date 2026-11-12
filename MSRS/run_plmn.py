@@ -570,7 +570,7 @@ def write_prediction(
         "threshold": float(threshold),
         "threshold_method": "train_percentile",
         "feature_columns": cols,
-        "feature_mode": "all_raw",
+        "feature_mode": "core",
         "scales": list(cfg.scales),
         "topk_ratio": cfg.topk_ratio,
         "topk_features": int(k_features),

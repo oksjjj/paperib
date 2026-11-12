@@ -31,7 +31,7 @@ DEFAULT_VALID_RATIO = 0.2
 
 
 def feature_columns(df: pd.DataFrame) -> list[str]:
-    """All raw counters (no rate overlays)."""
+    """Paper core counters (``metric_columns``); rates are never included."""
     return [c for c in metric_columns(df) if not is_rate_metric(c)]
 
 

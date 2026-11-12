@@ -51,6 +51,24 @@ PAPER_PLMNS: tuple[str, ...] = (
 )
 PAPER_PLMN_SET: frozenset[str] = frozenset(PAPER_PLMNS)
 
+# Expert core counters for visualization + model training (exclude other M*).
+# Order is the canonical feature order for plots and model inputs.
+CORE_FEATURES: tuple[str, ...] = (
+    "M971",  # COMB_ATTEMPT
+    "M185",  # COMB_AUC_FAIL
+    "M855",  # COMB_AUC_TO
+    "M965",  # COMB_DNS_FAIL
+    "M162",  # COMB_DNS_TO
+    "M843",  # COMB_GW_FAIL
+    "M430",  # COMB_GW_TO
+    "M874",  # COMB_HSS_FAIL
+    "M037",  # COMB_HSS_TO
+    "M419",  # COMB_SM_FAIL
+    "M618",  # COMB_SM_TO
+)
+CORE_FEATURE_SET: frozenset[str] = frozenset(CORE_FEATURES)
+CORE_FEATURE_MODE = "core"
+
 ANOMALY_FILL = "rgba(201, 162, 39, 0.28)"
 ANOMALY_LINE = "#c9a227"
 # OmniAnomaly (and other model) predictions — distinct from human labels.
@@ -644,12 +662,23 @@ def clear_plmn_cache(plmn: str | None = None) -> int:
     return removed
 
 
-def metric_columns(df: pd.DataFrame) -> list[str]:
+def all_metric_columns(df: pd.DataFrame) -> list[str]:
+    """Every numeric series column (including rates / non-core counters)."""
     return [
         c
         for c in df.columns
         if c not in ("time", "PLMN", ANOMALY_SCORE_KEY)
     ]
+
+
+def metric_columns(df: pd.DataFrame) -> list[str]:
+    """Core expert features only, in ``CORE_FEATURES`` order.
+
+    Used by labeling UI plots and all model training/export paths that import
+    this helper — non-core counters and rate overlays are excluded.
+    """
+    present = set(df.columns)
+    return [c for c in CORE_FEATURES if c in present]
 
 
 def label_path(plmn: str) -> str:
@@ -718,15 +747,14 @@ def pred_path(plmn: str, source: str = "riad") -> str:
 
 
 def list_prediction_sources(plmn: str) -> list[dict[str, str]]:
-    """Dropdown options for available model prediction JSON files."""
+    """Dropdown options for available model prediction JSON files.
+
+    Returns an empty list when no ``{plmn}_*.json`` exports exist — the UI
+    shows a placeholder instead of a fake RiAD entry.
+    """
     options: list[dict[str, str]] = []
     if not os.path.isdir(PRED_DIR):
-        return [
-            {
-                "label": "RiAD · paperib · 전체 raw · win=100 (파일 없음)",
-                "value": "riad",
-            }
-        ]
+        return []
     prefix = f"{plmn}_"
     for name in sorted(os.listdir(PRED_DIR)):
         if not name.startswith(prefix) or not name.endswith(".json"):
@@ -874,20 +902,13 @@ def list_prediction_sources(plmn: str) -> list[dict[str, str]]:
             }
         )
     options.sort(key=lambda o: o.pop("_sort"))
-    if not options:
-        options.append(
-            {
-                "label": "RiAD · paperib · 전체 raw · win=100 (파일 없음)",
-                "value": "riad",
-            }
-        )
     return options
 
 
-def empty_pred_doc(plmn: str, source: str = "riad") -> dict[str, Any]:
+def empty_pred_doc(plmn: str, source: str = "") -> dict[str, Any]:
     return {
         "plmn": plmn,
-        "source": source,
+        "source": source or "",
         "updated_at": None,
         "threshold": None,
         "labels": [],
@@ -897,9 +918,11 @@ def empty_pred_doc(plmn: str, source: str = "riad") -> dict[str, Any]:
 def load_predictions(
     plmn: str,
     *,
-    source: str = "riad",
+    source: str = "",
 ) -> dict[str, Any]:
     """Load model prediction overlay (separate from human label JSON)."""
+    if not source:
+        return empty_pred_doc(plmn, source="")
     path = pred_path(plmn, source=source)
     if not os.path.isfile(path):
         return empty_pred_doc(plmn, source=source)
@@ -2906,15 +2929,19 @@ def ranked_hover_html(
     cols: list[str],
     *,
     cols_per_row: int = 4,
+    max_rows: int = 2,
     extra_pairs: list[tuple[str, float]] | None = None,
 ) -> str:
-    """Scrollable grid of metric values, largest first, left-to-right then wrap."""
+    """Grid of metric values, largest first; at most ``max_rows`` lines."""
     pairs = ranked_metric_pairs(row, cols, nonzero_only=True)
     if extra_pairs:
         pairs = pairs + list(extra_pairs)
         pairs.sort(key=lambda x: x[1], reverse=True)
+    total = len(pairs)
+    cap = max(1, int(cols_per_row) * max(1, int(max_rows)))
+    shown = pairs[:cap]
     items = []
-    for i, (name, val) in enumerate(pairs, start=1):
+    for i, (name, val) in enumerate(shown, start=1):
         bg = "#f6f8fa" if ((i - 1) // cols_per_row) % 2 else "#ffffff"
         if name in HOVER_RED_METRICS and val != 0:
             color, weight = "crimson", "700"
@@ -2944,10 +2971,12 @@ def ranked_hover_html(
                 ),
             )
         )
+    more = total - len(shown)
+    more_txt = f" · 상위 {len(shown)}/{total}" if more > 0 else f" · {total}개 특성"
     return (
         "<div style='font-family:sans-serif;font-size:12px;width:100%'>"
         f"<div style='font-weight:600;margin-bottom:4px'>{format_kst(ts)}"
-        f"<span style='color:#666;font-weight:400'> (KST) · {len(pairs)}개 특성 · 값 내림차순</span>"
+        f"<span style='color:#666;font-weight:400'> (KST){more_txt} · 값 내림차순</span>"
         "</div>"
         f"<div style='display:grid;grid-template-columns:repeat({cols_per_row},minmax(0,1fr));"
         f"gap:2px 10px'>" + "".join(items) + "</div>"
@@ -3519,18 +3548,33 @@ def build_figure(
     embed_ranked = bool(hover_values) and _should_embed_ranked_hover(df, start, end)
     series_hoverinfo = "skip" if embed_ranked else None
 
-    if show_score:
+    show_rate = bool(rate_cols)
+    if show_score and show_rate:
         n_rows = 3
         row_heights = [0.22, 0.28, 0.50]
         titles = ("Anomaly score", "SUCCESS / COMB rate", "Metric 값")
         rate_row, metric_row = 2, 3
         spacing = 0.08
-    else:
+    elif show_score:
+        # Core-feature mode: metrics panel ≈ one half of the old 2-row chart.
+        n_rows = 2
+        row_heights = [0.35, 0.65]
+        titles = ("Anomaly score", "Metric 값")
+        rate_row, metric_row = None, 2
+        spacing = 0.10
+    elif show_rate:
         n_rows = 2
         row_heights = [0.5, 0.5]
         titles = ("SUCCESS / COMB rate", "Metric 값")
         rate_row, metric_row = 1, 2
         spacing = 0.13
+    else:
+        # Single metrics row at the old half-panel height (see fig height below).
+        n_rows = 1
+        row_heights = [1.0]
+        titles = ("Metric 값",)
+        rate_row, metric_row = None, 1
+        spacing = 0.08
 
     fig = make_subplots(
         rows=n_rows,
@@ -3573,30 +3617,31 @@ def build_figure(
                 col=1,
             )
 
-    for col in rate_cols:
-        x, y = series.get(col, ([], []))
-        metric_name = display_metric(col)
-        rate_kw: dict[str, Any] = dict(
-            x=x,
-            y=y,
-            mode="lines",
-            name=metric_name,
-            opacity=0.72,
-            line=dict(
-                color=rate_colors.get(col, "#888"),
-                width=1,
-            ),
-            uid=col,
-        )
-        if series_hoverinfo:
-            rate_kw["hoverinfo"] = series_hoverinfo
-        else:
-            rate_kw["hovertemplate"] = (
-                f"<b>{metric_name}</b><br>"
-                "%{x|%Y년 %m월 %d일 %H:%M}<br>"
-                f"{rate_hover}"
+    if rate_row is not None:
+        for col in rate_cols:
+            x, y = series.get(col, ([], []))
+            metric_name = display_metric(col)
+            rate_kw: dict[str, Any] = dict(
+                x=x,
+                y=y,
+                mode="lines",
+                name=metric_name,
+                opacity=0.72,
+                line=dict(
+                    color=rate_colors.get(col, "#888"),
+                    width=1,
+                ),
+                uid=col,
             )
-        fig.add_trace(go.Scattergl(**rate_kw), row=rate_row, col=1)
+            if series_hoverinfo:
+                rate_kw["hoverinfo"] = series_hoverinfo
+            else:
+                rate_kw["hovertemplate"] = (
+                    f"<b>{metric_name}</b><br>"
+                    "%{x|%Y년 %m월 %d일 %H:%M}<br>"
+                    f"{rate_hover}"
+                )
+            fig.add_trace(go.Scattergl(**rate_kw), row=rate_row, col=1)
 
     for i, col in enumerate(primary_cols):
         x, y = series.get(col, ([], []))
@@ -3636,7 +3681,7 @@ def build_figure(
 
     if embed_ranked and len(view):
         # Rate panel: SUCC / COMB largest-first (full max_points sample density).
-        if rate_cols:
+        if rate_cols and rate_row is not None:
             _add_ranked_hover_anchor(
                 fig,
                 view,
@@ -3666,7 +3711,7 @@ def build_figure(
     elif len(view) and (primary_cols or rate_cols) and not hover_values:
         # Keep a non-hover hit target for click/inspect when ranked tips are off.
         hover_y_cols = primary_cols or rate_cols
-        hover_row = metric_row if primary_cols else rate_row
+        hover_row = metric_row if primary_cols else (rate_row or 1)
         idx = _hover_sample_indices(
             view,
             hover_y_cols,
@@ -3743,7 +3788,9 @@ def build_figure(
 
     fig.update_layout(
         title=title or f"{display_plmn(str(doc.get('plmn')))} anomaly labeling",
-        height=480 if show_score else 420,
+        # Old rate+metrics was height=420 at 50/50 → one row ≈ 210.
+        # Keep that metrics-panel height; add a compact score row when present.
+        height=320 if show_score else 210,
         autosize=True,
         # Ranked hover uses shared-x tips; otherwise closest (one series).
         hovermode="x" if embed_ranked else "closest",
@@ -3786,22 +3833,23 @@ def build_figure(
             col=1,
         )
 
-    fig.update_yaxes(
-        title_text="rate",
-        autorange=True,
-        fixedrange=True,
-        showgrid=True,
-        showline=True,
-        mirror=True,
-        linewidth=1.5,
-        linecolor="#5f8499",
-        gridcolor="rgba(95,132,153,0.28)",
-        zeroline=False,
-        title_font=dict(size=11, color="#3d6578"),
-        tickfont=dict(size=10, color="#3d6578"),
-        row=rate_row,
-        col=1,
-    )
+    if rate_row is not None:
+        fig.update_yaxes(
+            title_text="rate",
+            autorange=True,
+            fixedrange=True,
+            showgrid=True,
+            showline=True,
+            mirror=True,
+            linewidth=1.5,
+            linecolor="#5f8499",
+            gridcolor="rgba(95,132,153,0.28)",
+            zeroline=False,
+            title_font=dict(size=11, color="#3d6578"),
+            tickfont=dict(size=10, color="#3d6578"),
+            row=rate_row,
+            col=1,
+        )
     fig.update_yaxes(
         title_text="value",
         fixedrange=True,
@@ -3840,7 +3888,13 @@ def build_figure(
     )
     for row_i in range(1, n_rows + 1):
         kw = dict(x_axis_kwargs)
-        if row_i == 1:
+        if n_rows == 1:
+            kw["matches"] = None
+            kw["title_text"] = "시간 (KST)"
+            kw["linecolor"] = "#8a7f6e"
+            kw["tickfont"] = dict(size=10, color="#5c5346")
+            kw["title_font"] = dict(size=11, color="#5c5346")
+        elif row_i == 1:
             kw["matches"] = None
             kw["linecolor"] = "#6d28d9" if show_score else "#5f8499"
             kw["tickfont"] = dict(
@@ -3860,7 +3914,9 @@ def build_figure(
         fig.update_xaxes(**kw, row=row_i, col=1)
 
     # Panel fills first, then train|valid|test tints (same layer=below → later wins).
-    _style_panel_separation(fig, n_rows=n_rows, show_score=show_score)
+    _style_panel_separation(
+        fig, n_rows=n_rows, show_score=show_score, show_rate=show_rate
+    )
     add_split_region_overlays(fig, chrono_split_bounds(df, predictions))
     return fig
 
@@ -3870,6 +3926,7 @@ def _style_panel_separation(
     *,
     n_rows: int = 2,
     show_score: bool = False,
+    show_rate: bool = True,
 ) -> None:
     """Distinct fills / frames / subtitle chips for subplot rows."""
     domains = []
@@ -3880,6 +3937,10 @@ def _style_panel_separation(
         domains.append(dom)
     if n_rows == 3:
         defaults = [(0.72, 1.0), (0.38, 0.64), (0.0, 0.30)]
+    elif n_rows == 1:
+        defaults = [(0.0, 1.0)]
+    elif show_score and not show_rate:
+        defaults = [(0.62, 1.0), (0.0, 0.54)]
     else:
         defaults = [(0.565, 1.0), (0.0, 0.435)]
     for i, dom in enumerate(domains):
@@ -3891,15 +3952,24 @@ def _style_panel_separation(
     x_dom = getattr(x_axis, "domain", None) or (0.0, 1.0)
 
     styles = []
-    if show_score and n_rows == 3:
+    if show_score and show_rate and n_rows == 3:
         styles = [
             ("#efe7ff", "#6d28d9", "panel_bg_score"),
             ("#e7f1f7", "#5f8499", "panel_bg_rate"),
             ("#f7f5f1", "#8a7f6e", "panel_bg_metrics"),
         ]
-    else:
+    elif show_score and n_rows == 2:
+        styles = [
+            ("#efe7ff", "#6d28d9", "panel_bg_score"),
+            ("#f7f5f1", "#8a7f6e", "panel_bg_metrics"),
+        ]
+    elif show_rate and n_rows == 2:
         styles = [
             ("#e7f1f7", "#5f8499", "panel_bg_rate"),
+            ("#f7f5f1", "#8a7f6e", "panel_bg_metrics"),
+        ]
+    else:
+        styles = [
             ("#f7f5f1", "#8a7f6e", "panel_bg_metrics"),
         ]
 

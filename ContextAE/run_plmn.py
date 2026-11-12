@@ -971,7 +971,7 @@ def write_prediction(
         "timezone": cfg.timezone,
         "n_context_models": int(segment_info["selected_k"]),
         "feature_columns": cols,
-        "feature_mode": "all_raw",
+        "feature_mode": "core",
         "n_scores": int(np.isfinite(scores).sum()),
         "n_pred_points": int(pred.sum()),
         "n_pred_segments": len(labels),

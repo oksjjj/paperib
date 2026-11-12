@@ -101,7 +101,7 @@ def write_roca_prediction(
         "n_pred_points": int(pred.sum()),
         "n_pred_segments": len(labels),
         "feature_columns": list(feature_columns),
-        "feature_mode": "all",
+        "feature_mode": "core",
         "split": split,
         "labels": labels,
         "score_series": {

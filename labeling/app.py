@@ -69,10 +69,7 @@ from tool import (  # noqa: E402
     overlay_metrics_available,
     pred_line,
     pred_chrono_split_tag,
-    rate_metrics_available,
-    A_RATE_KEY,
     M971_COL,
-    S_RATE_KEY,
     parse_time,
     pending_anchor_shape,
     pending_range_fill_shape,
@@ -136,6 +133,9 @@ state: dict = {
     "highlight_shape_idxs": None,
     "label_rev": 0,
     "place_rev": 0,
+    # Bump when highlight overlays change — stable uirevision otherwise keeps
+    # the previous (unselected) shapes after a click/list select.
+    "hi_rev": 0,
     "confirm_action": None,
     "value_cursor_pos": None,
     "hover_pos": None,
@@ -143,7 +143,7 @@ state: dict = {
     "show_anomalies": True,
     "show_model_preds": True,
     "predictions": None,
-    "pred_source": "riad",
+    "pred_source": None,
     "selected_pred_id": None,
     "threshold_mode": "pot",  # "pot" | "best_f1_point" | "best_f1" (PA)
     "metrics_eval_split": "valid",  # "valid" | "test"
@@ -167,7 +167,7 @@ def _empty_figure():
 
     fig = go.Figure()
     fig.update_layout(
-        height=420,
+        height=210,
         autosize=True,
         margin=dict(l=40, r=20, t=40, b=40),
         annotations=[
@@ -381,17 +381,17 @@ def _pred_by_id(pred_id: str | None) -> dict | None:
 def _model_pred_source_options():
     plmn = state.get("plmn")
     if not plmn:
-        return [{"label": "전체 메트릭", "value": "riad"}]
+        return []
     return list_prediction_sources(plmn)
 
 
-def _default_pred_source(options: list[dict] | None = None) -> str:
+def _default_pred_source(options: list[dict] | None = None) -> str | None:
     opts = options if options is not None else _model_pred_source_options()
-    values = [o["value"] for o in opts]
-    cur = state.get("pred_source") or "riad"
-    if cur in values:
+    values = [o["value"] for o in opts if o.get("value")]
+    cur = state.get("pred_source")
+    if cur and cur in values:
         return cur
-    return values[0] if values else "riad"
+    return values[0] if values else None
 
 
 def _fmt_prf(
@@ -885,16 +885,18 @@ def _pred_uses_feature_subset(preds: dict | None = None) -> bool:
     cols = list(preds.get("feature_columns") or [])
     mode = preds.get("feature_mode")
     source = str(preds.get("source") or state.get("pred_source") or "")
+    # "all" / "core" / "all_raw" = the active paper feature universe (now core).
     return mode in ("comb", "comb_share", "selected") or (
-        mode not in ("all",) and source not in ("", "omnianomaly") and bool(cols)
+        mode not in ("all", "core", "all_raw", None)
+        and source not in ("", "omnianomaly")
+        and bool(cols)
     )
 
 
 def _comb_ui_metric_columns(preds: dict) -> list[str]:
-    """Same checklist/plot set for comb and comb_share: raw counters + rates."""
+    """Checklist/plot set for comb / comb_share: raw counters only (no rates)."""
     raw = list(preds.get("comb_raw_counters") or [])
     if not raw:
-        # Fallback: drop rates from feature_columns, then re-append UI rates.
         raw = [
             c
             for c in (preds.get("feature_columns") or [])
@@ -902,7 +904,7 @@ def _comb_ui_metric_columns(preds: dict) -> list[str]:
         ]
     cols: list[str] = []
     seen: set[str] = set()
-    for c in [*raw, S_RATE_KEY, A_RATE_KEY]:
+    for c in raw:
         if c in seen:
             continue
         seen.add(c)
@@ -1051,6 +1053,7 @@ def _select_or_toggle_label_hit(hit: dict, click_mode: str):
             )
         state["highlight_id"] = None
         state.pop("_offscreen_cleared", None)
+        _bump_hi_rev()
         _store_draft_reasons([], [], "")
         return (
             _build_graph(click_mode),
@@ -1063,6 +1066,7 @@ def _select_or_toggle_label_hit(hit: dict, click_mode: str):
         )
     state["highlight_id"] = hit["id"]
     state.pop("_offscreen_cleared", None)
+    _bump_hi_rev()
     # Block stale plotly_relayout echoes from undoing this highlight.
     _arm_select_guard()
     if click_mode == "edit_range":
@@ -1105,6 +1109,7 @@ def _zoom_to_label_item(item: dict) -> None:
     state["highlight_id"] = item["id"]
     state["x_full_view"] = False
     state.pop("_offscreen_cleared", None)
+    _bump_hi_rev()
     _reset_y()
     # Same as 줌인/전체: bump layout uirevision so Plotly.react accepts the
     # new x window and the Y-auto ranges from `_reset_y` (stable uirevision
@@ -1219,6 +1224,11 @@ def _bump_place_rev() -> None:
     state["place_rev"] = int(state.get("place_rev") or 0) + 1
 
 
+def _bump_hi_rev() -> None:
+    """Bump when label/model highlight overlays change (Plotly uirevision)."""
+    state["hi_rev"] = int(state.get("hi_rev") or 0) + 1
+
+
 def _shape_name(shape) -> str | None:
     if shape is None:
         return None
@@ -1317,11 +1327,24 @@ def _score_subplot_active() -> bool:
     return _visible_score_y_bounds() is not None
 
 
+def _rate_subplot_active() -> bool:
+    """Match ``build_figure``: rate row only when SUCCESS/ACCEPT rates are plotted."""
+    return _visible_rate_y_bounds() is not None
+
+
 def _metric_axis_row() -> int:
-    return 3 if _score_subplot_active() else 2
+    score = _score_subplot_active()
+    rate = _rate_subplot_active()
+    if score and rate:
+        return 3
+    if score or rate:
+        return 2
+    return 1
 
 
-def _rate_axis_row() -> int:
+def _rate_axis_row() -> int | None:
+    if not _rate_subplot_active():
+        return None
     return 2 if _score_subplot_active() else 1
 
 
@@ -1373,23 +1396,29 @@ def _build_graph(click_mode: str):
     label_rev = int(state.get("label_rev") or 0)
     place_rev = int(state.get("place_rev") or 0)
     cursor_rev = int(state.get("cursor_rev") or 0)
+    hi_rev = int(state.get("hi_rev") or 0)
     x_gen = int(state.get("x_gen") or 0)
     force_ui = state.pop("_force_ui_rev", None)
     force_bit = f":f{force_ui}" if force_ui is not None else ""
     fig.update_layout(
         datarevision=(
             f"{fig.layout.datarevision}:{state['fig_gen']}"
-            f":m{metric_rev}:l{label_rev}:p{place_rev}:c{cursor_rev}:x{x_gen}{force_bit}"
+            f":m{metric_rev}:l{label_rev}:p{place_rev}:c{cursor_rev}"
+            f":h{hi_rev}:x{x_gen}{force_bit}"
         ),
         # Include x_gen so Plotly accepts a new time window on rebuild.
         # 「전체」 also sets _force_ui_rev for a one-shot hard UI reset.
+        # hi_rev: click/list highlight must change uirevision or Plotly keeps
+        # the previous unselected shapes.
         uirevision=(
             f"{state.get('plmn') or 'labeling'}"
-            f":m{metric_rev}:l{label_rev}:p{place_rev}:c{cursor_rev}:x{x_gen}{force_bit}"
+            f":m{metric_rev}:l{label_rev}:p{place_rev}:c{cursor_rev}"
+            f":h{hi_rev}:x{x_gen}{force_bit}"
         ),
         # Match dcc.Graph style height so select/redraw never shrinks the plot.
         # autosize stays True so width keeps filling the host.
-        height=480 if _score_subplot_active() else 420,
+        # Match build_figure: metrics panel ≈ old half-row (210); +score → 320.
+        height=320 if _score_subplot_active() else 210,
         autosize=True,
     )
 
@@ -1439,25 +1468,26 @@ def _build_graph(click_mode: str):
                 row=1,
                 col=1,
             )
-    if rate_bounds is None:
-        fig.update_yaxes(
-            title_text="rate",
-            autorange=True,
-            fixedrange=True,
-            uirevision=f"y1:{state.get('y_gen', 0)}",
-            row=rate_row,
-            col=1,
-        )
-    else:
-        fig.update_yaxes(
-            title_text="rate",
-            range=list(rate_bounds),
-            autorange=False,
-            fixedrange=True,
-            uirevision=f"y1:{state.get('y_gen', 0)}",
-            row=rate_row,
-            col=1,
-        )
+    if rate_row is not None:
+        if rate_bounds is None:
+            fig.update_yaxes(
+                title_text="rate",
+                autorange=True,
+                fixedrange=True,
+                uirevision=f"y1:{state.get('y_gen', 0)}",
+                row=rate_row,
+                col=1,
+            )
+        else:
+            fig.update_yaxes(
+                title_text="rate",
+                range=list(rate_bounds),
+                autorange=False,
+                fixedrange=True,
+                uirevision=f"y1:{state.get('y_gen', 0)}",
+                row=rate_row,
+                col=1,
+            )
     if y_bounds is None:
         fig.update_yaxes(
             title_text="value",
@@ -2083,7 +2113,7 @@ def _hover_panel_at_row(row: pd.Series):
     if not pairs and score_block is None:
         return html.I("이 시점에 0이 아닌 특성값이 없습니다.")
     body = dcc.Markdown(
-        ranked_hover_html(row["time"], row, cols),
+        ranked_hover_html(row["time"], row, cols, max_rows=2),
         dangerously_allow_html=True,
     )
     if score_block is None:
@@ -2302,11 +2332,13 @@ def _clear_highlight_if_offscreen() -> bool:
     if item is None or z0 is None or z1 is None:
         state["highlight_id"] = None
         state["_offscreen_cleared"] = True
+        _bump_hi_rev()
         return True
     if _label_overlaps_x_window(item, z0, z1):
         return False
     state["highlight_id"] = None
     state["_offscreen_cleared"] = True
+    _bump_hi_rev()
     return True
 
 
@@ -2674,8 +2706,8 @@ def _do_load(plmn: str, click_mode: str):
     state["plmn"] = plmn
     src_opts = list_prediction_sources(plmn)
     pred_source = _default_pred_source(src_opts)
-    preds = load_predictions(plmn, source=pred_source)
-    df = ensure_score_column(df, preds, source=pred_source, plmn=plmn)
+    preds = load_predictions(plmn, source=pred_source or "")
+    df = ensure_score_column(df, preds, source=pred_source or "", plmn=plmn)
     metrics = metric_columns(df)
     tmin, tmax = data_time_bounds(df)
     mode = state.get("threshold_mode") or "pot"
@@ -2743,7 +2775,7 @@ _START_METRIC_OPTS: list = []
 _START_METRIC_VALS: list = []
 _START_MODEL_PRED_OPTS: list = []
 _START_MODEL_SRC_OPTS: list = []
-_START_MODEL_SRC_VALUE = "riad"
+_START_MODEL_SRC_VALUE = None
 _START_THR_OPTS: list = [
     {"label": "POT (논문 primary)", "value": "pot"},
     {"label": "best-F1 point (oracle)", "value": "best_f1_point"},
@@ -3076,9 +3108,9 @@ app.layout = html.Div(
                     id="model-pred-source",
                     options=_START_MODEL_SRC_OPTS,
                     value=_START_MODEL_SRC_VALUE,
-                    clearable=False,
+                    clearable=True,
                     searchable=False,
-                    placeholder="모델 · feature view 선택",
+                    placeholder="예측 파일 없음 — 학습 후 export",
                     style={"width": "min(480px, 100%)", "flex": "1 1 280px"},
                 ),
                 html.B("Threshold", style={"marginLeft": "8px", "marginRight": "6px"}),
@@ -3272,7 +3304,7 @@ app.layout = html.Div(
                 "displayModeBar": True,
                 "showTips": False,
             },
-            style={"width": "100%", "height": "480px"},
+            style={"width": "100%", "height": "320px"},
         ),
         html.Div(id="status", style={"display": "none"}),
         html.B("이 시점 특성값 (값 내림차순)"),
@@ -3282,10 +3314,11 @@ app.layout = html.Div(
                 "그래프에 커서를 올리면 이 시점의 특성값이 내림차순으로 표시됩니다."
             ),
             style={
-                "height": "240px",
-                "overflow": "auto",
+                # Header + at most 2 metric grid rows.
+                "height": "72px",
+                "overflow": "hidden",
                 "border": "1px solid #ddd",
-                "padding": "8px",
+                "padding": "6px 8px",
                 "width": "100%",
                 "boxSizing": "border-box",
             },
@@ -3356,8 +3389,9 @@ def _sync_model_pred_source(plmn):
 )
 def _switch_model_pred_source(source, click_mode):
     plmn = state.get("plmn")
-    if not plmn or not source:
+    if not plmn:
         return (no_update,) * 13
+    source = source or None
     # Skip no-op reloads (e.g. startup sync rewriting the same dropdown value).
     if (
         source == state.get("pred_source")
@@ -3366,7 +3400,7 @@ def _switch_model_pred_source(source, click_mode):
     ):
         return (no_update,) * 13
     state["pred_source"] = source
-    preds = load_predictions(plmn, source=source)
+    preds = load_predictions(plmn, source=source or "")
     state["selected_pred_id"] = None
     if state.get("df") is not None:
         state["df"] = ensure_score_column(
@@ -3618,7 +3652,10 @@ def _nav_model_pred(_n_prev, _n_next, current):
 )
 def _on_model_pred_selected(pred_id, click_mode):
     """Select model segment → zoom to it and show attribution (via list value)."""
+    prev = state.get("selected_pred_id")
     state["selected_pred_id"] = pred_id
+    if prev != pred_id:
+        _bump_hi_rev()
     if state.get("df") is None:
         return (no_update,) * 4
     item = _pred_by_id(pred_id)
@@ -3654,7 +3691,11 @@ def _on_model_pred_selected(pred_id, click_mode):
     prevent_initial_call=True,
 )
 def _pick_model_pred_on_graph(shape_click, click_data, click_mode):
-    """Click a purple model band/point → select it (shows attribution above)."""
+    """Click a purple model band/point → select it (shows attribution above).
+
+    Prefer human labels when both overlap the click — otherwise model zoom
+    steals the graph click and human selection never sticks.
+    """
     click_mode = click_mode or "zoom"
     if click_mode in ("label_range", "label_point", "edit_range"):
         return no_update
@@ -3679,6 +3720,10 @@ def _pick_model_pred_on_graph(shape_click, click_data, click_mode):
         except (ValueError, TypeError):
             return no_update
     else:
+        return no_update
+
+    # Human anomaly under the cursor owns the click when overlays include human.
+    if state.get("show_anomalies", True) and _label_at_time(ts) is not None:
         return no_update
 
     hit = _pred_at_time(ts)
@@ -4360,6 +4405,7 @@ def _main_body(
         state["highlight_id"] = None
         state["label_range_anchor"] = None
         state.pop("_offscreen_cleared", None)
+        _bump_hi_rev()
         _store_draft_reasons([], [], "")
         return (
             _build_graph(click_mode),
@@ -4398,6 +4444,7 @@ def _main_body(
             state["highlight_id"] = None
             state["label_range_anchor"] = None
             state.pop("_offscreen_cleared", None)
+            _bump_hi_rev()
             _store_draft_reasons([], [], "")
             return (
                 _build_graph(click_mode),
@@ -4412,6 +4459,7 @@ def _main_body(
         if item is None:
             state["highlight_id"] = selected_label
             state.pop("_offscreen_cleared", None)
+            _bump_hi_rev()
             _arm_select_guard()
             return (
                 _build_graph(click_mode),
@@ -4437,6 +4485,7 @@ def _main_body(
         else:
             state["highlight_id"] = item["id"]
             state.pop("_offscreen_cleared", None)
+            _bump_hi_rev()
             _arm_select_guard()
             mode = click_mode
             panel = no_update
@@ -4544,7 +4593,11 @@ def _main_body(
             placed = _place_label_click(ts, click_mode)
             return placed if placed is not None else (no_update,) * 7
 
-        # 값 탐색: empty-area clicks snap to the nearest sample (same as line clicks).
+        # Prefer anomaly selection even in 값 탐색; empty area keeps value cursor.
+        hit = _label_at_time(ts) if state.get("show_anomalies", True) else None
+        if hit is not None:
+            return _select_or_toggle_label_hit(hit, click_mode)
+
         if click_mode == "inspect":
             pos = int((state["df"]["time"] - ts).abs().to_numpy().argmin())
             selected = _select_value_pos(pos)
@@ -4561,10 +4614,7 @@ def _main_body(
                 no_update,
             )
 
-        hit = _label_at_time(ts)
-        if hit is None:
-            return (no_update,) * 7
-        return _select_or_toggle_label_hit(hit, click_mode)
+        return (no_update,) * 7
 
     if prop == "graph.relayoutData":
         # Drag zoom/pan: Y 자동 + high-res rebuild go through `_drag_axis_nav`
@@ -4588,6 +4638,11 @@ def _main_body(
             return (no_update,) * 7
         state["_last_click"] = (ts, now)
 
+        # Prefer anomaly selection even in 값 탐색; empty/trace clicks keep cursor.
+        hit = _label_at_time(ts) if state.get("show_anomalies", True) else None
+        if hit is not None and click_mode not in ("label_range", "label_point"):
+            return _select_or_toggle_label_hit(hit, click_mode)
+
         if click_mode == "inspect":
             pos = int((state["df"]["time"] - ts).abs().to_numpy().argmin())
             selected = _select_value_pos(pos)
@@ -4610,10 +4665,6 @@ def _main_body(
                 return (no_update,) * 7
             placed = _place_label_click(ts, click_mode)
             return placed if placed is not None else (no_update,) * 7
-
-        hit = _label_at_time(ts)
-        if hit is not None:
-            return _select_or_toggle_label_hit(hit, click_mode)
 
         return (no_update,) * 7
 
@@ -5000,12 +5051,33 @@ app.clientside_callback(
         }
         if (touchY) {
             var fl = gd._fullLayout || {};
-            var hasScoreRow = !!fl.yaxis3;
-            // 3-row: yaxis=score, yaxis2=rate, yaxis3=metrics
-            // 2-row: yaxis=rate, yaxis2=metrics
-            var metricsKey = hasScoreRow ? 'yaxis3' : 'yaxis2';
-            var rateKey = hasScoreRow ? 'yaxis2' : 'yaxis';
-            var scoreKey = hasScoreRow ? 'yaxis' : null;
+            var hasY3 = !!fl.yaxis3;
+            var hasY2 = !!fl.yaxis2;
+            // Layouts:
+            // 3-row: score + rate + metrics
+            // 2-row score+metrics (core features): yaxis=score, yaxis2=metrics
+            // 2-row rate+metrics: yaxis=rate, yaxis2=metrics
+            // 1-row: metrics only
+            var metricsKey = 'yaxis';
+            var rateKey = null;
+            var scoreKey = null;
+            if (hasY3) {
+                scoreKey = 'yaxis';
+                rateKey = 'yaxis2';
+                metricsKey = 'yaxis3';
+            } else if (hasY2) {
+                var y1title = '';
+                try {
+                    y1title = (fl.yaxis && fl.yaxis.title && fl.yaxis.title.text) || '';
+                } catch (err) {}
+                if (hasYScore || /score/i.test(String(y1title))) {
+                    scoreKey = 'yaxis';
+                    metricsKey = 'yaxis2';
+                } else {
+                    rateKey = 'yaxis';
+                    metricsKey = 'yaxis2';
+                }
+            }
             if (hasY) {
                 patch[metricsKey + '.autorange'] = false;
                 patch[metricsKey + '.range'] = [cmd.y[0], cmd.y[1]];
@@ -5014,13 +5086,15 @@ app.clientside_callback(
                 patch[metricsKey + '.autorange'] = true;
                 patch[metricsKey + '.fixedrange'] = true;
             }
-            if (hasYRate) {
-                patch[rateKey + '.autorange'] = false;
-                patch[rateKey + '.range'] = [cmd.y_rate[0], cmd.y_rate[1]];
-                patch[rateKey + '.fixedrange'] = true;
-            } else {
-                patch[rateKey + '.autorange'] = true;
-                patch[rateKey + '.fixedrange'] = true;
+            if (rateKey) {
+                if (hasYRate) {
+                    patch[rateKey + '.autorange'] = false;
+                    patch[rateKey + '.range'] = [cmd.y_rate[0], cmd.y_rate[1]];
+                    patch[rateKey + '.fixedrange'] = true;
+                } else {
+                    patch[rateKey + '.autorange'] = true;
+                    patch[rateKey + '.fixedrange'] = true;
+                }
             }
             if (scoreKey) {
                 if (hasYScore) {
