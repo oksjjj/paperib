@@ -1121,92 +1121,6 @@ def print_hour24_comparison(
     print("=" * 86, flush=True)
 
 
-def write_hour24_comparison(
-    *,
-    plmn: str,
-    selected_k: int,
-    selected_silhouette: float,
-    context_result: dict[str, Any],
-    hour_result: dict[str, Any],
-    eval_test: bool,
-) -> str:
-    """Save a small comparison file without duplicating full score series."""
-    context_valid = context_result["valid"]
-    hour_valid = hour_result["valid"]
-
-    keys = [
-        "vus_pr",
-        "pr_auc",
-        "r_auc_pr",
-        "event_f1",
-        "event_precision",
-        "event_recall",
-        "n_gt_events",
-        "n_pred_events",
-        "n_hit_gt",
-        "precision",
-        "recall",
-        "f1",
-        "tp",
-        "fp",
-        "fn",
-        "false_alarms_per_day",
-        "n_false_alarm_events",
-        "n_detected_events",
-        "n_missed_events",
-    ]
-
-    valid_delta = {
-        key: _metric_delta(context_valid, hour_valid, key)
-        for key in keys
-        if isinstance(context_valid.get(key), (int, float))
-        and isinstance(hour_valid.get(key), (int, float))
-    }
-
-    payload: dict[str, Any] = {
-        "plmn": plmn,
-        "updated_at": datetime.now(timezone.utc).isoformat(),
-        "comparison": "silhouette_selected_contiguous_context_vs_fixed_24_hour",
-        "selected_k": int(selected_k),
-        "selected_silhouette": float(selected_silhouette),
-        "same_hyperparameters": True,
-        "train_labels_used": False,
-        "valid": {
-            "adaptive_context": context_valid,
-            "fixed_hour24": hour_valid,
-            "delta_adaptive_minus_hour24": valid_delta,
-        },
-        "paths": {
-            "adaptive_context": context_result.get("valid_path"),
-            "fixed_hour24": hour_result.get("valid_path"),
-        },
-    }
-
-    if eval_test and "test" in context_result and "test" in hour_result:
-        context_test = context_result["test"]
-        hour_test = hour_result["test"]
-        payload["test"] = {
-            "adaptive_context": context_test,
-            "fixed_hour24": hour_test,
-            "delta_adaptive_minus_hour24": {
-                key: _metric_delta(context_test, hour_test, key)
-                for key in keys
-                if isinstance(context_test.get(key), (int, float))
-                and isinstance(hour_test.get(key), (int, float))
-            },
-        }
-        payload["paths"]["adaptive_context_test"] = context_result.get("test_path")
-        payload["paths"]["fixed_hour24_test"] = hour_result.get("test_path")
-
-    PRED_DIR.mkdir(parents=True, exist_ok=True)
-    path = PRED_DIR / f"{plmn}_context_vs_hour24.json"
-    path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    return str(path)
-
-
 def run_hour24_baseline(
     *,
     plmn: str,
@@ -1500,16 +1414,6 @@ def run(
             hour_metrics=hour24_result["valid"],
         )
 
-        comparison_path = write_hour24_comparison(
-            plmn=plmn,
-            selected_k=int(segment_info["selected_k"]),
-            selected_silhouette=float(segment_info["selected_silhouette"]),
-            context_result=result,
-            hour_result=hour24_result,
-            eval_test=eval_test,
-        )
-        result["comparison_path"] = comparison_path
-        print(f"comparison saved: {comparison_path}", flush=True)
 
     return result
 
