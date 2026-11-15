@@ -1558,9 +1558,9 @@ def primary_threshold_label(
                 "note": (
                     "primary thr · train top-percentile on RoCA loss_n "
                     "(higher = more anomalous). "
-                    "Paper primary metric = VUS-PR (PA-F1 제외)"
+                    "Validation evaluation with train-score percentile threshold."
                 ),
-                "heading": "RoCA metrics — VUS-PR / Event-F1 / operational",
+                "heading": "RoCA metrics — Event-F1 / Point P-R-F1 / operational",
                 "overlay": "percentile",
             }
         return {
