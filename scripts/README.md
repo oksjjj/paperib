@@ -1,6 +1,6 @@
 # scripts/
 
-Repo 루트 공용 스크립트 (OmniAnomaly / AnomalyTransformer).
+Repo 루트 공용 데이터 전처리·평가·시각화 스크립트.
 
 ```bash
 # from paperib root
@@ -15,4 +15,3 @@ Repo 루트 공용 스크립트 (OmniAnomaly / AnomalyTransformer).
 .venv/bin/python scripts/viz_gt_anomalies.py --dataset machine-1-1 --gt_only
 ```
 
-학습은 여전히 `OmniAnomaly/main.py` 에서 실행합니다.
