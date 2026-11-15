@@ -538,6 +538,11 @@ def _detection_metrics_panel(pred: dict) -> list[Any]:
         or pred.get("eval_split")
         or "valid"
     )
+    vus_pr = paper.get("vus_pr", m.get("vus_pr"))
+    vus_roc = paper.get("vus_roc", m.get("vus_roc"))
+    r_auc_pr = paper.get("r_auc_pr", m.get("r_auc_pr"))
+    auc_pr = paper.get("auc_pr", m.get("auc_pr"))
+    vus_window = paper.get("vus_window", m.get("vus_window"))
     point = dict(paper.get("point") or {})
     if not any(point.get(k) is not None for k in ("precision", "recall", "f1", "TP", "FP")):
         point = {
@@ -578,7 +583,7 @@ def _detection_metrics_panel(pred: dict) -> list[Any]:
     )
     rows: list[Any] = [
         html.Div(
-            f"{tag} metrics — Event-F1 · Point P/R/F1 · operational · {split}",
+            f"{tag} metrics — VUS · Event-F1 · Point P/R/F1 · operational · {split}",
             style={
                 "fontWeight": "700",
                 "color": accent,
@@ -586,8 +591,22 @@ def _detection_metrics_panel(pred: dict) -> list[Any]:
             },
         ),
         html.Div(
-            "Validation label과 현재 threshold 기준 탐지 결과입니다.",
+            "VUS는 threshold-independent score ranking 평가이며, 아래 Event/Point/FA 지표는 현재 threshold 기준입니다.",
             style={"fontSize": "11px", "color": "#64748b", "marginBottom": "8px"},
+        ),
+        html.Div(
+            f"VUS-PR = {_fmt_opt(vus_pr)}  "
+            f"VUS-ROC = {_fmt_opt(vus_roc)}  "
+            f"R-AUC-PR = {_fmt_opt(r_auc_pr)}  "
+            f"AUC-PR = {_fmt_opt(auc_pr)}  "
+            f"window = {vus_window if vus_window is not None else '—'}",
+            style={
+                "fontFamily": "monospace",
+                "fontSize": "12px",
+                "fontWeight": "600",
+                "marginBottom": "6px",
+                "color": "#1e293b",
+            },
         ),
         html.Div(
             "Event-F1: "
