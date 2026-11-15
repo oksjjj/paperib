@@ -1198,7 +1198,9 @@ def paper_metrics_from_flat_metrics(
     return {
         "primary_metric": "vus_pr",
         "vus_pr": m.get("vus_pr"),
+        "vus_roc": m.get("vus_roc"),
         "pr_auc": m.get("pr_auc"),
+        "auc_pr": m.get("auc_pr"),
         "vus_window": m.get("vus_window"),
         "r_auc_pr": m.get("r_auc_pr"),
         "event": {
@@ -1262,7 +1264,9 @@ def paper_metrics_from_vus_bundle(
     return {
         "primary_metric": "vus_pr",
         "vus_pr": (bundle.get("primary") or {}).get("vus_pr", vus.get("vus_pr")),
+        "vus_roc": vus.get("vus_roc"),
         "pr_auc": bundle.get("pr_auc"),
+        "auc_pr": vus.get("auc_pr"),
         "vus_window": bundle.get("vus_window", vus.get("vus_window")),
         "r_auc_pr": vus.get("r_auc_pr"),
         "event": {
