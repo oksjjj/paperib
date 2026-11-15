@@ -7,6 +7,6 @@ plotly==6.9.0
 dash==4.4.1
 nbformat>=4.2.0
 
-# RiAD backbone + VUS-PR (Paparrizos et al.)
+# PyTorch models + VUS metrics (Paparrizos et al.)
 torch>=2.0.0
 vus>=0.0.6
