@@ -511,7 +511,7 @@ def _fmt_opt(v: Any, *, digits: int = 4) -> str:
 
 
 def _model_metrics_tag(pred: dict) -> tuple[str, str]:
-    """Display name + accent color for the shared VUS metrics panel."""
+    """Display name + accent color for the detection metrics panel."""
     model = str(pred.get("model") or pred.get("source") or "model").lower()
     src = str(pred.get("source") or "").lower()
     key = model if model not in ("", "none") else src
@@ -533,8 +533,8 @@ def _model_metrics_tag(pred: dict) -> tuple[str, str]:
     return stem.upper() if len(stem) <= 6 else stem, "#334155"
 
 
-def _vus_metrics_children(pred: dict) -> list[Any]:
-    """Shared paper metrics for every model: VUS-PR · Event-F1 · P/R/F1 · FA/day · delay."""
+def _detection_metrics_panel(pred: dict) -> list[Any]:
+    """Detection metrics panel for validation-result inspection."""
     paper = pred.get("paper_metrics") or {}
     m = pred.get("metrics") or {}
     split = (
@@ -576,9 +576,6 @@ def _vus_metrics_children(pred: dict) -> list[Any]:
             "mean_detection_delay_min": m.get("mean_detection_delay_min"),
             "median_detection_delay_min": m.get("median_detection_delay_min"),
         }
-    vus = paper.get("vus_pr", m.get("vus_pr"))
-    pr_auc = paper.get("pr_auc", m.get("pr_auc"))
-    vus_win = paper.get("vus_window", m.get("vus_window"))
     tag, accent = _model_metrics_tag(pred)
     thr_method = (
         paper.get("threshold_method")
@@ -587,7 +584,7 @@ def _vus_metrics_children(pred: dict) -> list[Any]:
     )
     rows: list[Any] = [
         html.Div(
-            f"{tag} metrics — VUS-PR (primary) · Event-F1 · operational · {split}",
+            f"{tag} metrics — Event-F1 · Point P/R/F1 · operational · {split}",
             style={
                 "fontWeight": "700",
                 "color": accent,
@@ -595,21 +592,8 @@ def _vus_metrics_children(pred: dict) -> list[Any]:
             },
         ),
         html.Div(
-            "모든 모델 공통 지표. Point-Adjusted F1 / Accuracy는 주요 지표에서 제외. "
-            "AUROC는 보조만.",
+            "Validation label과 현재 threshold 기준 탐지 결과입니다.",
             style={"fontSize": "11px", "color": "#64748b", "marginBottom": "8px"},
-        ),
-        html.Div(
-            f"VUS-PR (primary) = {_fmt_opt(vus)}    "
-            f"PR-AUC = {_fmt_opt(pr_auc)}"
-            + (f"    VUS-window = {vus_win}" if vus_win is not None else ""),
-            style={
-                "fontFamily": "monospace",
-                "fontSize": "13px",
-                "fontWeight": "600",
-                "marginBottom": "6px",
-                "color": "#1e293b",
-            },
         ),
         html.Div(
             "Event-F1: "
@@ -687,7 +671,7 @@ def _detection_metrics_children() -> list[Any]:
                 "학습·export 후 다시 로드하세요."
             )
         ]
-    return _vus_metrics_children(pred)
+    return _detection_metrics_panel(pred)
 
 
 def _enrich_current_predictions(*, threshold_mode: str | None = None) -> None:
