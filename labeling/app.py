@@ -851,11 +851,9 @@ def _metrics_by_view_sum() -> list[str]:
 
     active = sorted([m for m in rest if has_nonzero(m)], key=sort_key, reverse=True)
     inactive = [m for m in rest if m not in active]
-    # Subset runs (comb): keep every universe item toggleable.
-    # Full (paperib): hide in-view zeros from the checklist (previous behavior).
-    if _pred_uses_feature_subset():
-        return pinned + active + inactive
-    return pinned + active
+    # Always keep every universe item in the checklist (zeros at the end).
+    # Hiding in-view zeros made 「전체 선택」 check only a random-looking subset.
+    return pinned + active + inactive
 
 
 def _metric_filter_ui() -> tuple[list[dict], list[str]]:
@@ -974,8 +972,6 @@ def _label_at_time(ts, *, point_tol_seconds: float | None = None):
 
 def _pred_at_time(ts, *, point_tol_seconds: float | None = None):
     """Return the best model-prediction segment at `ts` (same hit rules as labels)."""
-    if not state.get("show_model_preds", True):
-        return None
     return _interval_hit_at_time(
         _model_pred_items(),
         ts,
@@ -1312,8 +1308,6 @@ def _edit_label_shape_meta(
 def _has_score_panel() -> bool:
     """Predictions include an anomaly-score series (may still be empty in-window)."""
     preds = state.get("predictions") or {}
-    if not state.get("show_model_preds", True):
-        return False
     ss = preds.get("score_series") or {}
     return bool(ss.get("times") and ss.get("scores"))
 
@@ -1329,14 +1323,20 @@ def _rate_subplot_active() -> bool:
 
 
 def _metric_axis_row() -> int:
-    # score=1, metrics=2, labels=3 (rate inserts before metrics if present).
+    # score=1, metrics=2, human=3, model=4 (rate inserts before metrics if present).
     if _rate_subplot_active():
         return 3
     return 2
 
 
 def _label_axis_row() -> int:
+    """Human label track row."""
     return 4 if _rate_subplot_active() else 3
+
+
+def _model_label_axis_row() -> int:
+    """Model prediction track row."""
+    return 5 if _rate_subplot_active() else 4
 
 
 def _rate_axis_row() -> int | None:
@@ -1364,10 +1364,10 @@ def _build_graph(click_mode: str):
         hover_values=True,
         max_metrics=-1,
         max_points=MAX_POINTS,
-        show_labels=bool(state.get("show_anomalies", True)),
+        show_labels=True,
         highlight_id=state.get("highlight_id"),
         predictions=_predictions_for_display(),
-        show_predictions=bool(state.get("show_model_preds", True)),
+        show_predictions=True,
         highlight_pred_id=state.get("selected_pred_id"),
     )
     # Extra revision bump so Dash/Plotly never keep a previous WebGL buffer /
@@ -1502,13 +1502,23 @@ def _build_graph(click_mode: str):
             col=1,
         )
     fig.update_yaxes(
-        title_text="label",
+        title_text="human",
         range=[0, 1],
         autorange=False,
         fixedrange=True,
         showticklabels=False,
-        uirevision="label-track",
+        uirevision="human-label-track",
         row=_label_axis_row(),
+        col=1,
+    )
+    fig.update_yaxes(
+        title_text="model",
+        range=[0, 1],
+        autorange=False,
+        fixedrange=True,
+        showticklabels=False,
+        uirevision="model-label-track",
+        row=_model_label_axis_row(),
         col=1,
     )
 
@@ -1526,7 +1536,7 @@ def _build_graph(click_mode: str):
     else:
         state["_pending_fill_index"] = None
 
-    if state.get("highlight_id") and state.get("show_anomalies", True):
+    if state.get("highlight_id"):
         item = _label_by_id(state["highlight_id"])
         if item is not None:
             before = len(fig.layout.shapes or ())
@@ -2491,9 +2501,10 @@ def _relayout_x_window(relayout) -> tuple[Any, Any] | str | None:
         or relayout.get("xaxis2.autorange")
         or relayout.get("xaxis3.autorange")
         or relayout.get("xaxis4.autorange")
+        or relayout.get("xaxis5.autorange")
     ):
         return "autorange"
-    for prefix in ("xaxis", "xaxis2", "xaxis3", "xaxis4"):
+    for prefix in ("xaxis", "xaxis2", "xaxis3", "xaxis4", "xaxis5"):
         k0, k1 = f"{prefix}.range[0]", f"{prefix}.range[1]"
         if k0 in relayout and k1 in relayout:
             return relayout[k0], relayout[k1]
@@ -3096,17 +3107,6 @@ app.layout = html.Div(
                             id="btn-zoom-full-split",
                             n_clicks=0,
                             title="train+valid+test 전체 보기",
-                        ),
-                        dcc.RadioItems(
-                            id="anomaly-overlay-mode",
-                            options=[
-                                {"label": "사람+모델", "value": "both"},
-                                {"label": "사람만", "value": "human"},
-                                {"label": "모델만", "value": "model"},
-                                {"label": "숨김", "value": "hide"},
-                            ],
-                            value="both",
-                            inline=True,
                         ),
                     ],
                     style={
@@ -3726,8 +3726,6 @@ def _pick_model_pred_on_graph(shape_click, click_data, click_mode):
     click_mode = click_mode or "zoom"
     if click_mode in ("label_range", "label_point", "edit_range"):
         return no_update
-    if not state.get("show_model_preds", True):
-        return no_update
     if state.get("df") is None:
         return no_update
 
@@ -3749,9 +3747,16 @@ def _pick_model_pred_on_graph(shape_click, click_data, click_mode):
     else:
         return no_update
 
-    # Human anomaly under the cursor owns the click when overlays include human.
-    if state.get("show_anomalies", True) and _label_at_time(ts) is not None:
+    # Human track clicks are owned by `_main_body`. Model-track clicks select preds.
+    track = None
+    if prop == "shape-click-event.data" and shape_click:
+        track = shape_click.get("track")
+    if track == "human":
         return no_update
+    if track != "model":
+        # Ambiguous / metrics click: human label wins if present.
+        if _label_at_time(ts) is not None:
+            return no_update
 
     hit = _pred_at_time(ts)
     if hit is None:
@@ -3811,7 +3816,6 @@ def _zoom_model_pred(n_clicks, pred_id):
     Input("btn-prev", "n_clicks"),
     Input("btn-next", "n_clicks"),
     Input("click-mode", "value"),
-    Input("anomaly-overlay-mode", "value"),
     Input("btn-cancel-range", "n_clicks"),
     Input("btn-confirm-ok", "n_clicks"),
     Input("btn-clear-selection", "n_clicks"),
@@ -3835,7 +3839,6 @@ def _main(
     n_prev,
     n_next,
     _mode_change,
-    anomaly_overlay_mode,
     n_cancel,
     n_confirm_ok,
     n_clear_selection,
@@ -3871,7 +3874,6 @@ def _main(
         n_prev,
         n_next,
         _mode_change,
-        anomaly_overlay_mode,
         n_cancel,
         n_confirm_ok,
         n_clear_selection,
@@ -4198,7 +4200,6 @@ def _main_body(
     n_prev,
     n_next,
     _mode_change,
-    anomaly_overlay_mode,
     n_cancel,
     n_confirm_ok,
     n_clear_selection,
@@ -4215,8 +4216,9 @@ def _main_body(
 ):
     prop = callback_context.triggered[0]["prop_id"] if callback_context.triggered else ""
     click_mode = click_mode or "zoom"
-    state["show_anomalies"] = (anomaly_overlay_mode or "both") in ("both", "human")
-    state["show_model_preds"] = (anomaly_overlay_mode or "both") in ("both", "model")
+    # Human + model tracks are always drawn (separate subplot rows).
+    state["show_anomalies"] = True
+    state["show_model_preds"] = True
 
     # ----- load on startup / dropdown change / prev / next -----
     triggered_id = getattr(callback_context, "triggered_id", None)
@@ -4338,22 +4340,6 @@ def _main_body(
             _label_options(),
             state.get("highlight_id"),
             status,
-            _cancel_style(click_mode),
-            no_update,
-            no_update,
-        )
-
-    if prop == "anomaly-overlay-mode.value":
-        mode = anomaly_overlay_mode or "both"
-        state["_hover_arrays_pushed"] = False
-        state["hover_cache_seq"] = int(state.get("hover_cache_seq") or 0) + 1
-        n_model = len(_model_pred_items())
-        split_tag = _metrics_split_wanted()
-        return (
-            _build_graph(click_mode),
-            no_update,
-            no_update,
-            f"오버레이: {mode} (모델 구간 {n_model}개 · {split_tag})",
             _cancel_style(click_mode),
             no_update,
             no_update,
@@ -4620,15 +4606,18 @@ def _main_body(
             placed = _place_label_click(ts, click_mode)
             return placed if placed is not None else (no_update,) * 7
 
-        # Prefer anomaly selection even in 값 탐색; empty area keeps value cursor.
-        # Labels-track clicks: wider edge tolerance (thin strip + 5-min snap).
-        on_label_track = bool(shape_click.get("label_track"))
-        hit = None
-        if state.get("show_anomalies", True):
-            hit = _label_at_time(
-                ts,
-                point_tol_seconds=(45 * 60.0) if on_label_track else None,
-            )
+        # Prefer human anomaly selection; model-track clicks leave preds to
+        # `_pick_model_pred_on_graph`. Wider tolerance on the thin label strips.
+        track = shape_click.get("track")
+        on_label_track = track in ("human", "model") or bool(
+            shape_click.get("label_track")
+        )
+        if track == "model":
+            return (no_update,) * 7
+        hit = _label_at_time(
+            ts,
+            point_tol_seconds=(45 * 60.0) if on_label_track else None,
+        )
         if hit is not None:
             return _select_or_toggle_label_hit(hit, click_mode)
 
@@ -4673,7 +4662,7 @@ def _main_body(
         state["_last_click"] = (ts, now)
 
         # Prefer anomaly selection even in 값 탐색; empty/trace clicks keep cursor.
-        hit = _label_at_time(ts) if state.get("show_anomalies", True) else None
+        hit = _label_at_time(ts)
         if hit is not None and click_mode not in ("label_range", "label_point"):
             return _select_or_toggle_label_hit(hit, click_mode)
 
@@ -4707,6 +4696,7 @@ def _main_body(
 
 @app.callback(
     Output("graph", "figure", allow_duplicate=True),
+    Output("metric-filter", "options", allow_duplicate=True),
     Output("metric-filter", "value", allow_duplicate=True),
     Output("status", "children", allow_duplicate=True),
     Output("hover-panel", "children", allow_duplicate=True),
@@ -4719,25 +4709,33 @@ def _main_body(
 def _metric_filter_changed(selected, _n_all, _n_none, click_mode):
     """Toggle drawn metrics within the active universe. 전체 선택 → Y 자동; 전체 해제 → Y 유지."""
     if state.get("df") is None:
-        return no_update, no_update, no_update, no_update
+        return no_update, no_update, no_update, no_update, no_update
     universe = _metric_universe()
     if not universe:
-        return no_update, no_update, no_update, no_update
+        return no_update, no_update, no_update, no_update, no_update
     tid = getattr(callback_context, "triggered_id", None)
     click_mode = click_mode or "zoom"
 
     def _bump_metric_rev() -> None:
         state["metric_rev"] = int(state.get("metric_rev") or 0) + 1
 
+    def _filter_options(ordered: list[str]) -> list[dict]:
+        return [{"label": display_metric(m), "value": m} for m in ordered]
+
     if tid == "btn-metrics-all":
-        ranked = _metrics_by_view_sum()
-        state["visible_metrics"] = list(ranked)
+        # Full universe — not just non-zero-in-view (that looked like a random subset).
+        ordered = _metrics_by_view_sum()
+        # Guarantee every universe item is present even if ranking omitted one.
+        missing = [m for m in universe if m not in ordered]
+        ordered = ordered + missing
+        state["visible_metrics"] = list(universe)
         _bump_metric_rev()
         _reset_y()
         return (
             _build_graph(click_mode),
-            list(ranked),
-            f"metric 전체 선택 ({len(ranked)})",
+            _filter_options(ordered),
+            list(universe),
+            f"metric 전체 선택 ({len(universe)})",
             _refresh_hover_panel(),
         )
     if tid == "btn-metrics-none":
@@ -4748,6 +4746,7 @@ def _metric_filter_changed(selected, _n_all, _n_none, click_mode):
         _bump_metric_rev()
         return (
             _build_graph(click_mode),
+            no_update,
             [],
             "metric 전체 해제 (Y축 유지)",
             _refresh_hover_panel(),
@@ -4756,18 +4755,18 @@ def _metric_filter_changed(selected, _n_all, _n_none, click_mode):
     # intermediate empty checklist. Ignore that — full clear is btn-metrics-none.
     if tid == "metric-filter" and not selected:
         if state.get("visible_metrics"):
-            return no_update, no_update, no_update, no_update
+            return no_update, no_update, no_update, no_update, no_update
     new_vis = _visible_from_filter_selection(selected)
     if new_vis == list(state.get("visible_metrics") or []):
-        return no_update, no_update, no_update, no_update
+        return no_update, no_update, no_update, no_update, no_update
     state["visible_metrics"] = new_vis
     _bump_metric_rev()
     _reset_y()
-    ranked = _metrics_by_view_sum()
     return (
         _build_graph(click_mode),
         no_update,
-        f"표시 metric {len(new_vis)}/{len(ranked)}",
+        no_update,
+        f"표시 metric {len(new_vis)}/{len(universe)}",
         _refresh_hover_panel(),
     )
 
@@ -5086,8 +5085,8 @@ app.clientside_callback(
         if (liveAxes && hasX) {
             patch['xaxis.autorange'] = false;
             patch['xaxis.range'] = [cmd.x[0], cmd.x[1]];
-            // Shared time axis across score / metrics / labels (± rate).
-            ['xaxis2', 'xaxis3', 'xaxis4'].forEach(function(ax) {
+            // Shared time axis across score / metrics / human / model (± rate).
+            ['xaxis2', 'xaxis3', 'xaxis4', 'xaxis5'].forEach(function(ax) {
                 patch[ax + '.autorange'] = false;
                 patch[ax + '.range'] = [cmd.x[0], cmd.x[1]];
             });
@@ -5097,25 +5096,27 @@ app.clientside_callback(
             var hasY3 = !!fl.yaxis3;
             var hasY2 = !!fl.yaxis2;
             // Layouts:
-            // 3-row: score + rate + metrics
-            // 2-row score+metrics (core features): yaxis=score, yaxis2=metrics
-            // 2-row rate+metrics: yaxis=rate, yaxis2=metrics
-            // 1-row: metrics only
+            // 4-row core: score + metrics + human + model
+            // 5-row: score + rate + metrics + human + model
+            // Labels tracks are never Y-auto'd from metrics commands.
             var metricsKey = 'yaxis';
             var rateKey = null;
             var scoreKey = null;
-            // Layouts (core): score + metrics + labels → y / y2 / y3
-            // Legacy rate: score + rate + metrics → y / y2 / y3
-            // Labels track is never Y-auto'd from metrics commands.
+            function axisTitle(key) {
+                try {
+                    var ax = fl[key];
+                    return (ax && ax.title && ax.title.text) || '';
+                } catch (err) { return ''; }
+            }
+            function isLabelAxisTitle(t) {
+                return /label|human|model/i.test(String(t));
+            }
             if (hasY3) {
                 scoreKey = 'yaxis';
-                var y2title = '';
-                var y3title = '';
-                try {
-                    y2title = (fl.yaxis2 && fl.yaxis2.title && fl.yaxis2.title.text) || '';
-                    y3title = (fl.yaxis3 && fl.yaxis3.title && fl.yaxis3.title.text) || '';
-                } catch (err) {}
-                if (/label/i.test(String(y3title))) {
+                var y2title = axisTitle('yaxis2');
+                var y3title = axisTitle('yaxis3');
+                if (isLabelAxisTitle(y3title) || isLabelAxisTitle(axisTitle('yaxis4'))) {
+                    // score + metrics + human(+ model)
                     metricsKey = 'yaxis2';
                     rateKey = null;
                 } else if (/rate/i.test(String(y2title))) {
@@ -5278,7 +5279,7 @@ app.clientside_callback(
                 layout.xaxis = Object.assign({}, layout.xaxis || {}, {
                     range: liveX, autorange: false
                 });
-                ['xaxis2', 'xaxis3', 'xaxis4'].forEach(function(ax) {
+                ['xaxis2', 'xaxis3', 'xaxis4', 'xaxis5'].forEach(function(ax) {
                     if (layout[ax] || (gd2.layout && gd2.layout[ax])) {
                         layout[ax] = Object.assign({}, layout[ax] || {}, {
                             range: liveX, autorange: false
@@ -5297,7 +5298,7 @@ app.clientside_callback(
             window.__ignoreDataXClampUntil = Date.now() + 1500;
             // Y from the rebuilt figure (Y 자동); never touch X after react.
             var yPatch = {};
-            ['yaxis', 'yaxis2', 'yaxis3', 'yaxis4'].forEach(function(key) {
+            ['yaxis', 'yaxis2', 'yaxis3', 'yaxis4', 'yaxis5'].forEach(function(key) {
                 var ax = layout[key];
                 if (!ax || !ax.range || ax.range.length !== 2) return;
                 if (ax.autorange) return;
@@ -5723,14 +5724,15 @@ app.clientside_callback(
                 var xr = (layout.xaxis && layout.xaxis.range)
                     || (layout.xaxis2 && layout.xaxis2.range)
                     || (layout.xaxis3 && layout.xaxis3.range)
-                    || (layout.xaxis4 && layout.xaxis4.range);
+                    || (layout.xaxis4 && layout.xaxis4.range)
+                    || (layout.xaxis5 && layout.xaxis5.range);
                 if (!xr) return null;
                 var view = {
                     x: [String(xr[0]), String(xr[1])]
                 };
-                // Metrics = title "value" (never the bottom Labels track).
+                // Metrics = title "value" (never human/model label tracks).
                 var yAxis = null;
-                ['yaxis', 'yaxis2', 'yaxis3', 'yaxis4'].forEach(function(key) {
+                ['yaxis', 'yaxis2', 'yaxis3', 'yaxis4', 'yaxis5'].forEach(function(key) {
                     var ax = layout[key];
                     if (!ax) return;
                     var t = '';
@@ -5738,9 +5740,9 @@ app.clientside_callback(
                     if (/value/i.test(String(t))) yAxis = ax;
                 });
                 if (!yAxis) {
-                    // Fallback: score(+rate)+metrics+labels → metrics is 2nd or 3rd.
-                    if (layout.yaxis4) yAxis = layout.yaxis3;
-                    else if (layout.yaxis3) yAxis = layout.yaxis2;
+                    // Fallback: score(+rate)+metrics+human+model.
+                    if (layout.yaxis5) yAxis = layout.yaxis3;
+                    else if (layout.yaxis4) yAxis = layout.yaxis2;
                     else yAxis = layout.yaxis2 || layout.yaxis;
                 }
                 if (yAxis && yAxis.range) {
@@ -5800,7 +5802,7 @@ app.clientside_callback(
         window.__installSharedPanelSync = function(gd) {
                 if (!gd || gd.__sharedPanelSyncV5) return;
                 gd.__sharedPanelSyncV5 = true;
-                var X_KEYS = ['xaxis', 'xaxis2', 'xaxis3', 'xaxis4'];
+                var X_KEYS = ['xaxis', 'xaxis2', 'xaxis3', 'xaxis4', 'xaxis5'];
 
                 function xPairFromEvent(ed) {
                     if (!ed) return null;
@@ -5839,7 +5841,8 @@ app.clientside_callback(
                     if (mode === 'pan' || mode === 'pan_keep_y'
                         || window.__desiredDragmode === 'pan') return;
                     if (ed['xaxis.autorange'] || ed['xaxis2.autorange']
-                        || ed['xaxis3.autorange'] || ed['xaxis4.autorange']) return;
+                        || ed['xaxis3.autorange'] || ed['xaxis4.autorange']
+                        || ed['xaxis5.autorange']) return;
                     var pair = xPairFromEvent(ed);
                     if (!pair) return;
                     var fl = gd._fullLayout || {};
@@ -6443,7 +6446,8 @@ app.clientside_callback(
                     // Never expand a deliberate zoom back via autorange echoes.
                     if (eventData['xaxis.autorange'] || eventData['xaxis2.autorange']
                         || eventData['xaxis3.autorange']
-                        || eventData['xaxis4.autorange']) return;
+                        || eventData['xaxis4.autorange']
+                        || eventData['xaxis5.autorange']) return;
                     var meta = (gd.layout && gd.layout.meta) || {};
                     var bounds = meta.data_x;
                     if (!bounds || bounds.length < 2) return;
@@ -6452,7 +6456,7 @@ app.clientside_callback(
                     if (!(tmax > tmin)) return;
 
                     var x0, x1;
-                    var axKeys = ['xaxis', 'xaxis2', 'xaxis3', 'xaxis4'];
+                    var axKeys = ['xaxis', 'xaxis2', 'xaxis3', 'xaxis4', 'xaxis5'];
                     for (var ai = 0; ai < axKeys.length; ai++) {
                         var ax = axKeys[ai];
                         x0 = eventData[ax + '.range[0]'];
@@ -6528,13 +6532,13 @@ app.clientside_callback(
                 var lastEmit = {x: null, t: 0};
                 var ptrDown = null;
 
-                function labelTrackRect(gd) {
+                function labelTrackInfo(gd, clientX, clientY) {
+                    // Returns {track:'human'|'model', rect} when over a label strip.
                     try {
                         var fl = gd._fullLayout;
                         var plots = fl && fl._plots;
                         if (!plots) return null;
                         var keys = Object.keys(plots);
-                        var best = null;
                         for (var i = 0; i < keys.length; i++) {
                             var p = plots[keys[i]];
                             if (!p || !p.plot || !p.plot.getBoundingClientRect) continue;
@@ -6545,21 +6549,20 @@ app.clientside_callback(
                             } catch (err) {}
                             var r = p.plot.getBoundingClientRect();
                             if (!(r.width > 2 && r.height > 2)) continue;
-                            if (/label/i.test(String(title))) return r;
-                            // Fallback: bottom-most subplot.
-                            if (!best || r.top > best.top) best = r;
+                            if (clientX < r.left || clientX > r.right
+                                || clientY < r.top || clientY > r.bottom) {
+                                continue;
+                            }
+                            var t = String(title);
+                            if (/human|사람/i.test(t) || (/label/i.test(t) && !/model/i.test(t))) {
+                                return {track: 'human', rect: r};
+                            }
+                            if (/model|모델/i.test(t)) {
+                                return {track: 'model', rect: r};
+                            }
                         }
-                        return best;
-                    } catch (err2) {
-                        return null;
-                    }
-                }
-
-                function overLabelTrack(gd, clientX, clientY) {
-                    var r = labelTrackRect(gd);
-                    if (!r) return false;
-                    return clientX >= r.left && clientX <= r.right
-                        && clientY >= r.top && clientY <= r.bottom;
+                    } catch (err2) {}
+                    return null;
                 }
 
                 function emitSnap(clientX, clientY, opts) {
@@ -6567,8 +6570,9 @@ app.clientside_callback(
                     var gd = host.querySelector('.js-plotly-plot');
                     if (!gd || !gd._fullLayout || !window.__plotPlaceUtils) return false;
                     var plot = window.__plotPlaceUtils(gd);
-                    var onLabels = overLabelTrack(gd, clientX, clientY);
-                    if (!onLabels && !plot.inPlotArea(clientX, clientY)) return false;
+                    var info = labelTrackInfo(gd, clientX, clientY);
+                    var track = (info && info.track) || opts.track || null;
+                    if (!info && !plot.inPlotArea(clientX, clientY)) return false;
                     var xVal = plot.snapClientX(clientX);
                     if (xVal == null) return false;
                     var now = Date.now();
@@ -6579,7 +6583,8 @@ app.clientside_callback(
                         data: {
                             x: xVal,
                             sequence: now,
-                            label_track: !!onLabels || !!opts.labelTrack
+                            track: track,
+                            label_track: !!track
                         }
                     });
                     return true;
@@ -6588,10 +6593,11 @@ app.clientside_callback(
                 host.addEventListener('pointerdown', function(ev) {
                     if (ev.button !== 0) return;
                     var gd0 = host.querySelector('.js-plotly-plot');
+                    var info0 = gd0 && labelTrackInfo(gd0, ev.clientX, ev.clientY);
                     ptrDown = {
                         x: ev.clientX,
                         y: ev.clientY,
-                        labelTrack: !!(gd0 && overLabelTrack(gd0, ev.clientX, ev.clientY))
+                        track: info0 && info0.track
                     };
                 }, true);
 
@@ -6632,19 +6638,19 @@ app.clientside_callback(
                     // Placement modes use click (empty) + clickData (traces).
                     if (mode === 'label_range' || mode === 'label_point') return;
                     var gd1 = host.querySelector('.js-plotly-plot');
-                    var onLabels = (down && down.labelTrack)
-                        || (gd1 && overLabelTrack(gd1, ev.clientX, ev.clientY));
+                    var info1 = gd1 && labelTrackInfo(gd1, ev.clientX, ev.clientY);
+                    var track = (down && down.track) || (info1 && info1.track) || null;
                     if (down) {
                         var dx = Math.abs(ev.clientX - down.x);
                         var dy = Math.abs(ev.clientY - down.y);
-                        var maxMove = onLabels ? 28 : 6;
+                        var maxMove = track ? 28 : 6;
                         if (dx > maxMove || dy > maxMove) return;
                     }
-                    emitSnap(ev.clientX, ev.clientY, {labelTrack: onLabels});
+                    emitSnap(ev.clientX, ev.clientY, {track: track});
                 }, true);
             };
 
-        // Labels subplot: never pan/zoom — clicks must select anomaly bars.
+        // Human/model label subplots: never pan/zoom — clicks select bars.
         window.__disableLabelTrackDrag = function(gd) {
                 if (!gd || !gd._fullLayout) return;
                 try {
@@ -6656,15 +6662,10 @@ app.clientside_callback(
                         try {
                             title = (ya && ya.title && ya.title.text) || '';
                         } catch (err) {}
-                        if (!/label/i.test(String(title))) return;
+                        if (!/label|human|model|사람|모델/i.test(String(title))) return;
                         var nodes = gd.querySelectorAll(
                             '.draglayer .' + key + ' .nsewdrag, .draglayer > .' + key + ' > .nsewdrag'
                         );
-                        if (!nodes.length) {
-                            // Fallback: bottom-most nsewdrag.
-                            var all = gd.querySelectorAll('.draglayer .nsewdrag');
-                            if (all.length) nodes = [all[all.length - 1]];
-                        }
                         for (var i = 0; i < nodes.length; i++) {
                             nodes[i].style.pointerEvents = 'none';
                             nodes[i].style.cursor = 'pointer';
@@ -7421,7 +7422,7 @@ app.clientside_callback(
                     layout.xaxis = Object.assign({}, layout.xaxis || {}, {
                         range: keepX, autorange: false
                     });
-                    ['xaxis2', 'xaxis3', 'xaxis4'].forEach(function(ax) {
+                    ['xaxis2', 'xaxis3', 'xaxis4', 'xaxis5'].forEach(function(ax) {
                         if (layout[ax]) {
                             layout[ax] = Object.assign({}, layout[ax], {
                                 range: keepX, autorange: false
@@ -7441,12 +7442,12 @@ app.clientside_callback(
                         var meta = layout.meta || {};
                         var zx = keepX || meta.zoom_x;
                         if (zx && zx.length === 2 && !window.__graphPointerDown) {
-                            ['xaxis', 'xaxis2', 'xaxis3', 'xaxis4'].forEach(function(ax) {
+                            ['xaxis', 'xaxis2', 'xaxis3', 'xaxis4', 'xaxis5'].forEach(function(ax) {
                                 patch[ax + '.autorange'] = false;
                                 patch[ax + '.range'] = [zx[0], zx[1]];
                             });
                         }
-                        ['yaxis', 'yaxis2', 'yaxis3', 'yaxis4'].forEach(function(key) {
+                        ['yaxis', 'yaxis2', 'yaxis3', 'yaxis4', 'yaxis5'].forEach(function(key) {
                             var ax = layout[key];
                             if (!ax || !ax.range || ax.range.length !== 2) return;
                             if (ax.autorange) return;

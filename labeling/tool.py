@@ -70,12 +70,17 @@ CORE_FEATURE_SET: frozenset[str] = frozenset(CORE_FEATURES)
 CORE_FEATURE_MODE = "core"
 
 # Figure layout: metrics panel keeps a fixed height; score band is always
-# reserved above it; human/model label bars live in a bottom track so they
-# do not cover metric/score traces.
+# reserved above it; human and model label bars each get their own bottom
+# track so they do not cover metric/score traces or each other.
 FIGURE_METRICS_HEIGHT = 320
 FIGURE_SCORE_HEIGHT = 100
-FIGURE_LABEL_HEIGHT = 56
-FIGURE_HEIGHT = FIGURE_METRICS_HEIGHT + FIGURE_SCORE_HEIGHT + FIGURE_LABEL_HEIGHT
+FIGURE_LABEL_HEIGHT = 48  # per track (human + model)
+FIGURE_HEIGHT = (
+    FIGURE_METRICS_HEIGHT
+    + FIGURE_SCORE_HEIGHT
+    + FIGURE_LABEL_HEIGHT
+    + FIGURE_LABEL_HEIGHT
+)
 
 ANOMALY_FILL = "rgba(201, 162, 39, 0.28)"
 ANOMALY_LINE = "#c9a227"
@@ -3607,8 +3612,7 @@ def build_figure(
     series_hoverinfo = "skip" if embed_ranked else None
 
     show_rate = bool(rate_cols)
-    # Always reserve score (top) + label track (bottom). Metrics height is fixed;
-    # score/label bands are extra rows so bars never cover metric traces.
+    # Always reserve score (top) + human/model label tracks (bottom).
     reserve_score = True
     reserve_labels = True
     has_score_data = bool(show_score and len(score_x))
@@ -3616,30 +3620,51 @@ def build_figure(
     metrics_frac = FIGURE_METRICS_HEIGHT / FIGURE_HEIGHT
     label_frac = FIGURE_LABEL_HEIGHT / FIGURE_HEIGHT
     if reserve_score and show_rate and reserve_labels:
-        n_rows = 4
-        row_heights = [score_frac, 0.14, metrics_frac * 0.85, label_frac]
+        n_rows = 5
+        row_heights = [
+            score_frac,
+            0.12,
+            metrics_frac * 0.78,
+            label_frac,
+            label_frac,
+        ]
         s = sum(row_heights)
         row_heights = [h / s for h in row_heights]
-        titles = ("Anomaly score", "SUCCESS / COMB rate", "Metric 값", "Labels")
-        rate_row, metric_row, label_row = 2, 3, 4
-        spacing = 0.06
+        titles = (
+            "Anomaly score",
+            "SUCCESS / COMB rate",
+            "Metric 값",
+            "사람 라벨",
+            "모델 예측",
+        )
+        rate_row, metric_row = 2, 3
+        human_label_row, model_label_row = 4, 5
+        spacing = 0.05
     elif reserve_score and reserve_labels:
-        n_rows = 3
-        row_heights = [score_frac, metrics_frac, label_frac]
-        titles = ("Anomaly score", "Metric 값", "Labels")
-        rate_row, metric_row, label_row = None, 2, 3
-        spacing = 0.06
+        n_rows = 4
+        row_heights = [score_frac, metrics_frac, label_frac, label_frac]
+        s = sum(row_heights)
+        row_heights = [h / s for h in row_heights]
+        titles = ("Anomaly score", "Metric 값", "사람 라벨", "모델 예측")
+        rate_row, metric_row = None, 2
+        human_label_row, model_label_row = 3, 4
+        spacing = 0.05
     elif reserve_score:
         n_rows = 2
-        row_heights = [score_frac / (score_frac + metrics_frac), metrics_frac / (score_frac + metrics_frac)]
+        row_heights = [
+            score_frac / (score_frac + metrics_frac),
+            metrics_frac / (score_frac + metrics_frac),
+        ]
         titles = ("Anomaly score", "Metric 값")
-        rate_row, metric_row, label_row = None, 2, None
+        rate_row, metric_row = None, 2
+        human_label_row, model_label_row = None, None
         spacing = 0.08
     else:
         n_rows = 1
         row_heights = [1.0]
         titles = ("Metric 값",)
-        rate_row, metric_row, label_row = None, 1, None
+        rate_row, metric_row = None, 1
+        human_label_row, model_label_row = None, None
         spacing = 0.08
 
     fig = make_subplots(
@@ -3801,33 +3826,37 @@ def build_figure(
             col=1,
         )
 
-    if label_row is not None:
-        # Keep the Labels subplot alive even when no bars are drawn.
+    def _keep_label_track(row: int | None, *, uid: str, name: str) -> None:
+        if row is None:
+            return
         fig.add_trace(
             go.Scatter(
                 x=[None],
                 y=[None],
                 mode="markers",
                 marker=dict(opacity=0, size=1),
-                name="labels",
+                name=name,
                 showlegend=False,
                 hoverinfo="skip",
-                uid="__label_track__",
+                uid=uid,
             ),
-            row=label_row,
+            row=row,
             col=1,
         )
 
-    if show_labels and label_row is not None:
+    _keep_label_track(human_label_row, uid="__human_label_track__", name="human-labels")
+    _keep_label_track(model_label_row, uid="__model_label_track__", name="model-labels")
+
+    if show_labels and human_label_row is not None:
         hi = str(highlight_id) if highlight_id is not None else None
         for item in doc.get("labels", []):
             label_id = item.get("id", "")
             selected = hi is not None and str(label_id) == hi
             add_label_indicator(
-                fig, item, highlight=selected, row=label_row
+                fig, item, highlight=selected, row=human_label_row
             )
 
-    if show_predictions and predictions:
+    if show_predictions and predictions and model_label_row is not None:
         hid_pred = str(highlight_pred_id) if highlight_pred_id is not None else None
         overlay_items = model_overlays_for_plot(
             predictions.get("labels") or [],
@@ -3845,7 +3874,7 @@ def build_figure(
                 item,
                 highlight=is_hi,
                 draw_edges=draw_all_edges or is_hi,
-                row=label_row,
+                row=model_label_row,
             )
 
     fig.update_layout(
@@ -3925,9 +3954,11 @@ def build_figure(
         row=metric_row,
         col=1,
     )
-    if label_row is not None:
+    def _style_label_yaxis(row: int | None, *, title: str, line: str, font: str) -> None:
+        if row is None:
+            return
         fig.update_yaxes(
-            title_text="label",
+            title_text=title,
             range=[0, 1],
             autorange=False,
             fixedrange=True,
@@ -3937,11 +3968,14 @@ def build_figure(
             showline=True,
             mirror=True,
             linewidth=1.5,
-            linecolor="#a16207",
-            title_font=dict(size=11, color="#854d0e"),
-            row=label_row,
+            linecolor=line,
+            title_font=dict(size=11, color=font),
+            row=row,
             col=1,
         )
+
+    _style_label_yaxis(human_label_row, title="human", line="#a16207", font="#854d0e")
+    _style_label_yaxis(model_label_row, title="model", line="#7c3aed", font="#5b21b6")
 
     tmin, tmax = data_time_bounds(view if len(view) else df)
     x0 = pd.to_datetime(start, utc=True) if start is not None else tmin
@@ -3982,7 +4016,11 @@ def build_figure(
         elif row_i == n_rows:
             kw["matches"] = "x"
             kw["title_text"] = "시간 (KST)"
-            if label_row is not None and row_i == label_row:
+            if model_label_row is not None and row_i == model_label_row:
+                kw["linecolor"] = "#7c3aed"
+                kw["tickfont"] = dict(size=10, color="#5b21b6")
+                kw["title_font"] = dict(size=11, color="#5b21b6")
+            elif human_label_row is not None and row_i == human_label_row:
                 kw["linecolor"] = "#a16207"
                 kw["tickfont"] = dict(size=10, color="#854d0e")
                 kw["title_font"] = dict(size=11, color="#854d0e")
@@ -3990,6 +4028,11 @@ def build_figure(
                 kw["linecolor"] = "#8a7f6e"
                 kw["tickfont"] = dict(size=10, color="#5c5346")
                 kw["title_font"] = dict(size=11, color="#5c5346")
+        elif human_label_row is not None and row_i == human_label_row:
+            kw["matches"] = "x"
+            kw["linecolor"] = "#a16207"
+            kw["tickfont"] = dict(size=10, color="#854d0e")
+            kw["showticklabels"] = False
         elif metric_row is not None and row_i == metric_row:
             kw["matches"] = "x"
             kw["linecolor"] = "#8a7f6e"
@@ -4029,10 +4072,21 @@ def _style_panel_separation(
         axis = getattr(fig.layout, key, None)
         dom = getattr(axis, "domain", None) if axis is not None else None
         domains.append(dom)
-    if n_rows == 4:
+    if show_score and show_rate and show_labels and n_rows == 5:
+        # score / rate / metrics / human / model
+        defaults = [
+            (0.84, 1.0),
+            (0.70, 0.80),
+            (0.22, 0.66),
+            (0.11, 0.18),
+            (0.0, 0.08),
+        ]
+    elif show_score and show_labels and n_rows == 4:
+        # score / metrics / human / model
+        defaults = [(0.82, 1.0), (0.22, 0.78), (0.11, 0.18), (0.0, 0.08)]
+    elif n_rows == 4:
         defaults = [(0.82, 1.0), (0.66, 0.78), (0.14, 0.62), (0.0, 0.10)]
     elif show_score and show_labels and n_rows == 3:
-        # score / metrics / labels (FIGURE_* proportions).
         defaults = [(0.82, 1.0), (0.14, 0.78), (0.0, 0.10)]
     elif n_rows == 3:
         defaults = [(0.72, 1.0), (0.38, 0.64), (0.0, 0.30)]
@@ -4051,7 +4105,22 @@ def _style_panel_separation(
     x_dom = getattr(x_axis, "domain", None) or (0.0, 1.0)
 
     styles = []
-    if show_score and show_rate and show_labels and n_rows == 4:
+    if show_score and show_rate and show_labels and n_rows == 5:
+        styles = [
+            ("#efe7ff", "#6d28d9", "panel_bg_score"),
+            ("#e7f1f7", "#5f8499", "panel_bg_rate"),
+            ("#f7f5f1", "#8a7f6e", "panel_bg_metrics"),
+            ("#fef9c3", "#a16207", "panel_bg_human_labels"),
+            ("#f3e8ff", "#7c3aed", "panel_bg_model_labels"),
+        ]
+    elif show_score and show_labels and n_rows == 4:
+        styles = [
+            ("#efe7ff", "#6d28d9", "panel_bg_score"),
+            ("#f7f5f1", "#8a7f6e", "panel_bg_metrics"),
+            ("#fef9c3", "#a16207", "panel_bg_human_labels"),
+            ("#f3e8ff", "#7c3aed", "panel_bg_model_labels"),
+        ]
+    elif show_score and show_rate and show_labels and n_rows == 4:
         styles = [
             ("#efe7ff", "#6d28d9", "panel_bg_score"),
             ("#e7f1f7", "#5f8499", "panel_bg_rate"),
@@ -4141,17 +4210,35 @@ def _style_panel_separation(
         borderwidth=1,
         borderpad=4,
     )
-    labels_title = dict(
+    human_labels_title = dict(
         font=dict(size=12, color="#854d0e", family="sans-serif"),
         bgcolor="rgba(254,249,195,0.96)",
         bordercolor="#a16207",
         borderwidth=1,
         borderpad=4,
     )
+    model_labels_title = dict(
+        font=dict(size=12, color="#5b21b6", family="sans-serif"),
+        bgcolor="rgba(243,232,255,0.96)",
+        bordercolor="#7c3aed",
+        borderwidth=1,
+        borderpad=4,
+    )
     if show_score and show_rate and show_labels:
-        title_styles = (score_title, rate_title, metrics_title, labels_title)
+        title_styles = (
+            score_title,
+            rate_title,
+            metrics_title,
+            human_labels_title,
+            model_labels_title,
+        )
     elif show_score and show_labels:
-        title_styles = (score_title, metrics_title, labels_title)
+        title_styles = (
+            score_title,
+            metrics_title,
+            human_labels_title,
+            model_labels_title,
+        )
     elif show_score and show_rate:
         title_styles = (score_title, rate_title, metrics_title)
     elif show_score:

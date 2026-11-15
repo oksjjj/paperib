@@ -1,0 +1,251 @@
+{
+  "plmn": "P2291",
+  "rank": 9,
+  "updated_at": "2026-11-15T11:09:01.886982+00:00",
+  "labels": [
+    {
+      "id": "bfd52418",
+      "kind": "range",
+      "start": "2026-07-27T20:15:00+00:00",
+      "end": "2026-07-28T00:00:00+00:00",
+      "updated_at": "2026-11-15T11:07:09.931201+00:00",
+      "reasons": [
+        "attempt_spike",
+        "fail_surge"
+      ],
+      "fail_metrics": [
+        "M185",
+        "M855"
+      ],
+      "note": ""
+    },
+    {
+      "id": "8094bbc6",
+      "kind": "point",
+      "start": "2026-08-04T07:00:00+00:00",
+      "end": "2026-08-04T07:00:00+00:00",
+      "updated_at": "2026-11-15T11:07:15.831752+00:00",
+      "reasons": [
+        "attempt_spike"
+      ],
+      "fail_metrics": [],
+      "note": ""
+    },
+    {
+      "id": "402cd4ab",
+      "kind": "point",
+      "start": "2026-08-04T07:30:00+00:00",
+      "end": "2026-08-04T07:30:00+00:00",
+      "updated_at": "2026-11-15T11:07:18.248275+00:00",
+      "reasons": [
+        "attempt_spike"
+      ],
+      "fail_metrics": [],
+      "note": ""
+    },
+    {
+      "id": "db075830",
+      "kind": "point",
+      "start": "2026-08-07T02:10:00+00:00",
+      "end": "2026-08-07T02:10:00+00:00",
+      "updated_at": "2026-11-15T11:07:23.348330+00:00",
+      "reasons": [
+        "attempt_spike"
+      ],
+      "fail_metrics": [],
+      "note": ""
+    },
+    {
+      "id": "1aaa2d88",
+      "kind": "point",
+      "start": "2026-08-07T06:25:00+00:00",
+      "end": "2026-08-07T06:25:00+00:00",
+      "updated_at": "2026-11-15T11:07:28.212439+00:00",
+      "reasons": [
+        "attempt_spike"
+      ],
+      "fail_metrics": [],
+      "note": ""
+    },
+    {
+      "id": "1af625af",
+      "kind": "point",
+      "start": "2026-08-07T07:00:00+00:00",
+      "end": "2026-08-07T07:00:00+00:00",
+      "updated_at": "2026-11-15T11:07:30.936394+00:00",
+      "reasons": [
+        "attempt_spike"
+      ],
+      "fail_metrics": [],
+      "note": ""
+    },
+    {
+      "id": "ad3cc268",
+      "kind": "point",
+      "start": "2026-08-11T06:25:00+00:00",
+      "end": "2026-08-11T06:25:00+00:00",
+      "updated_at": "2026-11-15T11:07:34.564887+00:00",
+      "reasons": [
+        "attempt_spike"
+      ],
+      "fail_metrics": [],
+      "note": ""
+    },
+    {
+      "id": "90eddf9d",
+      "kind": "point",
+      "start": "2026-08-11T07:50:00+00:00",
+      "end": "2026-08-11T07:50:00+00:00",
+      "updated_at": "2026-11-15T11:07:38.468559+00:00",
+      "reasons": [
+        "attempt_spike"
+      ],
+      "fail_metrics": [],
+      "note": ""
+    },
+    {
+      "id": "ea13ecb5",
+      "kind": "range",
+      "start": "2026-08-11T07:55:00+00:00",
+      "end": "2026-08-11T08:05:00+00:00",
+      "updated_at": "2026-11-15T11:07:52.631911+00:00",
+      "reasons": [
+        "fail_surge"
+      ],
+      "fail_metrics": [
+        "M430",
+        "M419"
+      ],
+      "note": ""
+    },
+    {
+      "id": "65d973eb",
+      "kind": "range",
+      "start": "2026-08-11T08:20:00+00:00",
+      "end": "2026-08-11T08:35:00+00:00",
+      "updated_at": "2026-11-15T11:07:58.910798+00:00",
+      "reasons": [
+        "fail_surge"
+      ],
+      "fail_metrics": [
+        "M430",
+        "M419"
+      ],
+      "note": ""
+    },
+    {
+      "id": "8ac52c6e",
+      "kind": "range",
+      "start": "2026-08-11T08:45:00+00:00",
+      "end": "2026-08-11T08:55:00+00:00",
+      "updated_at": "2026-11-15T11:08:26.318149+00:00",
+      "reasons": [
+        "fail_surge"
+      ],
+      "fail_metrics": [
+        "M430",
+        "M419"
+      ],
+      "note": ""
+    },
+    {
+      "id": "ed9783c6",
+      "kind": "point",
+      "start": "2026-08-19T05:00:00+00:00",
+      "end": "2026-08-19T05:00:00+00:00",
+      "updated_at": "2026-11-15T11:08:35.720872+00:00",
+      "reasons": [
+        "attempt_spike",
+        "fail_surge"
+      ],
+      "fail_metrics": [
+        "M855"
+      ],
+      "note": ""
+    },
+    {
+      "id": "6db8e010",
+      "kind": "point",
+      "start": "2026-08-20T05:40:00+00:00",
+      "end": "2026-08-20T05:40:00+00:00",
+      "updated_at": "2026-11-15T11:08:40.213745+00:00",
+      "reasons": [
+        "attempt_spike"
+      ],
+      "fail_metrics": [],
+      "note": ""
+    },
+    {
+      "id": "4ecbf7e8",
+      "kind": "point",
+      "start": "2026-08-20T06:05:00+00:00",
+      "end": "2026-08-20T06:05:00+00:00",
+      "updated_at": "2026-11-15T11:08:43.275301+00:00",
+      "reasons": [
+        "attempt_spike"
+      ],
+      "fail_metrics": [],
+      "note": ""
+    },
+    {
+      "id": "227162a6",
+      "kind": "point",
+      "start": "2026-08-20T06:05:00+00:00",
+      "end": "2026-08-20T06:05:00+00:00",
+      "updated_at": "2026-11-15T11:08:47.350744+00:00",
+      "reasons": [
+        "attempt_spike"
+      ],
+      "fail_metrics": [],
+      "note": ""
+    },
+    {
+      "id": "e7ae7fe1",
+      "kind": "point",
+      "start": "2026-08-25T03:15:00+00:00",
+      "end": "2026-08-25T03:15:00+00:00",
+      "updated_at": "2026-11-15T11:08:50.440348+00:00",
+      "reasons": [
+        "attempt_spike"
+      ],
+      "fail_metrics": [],
+      "note": ""
+    },
+    {
+      "id": "09c772fd",
+      "kind": "point",
+      "start": "2026-08-25T07:00:00+00:00",
+      "end": "2026-08-25T07:00:00+00:00",
+      "updated_at": "2026-11-15T11:08:53.874385+00:00",
+      "reasons": [
+        "attempt_spike"
+      ],
+      "fail_metrics": [],
+      "note": ""
+    },
+    {
+      "id": "618e6dfb",
+      "kind": "point",
+      "start": "2026-08-25T07:00:00+00:00",
+      "end": "2026-08-25T07:00:00+00:00",
+      "updated_at": "2026-11-15T11:08:57.322513+00:00",
+      "reasons": [
+        "attempt_spike"
+      ],
+      "fail_metrics": [],
+      "note": ""
+    },
+    {
+      "id": "1996a701",
+      "kind": "point",
+      "start": "2026-08-25T07:30:00+00:00",
+      "end": "2026-08-25T07:30:00+00:00",
+      "updated_at": "2026-11-15T11:09:01.886966+00:00",
+      "reasons": [
+        "attempt_spike"
+      ],
+      "fail_metrics": [],
+      "note": ""
+    }
+  ]
+}
