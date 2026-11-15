@@ -511,7 +511,7 @@ def _fmt_opt(v: Any, *, digits: int = 4) -> str:
 
 
 def _model_metrics_tag(pred: dict) -> tuple[str, str]:
-    """Display name + accent color for the shared VUS metrics panel."""
+    """Display name + accent color for the detection metrics panel."""
     model = str(pred.get("model") or pred.get("source") or "model").lower()
     src = str(pred.get("source") or "").lower()
     key = model if model not in ("", "none") else src
@@ -534,7 +534,7 @@ def _model_metrics_tag(pred: dict) -> tuple[str, str]:
 
 
 def _detection_metrics_panel(pred: dict) -> list[Any]:
-    """Detection metrics panel without VUS-related presentation."""
+    """Detection metrics panel for validation-result inspection."""
     paper = pred.get("paper_metrics") or {}
     m = pred.get("metrics") or {}
     split = (
