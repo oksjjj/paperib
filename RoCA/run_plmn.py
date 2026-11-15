@@ -2,7 +2,7 @@
 """Train official-style RoCA on one PLMN; export valid predictions for labeling UI.
 
 Uses upstream network + loss (ruiking04/RoCA, MIT) without Merlion.
-Same paper metrics / UI JSON schema as RiAD for backbone comparison.
+Uses the shared paper metrics / UI JSON schema.
 
 Example:
   ../.venv/bin/python run_plmn.py --plmn P0480 --epochs 20
@@ -34,9 +34,9 @@ REPO = ROOT.parent
 MODEL_ROOT = ROOT / "model"
 
 
-def _load_riad_prepare():
-    path = REPO / "RiAD" / "data.py"
-    spec = importlib.util.spec_from_file_location("riad_data_mod", path)
+def _load_prepare_plmn():
+    path = REPO / "common" / "data.py"
+    spec = importlib.util.spec_from_file_location("paperib_data_mod", path)
     if spec is None or spec.loader is None:
         raise ImportError(path)
     mod = importlib.util.module_from_spec(spec)
@@ -44,7 +44,7 @@ def _load_riad_prepare():
     return mod.prepare_plmn
 
 
-prepare_plmn = _load_riad_prepare()
+prepare_plmn = _load_prepare_plmn()
 
 
 def _device() -> torch.device:
