@@ -55,12 +55,13 @@ def _device() -> torch.device:
     return torch.device("cpu")
 
 
-def train_percentile_threshold(train_scores: np.ndarray, anomaly_ratio: float) -> float:
+def train_quantile_threshold(train_scores: np.ndarray, quantile: float = 0.99) -> float:
+    """Label-free threshold fitted only on train scores."""
     finite = train_scores[np.isfinite(train_scores)]
     if finite.size == 0:
         raise RuntimeError("no finite train scores for threshold")
-    q = max(0.0, min(100.0, 100.0 - float(anomaly_ratio)))
-    return float(np.percentile(finite, q))
+    q = max(0.0, min(1.0, float(quantile)))
+    return float(np.quantile(finite, q))
 
 
 @torch.no_grad()
@@ -107,6 +108,7 @@ def train_and_eval(
     epochs: int | None = None,
     seed: int = 2,
     anomaly_ratio: float | None = None,
+    threshold_quantile: float = 0.99,
     window: int | None = None,
     time_step: int | None = None,
     batch_size: int | None = None,
@@ -142,7 +144,7 @@ def train_and_eval(
         print(
             f"device={device} plmn={plmn} window={cfg.window_size} "
             f"step={cfg.time_step} epochs={cfg.num_epoch} ch={n_feat} "
-            f"ar={cfg.anomaly_ratio} nu={cfg.nu}",
+            f"ar={cfg.anomaly_ratio} nu={cfg.nu} q={threshold_quantile}",
             flush=True,
         )
 
@@ -205,7 +207,7 @@ def train_and_eval(
     valid_scores = score_block(
         model, center, prep["valid"], cfg=cfg, device=device, time_step=1
     )
-    thr = train_percentile_threshold(train_scores, cfg.anomaly_ratio)
+    thr = train_quantile_threshold(train_scores, threshold_quantile)
     y_valid = prep["y_valid"]
     eval_bundle = evaluate_valid(
         y_valid, valid_scores, thr, vus_window=None, sample_minutes=5.0
@@ -214,10 +216,10 @@ def train_and_eval(
     out: dict[str, Any] = {
         "plmn": plmn,
         "threshold": thr,
+        "threshold_quantile": float(threshold_quantile),
+        "eval_split": "valid",
         "metrics": {
-            "vus_pr": eval_bundle["primary"]["vus_pr"],
             "event_f1": eval_bundle["event"].get("f1"),
-            "pr_auc": eval_bundle["pr_auc"],
             "false_alarms_per_day": eval_bundle["operational"].get(
                 "false_alarms_per_day"
             ),
@@ -228,6 +230,7 @@ def train_and_eval(
             "time_step": cfg.time_step,
             "epochs": cfg.num_epoch,
             "anomaly_ratio": cfg.anomaly_ratio,
+            "threshold_quantile": float(threshold_quantile),
             "nu": cfg.nu,
             "lr": cfg.lr,
             "seed": seed,
@@ -264,7 +267,7 @@ def train_and_eval(
             split=prep["split"],
             metrics_extra={
                 "model": "roca",
-                "vus_window": eval_bundle.get("vus_window"),
+                "threshold_quantile": float(threshold_quantile),
                 "score_distribution": eval_bundle.get("score_distribution"),
                 "event_score_diagnostics": eval_bundle.get("event_score_diagnostics"),
                 "upstream": "ruiking04/RoCA",
@@ -281,8 +284,9 @@ def train_and_eval(
             print(f"exported {path}", flush=True)
             m = out["metrics"]
             print(
-                f"VUS-PR={m['vus_pr']:.4f} (vus_window={eval_bundle.get('vus_window')}) "
-                f"Event-F1={m['event_f1']} FA/day={m['false_alarms_per_day']}",
+                f"valid Event-F1={m['event_f1']} "
+                f"P={m['precision']} R={m['recall']} F1={m['f1']} "
+                f"FA/day={m['false_alarms_per_day']}",
                 flush=True,
             )
             sd = eval_bundle.get("score_distribution") or {}
@@ -300,6 +304,12 @@ def main() -> None:
     p.add_argument("--epochs", type=int, default=20)
     p.add_argument("--seed", type=int, default=2)
     p.add_argument("--anomaly_ratio", type=float, default=1.0)
+    p.add_argument(
+        "--threshold_quantile",
+        type=float,
+        default=0.99,
+        help="train-score quantile used as the fixed detection threshold (default: 0.99)",
+    )
     p.add_argument("--window", type=int, default=32)
     p.add_argument("--time_step", type=int, default=16)
     p.add_argument("--batch_size", type=int, default=256)
@@ -312,6 +322,7 @@ def main() -> None:
         epochs=args.epochs,
         seed=args.seed,
         anomaly_ratio=args.anomaly_ratio,
+        threshold_quantile=args.threshold_quantile,
         window=args.window,
         time_step=args.time_step,
         batch_size=args.batch_size,
