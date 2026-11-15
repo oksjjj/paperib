@@ -769,6 +769,9 @@ def list_prediction_sources(plmn: str) -> list[dict[str, str]]:
         if not name.startswith(prefix) or not name.endswith(".json"):
             continue
         source = name[len(prefix) : -len(".json")]
+        # Comparison/report artifacts are not model prediction sources.
+        if source == "context_vs_hour24":
+            continue
         path = os.path.join(PRED_DIR, name)
         try:
             with open(path, encoding="utf-8") as f:
