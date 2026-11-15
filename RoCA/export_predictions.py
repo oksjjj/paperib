@@ -110,20 +110,15 @@ def write_roca_prediction(
             "threshold": float(threshold),
             "note": (
                 "RoCA score = distance-to-center (loss_n; higher = more anomalous); "
-                "primary thr = train top-percentile. "
-                "Upstream: ruiking04/RoCA. Primary metric = VUS-PR."
+                "threshold = train score q0.99 by default. "
+                "Upstream: ruiking04/RoCA."
             ),
         },
         "score_polarity": "higher_is_anomaly",
         "metrics": {
             "eval_split": "valid",
             "test_held_out": True,
-            "primary_metric": "vus_pr",
             "score_polarity": "higher_is_anomaly",
-            "vus_pr": eval_bundle["primary"]["vus_pr"],
-            "pr_auc": eval_bundle["pr_auc"],
-            "vus_window": eval_bundle.get("vus_window"),
-            "r_auc_pr": vus.get("r_auc_pr"),
             "score_distribution": eval_bundle.get("score_distribution"),
             "event_score_diagnostics": eval_bundle.get("event_score_diagnostics"),
             "event_f1": event.get("f1"),
@@ -150,9 +145,6 @@ def write_roca_prediction(
             **(metrics_extra or {}),
         },
         "paper_metrics": {
-            "primary_metric": "vus_pr",
-            "vus_pr": eval_bundle["primary"]["vus_pr"],
-            "pr_auc": eval_bundle["pr_auc"],
             "event": {
                 "f1": event.get("f1"),
                 "precision": event.get("precision"),
