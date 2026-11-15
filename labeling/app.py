@@ -517,16 +517,10 @@ def _model_metrics_tag(pred: dict) -> tuple[str, str]:
     key = model if model not in ("", "none") else src
     if key.startswith("roca"):
         return "RoCA", "#0f766e"
-    if key.startswith("riad"):
-        return "RiAD", "#5b21b6"
-    if key.startswith("msrs"):
-        return "MSRS", "#b45309"
     if key.startswith("lstm"):
         return "LSTM-AD", "#0369a1"
     if "anomalytransformer" in key or key.startswith("at"):
         return "AnomalyTransformer", "#7c3aed"
-    if key.startswith("omni"):
-        return "OmniAnomaly", "#be185d"
     # Fallback: capitalize source stem
     stem = (pred.get("model") or pred.get("source") or "Model")
     stem = str(stem).split("_")[0]
@@ -871,7 +865,7 @@ def _pred_uses_feature_subset(preds: dict | None = None) -> bool:
     # "all" / "core" / "all_raw" = the active paper feature universe (now core).
     return mode in ("comb", "comb_share", "selected") or (
         mode not in ("all", "core", "all_raw", None)
-        and source not in ("", "omnianomaly")
+        and source != ""
         and bool(cols)
     )
 
@@ -2094,8 +2088,6 @@ def _hover_panel_at_row(row: pd.Series):
         higher = True
         pol = str(preds.get("score_polarity") or "")
         if pol in ("lower_is_anomaly", "low", "lt"):
-            higher = False
-        elif str(preds.get("source") or "").startswith("omnianomaly"):
             higher = False
         anomalous = (score > thr) if higher else (score < thr)
         flag = " · anomaly" if thr is not None and anomalous else ""
@@ -7063,7 +7055,7 @@ app.clientside_callback(
                     text += '\\nAnomaly score = ' + formatScoreNumber(score);
                     if (thr != null) {
                         text += '\\nthreshold = ' + formatScoreNumber(thr);
-                        // RiAD / paperib default: higher score = anomaly
+                        // paperib default: higher score = anomaly
                         var higher = true;
                         if (cache.score_polarity === 'lower_is_anomaly'
                             || cache.score_polarity === 'low'
