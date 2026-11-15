@@ -1,0 +1,132 @@
+{
+  "plmn": "P2309",
+  "updated_at": "2026-11-15T12:40:16.253363+00:00",
+  "comparison": "silhouette_selected_contiguous_context_vs_fixed_24_hour",
+  "selected_k": 2,
+  "selected_silhouette": 0.11728075326766613,
+  "same_hyperparameters": true,
+  "train_labels_used": false,
+  "valid": {
+    "adaptive_context": {
+      "primary_metric": "vus_pr",
+      "vus_pr": 0.11096837480011551,
+      "pr_auc": 0.09905573767344669,
+      "r_auc_pr": 0.06632871455100298,
+      "vus_window": 31,
+      "event_f1": 0.013201320132013201,
+      "event_precision": 0.006644518272425249,
+      "event_recall": 1.0,
+      "n_gt_events": 1,
+      "n_pred_events": 602,
+      "n_hit_gt": 1,
+      "precision": 0.03625377643504532,
+      "recall": 0.7741935483870968,
+      "f1": 0.06926406926406928,
+      "tp": 24,
+      "fp": 638,
+      "fn": 7,
+      "false_alarms_per_day": 22.82926829268293,
+      "n_false_alarm_events": 598,
+      "observation_days": 26.194444444444443,
+      "mean_detection_delay_min": 0.0,
+      "median_detection_delay_min": 0.0,
+      "n_detected_events": 1,
+      "n_missed_events": 0,
+      "score_distribution": {
+        "fraction_above_threshold": 0.08775185577942736,
+        "q50": -0.03712627632720729,
+        "q90": 2.006981654501547,
+        "q95": 16.090260804121815,
+        "q99": 979.1783499027719,
+        "max": 1699161.9155213605
+      },
+      "event_score_diagnostics": [
+        {
+          "event_id": 1,
+          "start_index": 7438,
+          "end_index": 7468,
+          "length_points": 31,
+          "detected": true,
+          "n_pred_points": 24,
+          "max_score": 6764.703799995591,
+          "mean_score": 712.3132055409965,
+          "max_score_percentile": 0.9980116648992576,
+          "mean_score_percentile": 0.9887327677624602
+        }
+      ]
+    },
+    "fixed_hour24": {
+      "primary_metric": "vus_pr",
+      "vus_pr": 0.2819378993655079,
+      "pr_auc": 0.2648254420052112,
+      "r_auc_pr": 0.16047571181116704,
+      "vus_window": 31,
+      "event_f1": 0.003857280617164899,
+      "event_precision": 0.001932367149758454,
+      "event_recall": 1.0,
+      "n_gt_events": 1,
+      "n_pred_events": 1035,
+      "n_hit_gt": 1,
+      "precision": 0.022998296422487224,
+      "recall": 0.8709677419354839,
+      "f1": 0.04481327800829876,
+      "tp": 27,
+      "fp": 1147,
+      "fn": 4,
+      "false_alarms_per_day": 39.43584305408272,
+      "n_false_alarm_events": 1033,
+      "observation_days": 26.194444444444443,
+      "mean_detection_delay_min": 0.0,
+      "median_detection_delay_min": 0.0,
+      "n_detected_events": 1,
+      "n_missed_events": 0,
+      "score_distribution": {
+        "fraction_above_threshold": 0.1556203605514316,
+        "q50": -0.01477896961615933,
+        "q90": 5.436579251304897,
+        "q95": 11.677227925838535,
+        "q99": 97.24781643305813,
+        "max": 120416.92647488407
+      },
+      "event_score_diagnostics": [
+        {
+          "event_id": 1,
+          "start_index": 7438,
+          "end_index": 7468,
+          "length_points": 31,
+          "detected": true,
+          "n_pred_points": 27,
+          "max_score": 1408.5328777260536,
+          "mean_score": 419.7351424610995,
+          "max_score_percentile": 0.9982767762460233,
+          "mean_score_percentile": 0.9961558854718982
+        }
+      ]
+    },
+    "delta_adaptive_minus_hour24": {
+      "vus_pr": -0.17096952456539238,
+      "pr_auc": -0.1657697043317645,
+      "r_auc_pr": -0.09414699726016407,
+      "event_f1": 0.009344039514848303,
+      "event_precision": 0.0047121511226667955,
+      "event_recall": 0.0,
+      "n_gt_events": 0.0,
+      "n_pred_events": -433.0,
+      "n_hit_gt": 0.0,
+      "precision": 0.013255480012558097,
+      "recall": -0.09677419354838712,
+      "f1": 0.024450791255770515,
+      "tp": -3.0,
+      "fp": -509.0,
+      "fn": 3.0,
+      "false_alarms_per_day": -16.606574761399788,
+      "n_false_alarm_events": -435.0,
+      "n_detected_events": 0.0,
+      "n_missed_events": 0.0
+    }
+  },
+  "paths": {
+    "adaptive_context": "/Users/oksjjj/coding/paperib/data/ib_data/predictions/P2309_context_ae_valid.json",
+    "fixed_hour24": "/Users/oksjjj/coding/paperib/data/ib_data/predictions/P2309_hour_ae_valid.json"
+  }
+}
