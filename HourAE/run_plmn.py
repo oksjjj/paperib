@@ -59,7 +59,7 @@ from tool import (
 
 
 def _load_metrics():
-    path = REPO / "RiAD" / "metrics.py"
+    path = REPO / "common" / "metrics.py"
     spec = importlib.util.spec_from_file_location("paperib_metrics_hourae", path)
     if spec is None or spec.loader is None:
         raise ImportError(path)
@@ -69,7 +69,7 @@ def _load_metrics():
 
 
 paper_metrics = _load_metrics()
-evaluate_valid = paper_metrics.evaluate_riad_valid
+evaluate_valid = paper_metrics.evaluate_valid
 resolve_vus_window = paper_metrics.resolve_vus_window
 
 
