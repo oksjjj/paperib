@@ -201,7 +201,7 @@ Ho와 Armanfard는 contaminated multivariate time series에서 anomaly label 없
 - iterative filtering 또는 sample reweighting 방식
 - contamination ratio에 대한 민감도
 
-**추가 문헌 검토 예정:** RoCA, RiAD 및 contaminated-training/robust TSAD 관련 4~6편.
+**추가 문헌 검토 예정:** RoCA 및 contaminated-training/robust TSAD 관련 4~6편.
 
 ## 2.3 Temporal Context, Seasonality와 Context-dependent Normality
 
@@ -820,7 +820,7 @@ direction-aware scoring이 구현된 이후에는 다섯 번째 질문을 추가
 
 가능한 경우 contaminated training을 직접 다루는 기존 TSAD 방법을 external baseline으로 추가한다.
 
-P0480 개발 과정에서 전체 feature를 사용해 얻은 RoCA, MSRS, HourAE, Adaptive ContextAE 결과는 preliminary failure analysis와 연구 동기 설명에만 활용한다. 최종 main comparison에서는 RoCA를 포함한 모든 baseline과 제안 방법을 동일한 11개 core feature 및 동일한 evaluation protocol에서 처음부터 재학습·재평가한다.
+P0480 개발 과정에서 전체 feature를 사용해 얻은 RoCA, HourAE, Adaptive ContextAE 결과는 preliminary failure analysis와 연구 동기 설명에만 활용한다. 최종 main comparison에서는 RoCA를 포함한 모든 baseline과 제안 방법을 동일한 11개 core feature 및 동일한 evaluation protocol에서 처음부터 재학습·재평가한다.
 
 ## 5.3 평가 지표
 
@@ -889,8 +889,6 @@ $$
 - FA/day: 약 1.61
 
 이 결과는 false alarm의 수 자체는 적었지만 여러 operational GT anomaly의 ranking이 충분히 높지 않음을 보여주었다.
-
-이후 multi-scale reconstruction/prediction 기반 internal pilot인 MSRS에서는 VUS-PR이 약 0.108, PR-AUC가 약 0.434로 상승했으나 FA/day가 약 4.37로 증가하였다.
 
 이러한 실험은 복잡한 sequence 구조를 계속 추가하는 것보다 시간에 따라 정상 상태 자체를 분리하여 학습할 필요성을 제기하였다.
 
@@ -1242,11 +1240,6 @@ direction-aware scoring은 모델 입력값을 임의로 clipping하는 대신 �
 - DOI: https://doi.org/10.1109/TNNLS.2026.3702237
 - arXiv: https://arxiv.org/abs/2503.18385
 
-[10] Z. Chen, Z. Li, X. Chen, X. Chen, H. Fan, and R. Hu,  
-**“Rectifying inaccurate unsupervised learning for robust time series anomaly detection,”** *Information Sciences*, vol. 662, 120222, 2024.  
-- 역할: RiAD, contaminated training에서 uncertainty와 adaptive reconstruction loss 활용
-- 주소: https://doi.org/10.1016/j.ins.2024.120222
-
 [11] W. Li, C. Feng, T. Chen, and J. Zhu,  
 **“Robust Learning of Deep Time Series Anomaly Detection Models with Contaminated Training Data,”** 2022.  
 - 역할: 여러 deep TSAD가 contamination에 얼마나 민감한지 분석하고 model-agnostic robust learning 제안
@@ -1419,12 +1412,6 @@ direction-aware scoring은 모델 입력값을 임의로 clipping하는 대신 �
 ## 7순위 — 대표 TSAD 모델 및 Benchmark
 
 최종적으로 기존 TSAD 분야의 대표적인 방법을 읽어 현재 연구가 어떤 계열과 다른지 정리한다.
-
-[25] Y. Su, Y. Zhao, C. Niu, R. Liu, W. Sun, and D. Pei,  
-**“Robust Anomaly Detection for Multivariate Time Series through Stochastic Recurrent Neural Network,”** *KDD*, 2019.  
-- 모델: OmniAnomaly
-- 역할: stochastic RNN 기반 multivariate sequence modeling
-- 주소: https://www.kdd.org/kdd2019/accepted-papers/view/robust-anomaly-detection-for-multivariate-time-series-through-stochastic-re
 
 [26] J. Audibert, P. Michiardi, F. Guyard, S. Marti, and M. A. Zuluaga,  
 **“USAD: UnSupervised Anomaly Detection on Multivariate Time Series,”** *KDD Workshop*, 2020.  
