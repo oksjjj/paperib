@@ -84,14 +84,14 @@ FIGURE_HEIGHT = (
 
 ANOMALY_FILL = "rgba(201, 162, 39, 0.28)"
 ANOMALY_LINE = "#c9a227"
-# OmniAnomaly (and other model) predictions — distinct from human labels.
+# Model predictions — distinct from human labels.
 MODEL_FILL = "rgba(124, 58, 237, 0.22)"
 MODEL_LINE = "#7c3aed"
 ANOMALY_SCORE_KEY = "__anomaly_score__"
 ANOMALY_SCORE_COLOR = "#7c3aed"
 ANOMALY_SCORE_THRESHOLD_COLOR = "#c026d3"
 
-# Chronological train / valid / test bands (OmniAnomaly IB split).
+# Chronological train / valid / test bands.
 # Opacity is high enough to read on top of panel_bg fills (#f7f5f1 etc.).
 # Chrono split bands — keep distinct from human anomaly (gold) and model (purple).
 SPLIT_TRAIN_BAND = "rgba(14, 165, 233, 0.14)"   # sky blue
@@ -401,7 +401,7 @@ def chrono_split_bounds(
     """Resolve train / valid / test UTC bounds for the IB chronological split.
 
     Prefer ``predictions['split']`` from ``run_plmn`` export; otherwise use the
-    same default ratios as OmniAnomaly (0.6 / 0.2 / 0.2).
+    default ratios 0.6 / 0.2 / 0.2.
     """
     if df is None or not len(df):
         return None
@@ -755,16 +755,12 @@ def save_labels(doc: dict[str, Any]) -> str:
     return path
 
 
-def pred_path(plmn: str, source: str = "riad") -> str:
+def pred_path(plmn: str, source: str = "") -> str:
     return os.path.join(PRED_DIR, f"{plmn}_{source}.json")
 
 
 def list_prediction_sources(plmn: str) -> list[dict[str, str]]:
-    """Dropdown options for available model prediction JSON files.
-
-    Returns an empty list when no ``{plmn}_*.json`` exports exist — the UI
-    shows a placeholder instead of a fake RiAD entry.
-    """
+    """Dropdown options for available prediction JSON files."""
     options: list[dict[str, str]] = []
     if not os.path.isdir(PRED_DIR):
         return []
@@ -779,144 +775,26 @@ def list_prediction_sources(plmn: str) -> list[dict[str, str]]:
                 doc = json.load(f)
         except (OSError, json.JSONDecodeError):
             doc = {}
-        # Listing only needs metadata — drop heavy score_series ASAP.
         doc.pop("score_series", None)
-        is_at = source.startswith("anomalytransformer") or doc.get(
-            "model"
-        ) == "anomalytransformer"
-        is_classical = (
-            source.startswith("classical")
-            or doc.get("model") == "classical"
-        )
-        is_lstm = (
-            source.startswith("lstm_ad")
-            or doc.get("model") == "lstm_ad"
-        )
-        is_riad = (
-            source.startswith("riad")
-            or doc.get("model") == "riad"
-            or str(doc.get("source") or "").startswith("riad")
-        )
-        is_roca = (
-            source.startswith("roca")
-            or doc.get("model") == "roca"
-            or str(doc.get("source") or "").startswith("roca")
-        )
-        is_msrs = (
-            source.startswith("msrs")
-            or doc.get("model") == "msrs"
-            or str(doc.get("source") or "").startswith("msrs")
-        )
+        model = str(doc.get("model") or source)
+        run = str(doc.get("run_name") or "paperib")
         n_seg = len(doc.get("labels") or [])
-
-        if is_riad or is_roca or is_msrs:
-            run = doc.get("run_name") or "paperib"
-            try:
-                win = int(doc["window_length"]) if doc.get("window_length") is not None else (
-                    100 if is_riad else (32 if is_roca else 0)
-                )
-            except (TypeError, ValueError):
-                win = 100 if is_riad else (32 if is_roca else 0)
-            cols = doc.get("feature_columns") or []
-            if is_riad:
-                tag, family = "RiAD", 0
-            elif is_roca:
-                tag, family = "RoCA", 1
-            else:
-                tag, family = "MSRS", 2
-            win_bit = f" · win={win}" if win else ""
-            label = (
-                f"{tag} · {run} · 전체 raw{win_bit} "
-                f"({len(cols)}d, {n_seg}구간)"
+        cols = doc.get("feature_columns") or []
+        label = f"{model} · {run} ({len(cols)}d, {n_seg}구간)"
+        family = 0 if model.lower().startswith("context") else (
+            1 if model.lower().startswith("hour") else (
+                2 if model.lower().startswith("roca") else 9
             )
-            view_ord = 0
-            options.append(
-                {
-                    "label": label,
-                    "value": source,
-                    "_sort": (family, view_ord, win, source),
-                }
-            )
-            continue
-
-        if is_classical or is_lstm:
-            run = doc.get("run_name") or "paperib"
-            if is_classical:
-                label = f"Classical · IQR+EWMA · {run} ({n_seg}구간)"
-                family = 3
-            else:
-                try:
-                    win = int(doc["window"]) if doc.get("window") is not None else int(
-                        (doc.get("metrics") or {}).get("window") or 32
-                    )
-                except (TypeError, ValueError):
-                    win = 32
-                label = f"LSTM-AD · forecast residual · {run} · win={win} ({n_seg}구간)"
-                family = 4
-            view_ord = {"paperib": 0, "comb": 1, "comb_share": 2}.get(str(run), 9)
-            if is_classical:
-                win = 0
-        else:
-            # OmniAnomaly (default) or Anomaly Transformer only.
-            model_name = "Anomaly Transformer" if is_at else "OmniAnomaly"
-            if not is_at and not (
-                source.startswith("omnianomaly")
-                or source == "omnianomaly"
-                or doc.get("model") in (None, "", "omnianomaly")
-            ):
-                # Unknown model file — show its model/source id, never fake OA.
-                model_name = str(doc.get("model") or source)
-            run = doc.get("run_name")
-            if not run:
-                stem = source
-                if stem.startswith("anomalytransformer_"):
-                    stem = stem[len("anomalytransformer_") :]
-                elif stem == "anomalytransformer":
-                    stem = "paperib"
-                elif stem.startswith("omnianomaly_"):
-                    stem = stem[len("omnianomaly_") :]
-                elif stem == "omnianomaly":
-                    stem = "paperib"
-                # Strip non-default window suffix: comb_w200 → comb
-                run = re.sub(r"_w\d+$", "", stem) or "paperib"
-            cols = doc.get("feature_columns") or []
-            mode = doc.get("feature_mode") or (
-                "all"
-                if run == "paperib"
-                else "selected"
-            )
-            # Existing exports used window_length=100; default so older JSON still shows it.
-            try:
-                win = int(doc["window_length"]) if doc.get("window_length") is not None else 100
-            except (TypeError, ValueError):
-                win = 100
-            if mode == "all" or run == "paperib":
-                feat = "전체 raw metrics"
-            elif mode == "comb_share" or run == "comb_share":
-                feat = "M971 + other÷M971"
-            elif mode == "comb" or run == "comb":
-                feat = "selected counters + S_RATE/A_RATE"
-            else:
-                preview = ",".join(str(c) for c in cols[:4])
-                if len(cols) > 4:
-                    preview = f"{preview},…"
-                feat = f"선별 ({preview})"
-            label = (
-                f"{model_name} · {run} · {feat} · win={win} "
-                f"({len(cols)}d, {n_seg}구간)"
-            )
-            family = 0 if not is_at else 1
-            view_ord = {"paperib": 0, "comb": 1, "comb_share": 2}.get(str(run), 9)
+        )
         options.append(
             {
                 "label": label,
                 "value": source,
-                "_sort": (family, view_ord, win, source),
+                "_sort": (family, source),
             }
         )
     options.sort(key=lambda o: o.pop("_sort"))
     return options
-
 
 def empty_pred_doc(plmn: str, source: str = "") -> dict[str, Any]:
     return {
@@ -1036,7 +914,7 @@ def paper_metrics_from_ib_saved(
     *,
     metrics_split: str = "valid",
 ) -> dict[str, dict[str, Any]]:
-    """Map Omni/AT/baseline ``metrics`` → pot / best_f1 UI blocks for one split."""
+    """Map legacy metric dictionaries to UI blocks for one split."""
     m = metrics or {}
     out: dict[str, dict[str, Any]] = {}
     split = "test" if metrics_split == "test" else "valid"
@@ -1134,7 +1012,7 @@ def _point_metrics(pred: np.ndarray, actual: np.ndarray) -> dict[str, float]:
 
 
 def adjust_predicts(pred: np.ndarray, label: np.ndarray) -> np.ndarray:
-    """OmniAnomaly point-adjustment (segment hit → fill whole GT segment)."""
+    """Point-adjustment helper (segment hit → fill whole GT segment)."""
     predict = np.asarray(pred, dtype=bool).copy()
     actual = np.asarray(label, dtype=bool)
     anomaly_state = False
@@ -1157,10 +1035,7 @@ def score_higher_is_anomaly(
     *,
     source: str | None = None,
 ) -> bool:
-    """RiAD (and current paperib default): higher score = more anomalous.
-
-    Legacy OmniAnomaly/AT used lower-is-anomalous; those runners are removed.
-    """
+    """Return whether larger scores mean more anomalous."""
     if predictions is None and source is None:
         return True
     pol = str((predictions or {}).get("score_polarity") or "")
@@ -1168,13 +1043,6 @@ def score_higher_is_anomaly(
         return True
     if pol in ("lower_is_anomaly", "low", "lt"):
         return False
-    src = str(source or (predictions or {}).get("source") or "")
-    model = str((predictions or {}).get("model") or "")
-    if src.startswith("riad") or model == "riad":
-        return True
-    if src.startswith("roca") or model == "roca":
-        return True
-    # Default for paperib after OA removal.
     return True
 
 
@@ -1281,17 +1149,6 @@ def best_f1_threshold(
     return best_thr, best_live
 
 
-def is_riad_prediction(
-    predictions: dict[str, Any] | None,
-    *,
-    source: str | None = None,
-) -> bool:
-    """True for RiAD backbone overlays."""
-    src = str(source or (predictions or {}).get("source") or "")
-    model = str((predictions or {}).get("model") or "")
-    return src.startswith("riad") or model == "riad"
-
-
 def is_roca_prediction(
     predictions: dict[str, Any] | None,
     *,
@@ -1308,10 +1165,8 @@ def is_paper_backbone_prediction(
     *,
     source: str | None = None,
 ) -> bool:
-    """RiAD or RoCA contamination-robust backbone overlays."""
-    return is_riad_prediction(predictions, source=source) or is_roca_prediction(
-        predictions, source=source
-    )
+    """True for the retained contamination-robust backbone overlay."""
+    return is_roca_prediction(predictions, source=source)
 
 
 def has_vus_paper_metrics(predictions: dict[str, Any] | None) -> bool:
@@ -1378,17 +1233,17 @@ def paper_metrics_from_flat_metrics(
 
 
 def _load_evaluate_valid():
-    """Lazy-load RiAD ``evaluate_riad_valid`` (shared paper metrics)."""
+    """Lazy-load shared paper metrics."""
     import importlib.util
     from pathlib import Path
 
-    path = Path(__file__).resolve().parents[1] / "RiAD" / "metrics.py"
-    spec = importlib.util.spec_from_file_location("riad_metrics_ui", path)
+    path = Path(__file__).resolve().parents[1] / "common" / "metrics.py"
+    spec = importlib.util.spec_from_file_location("paperib_metrics_ui", path)
     if spec is None or spec.loader is None:
         raise ImportError(f"cannot load {path}")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    return mod.evaluate_riad_valid
+    return mod.evaluate_valid
 
 
 def paper_metrics_from_vus_bundle(
@@ -1398,7 +1253,7 @@ def paper_metrics_from_vus_bundle(
     threshold: float | None = None,
     threshold_method: str | None = None,
 ) -> dict[str, Any]:
-    """Map ``evaluate_riad_valid`` output → UI ``paper_metrics`` block."""
+    """Map shared evaluation output to the UI metric block."""
     point = bundle.get("point") or {}
     event = bundle.get("event") or {}
     op = bundle.get("operational") or {}
@@ -1501,15 +1356,14 @@ def is_baseline_percentile_prediction(
     *,
     source: str | None = None,
 ) -> bool:
-    """RiAD / Classical / LSTM-AD (train percentile thr, not POT)."""
+    """Models using a train-derived percentile threshold."""
     src = str(source or (predictions or {}).get("source") or "")
     model = str((predictions or {}).get("model") or "")
     return (
-        src.startswith("riad")
-        or src.startswith("roca")
+        src.startswith("roca")
         or src.startswith("classical")
         or src.startswith("lstm_ad")
-        or model in ("riad", "roca", "classical", "lstm_ad")
+        or model in ("roca", "classical", "lstm_ad")
     )
 
 
@@ -1536,19 +1390,6 @@ def primary_threshold_label(
                     "point / PA (valid)"
                 ),
                 "overlay": "percentile / OR",
-            }
-        if str(src).startswith("riad") or model == "riad":
-            return {
-                "short": "percentile",
-                "title": "[percentile]",
-                "radio": "percentile (train · RiAD)",
-                "note": (
-                    "primary thr · train top-percentile on recon MSE "
-                    "(higher = more anomalous). "
-                    "Validation evaluation with train-score percentile threshold."
-                ),
-                "heading": "RiAD metrics — Event-F1 / Point P-R-F1 / operational",
-                "overlay": "percentile",
             }
         if str(src).startswith("roca") or model == "roca":
             return {
@@ -1612,7 +1453,7 @@ def thresholds_from_pred_doc(predictions: dict[str, Any]) -> dict[str, float | N
 
     Keys (UI order): ``pot`` (primary), ``best_f1_point``, ``best_f1`` (PA).
     Primary is under ``pot`` for both OA (POT) and AT/baselines (percentile).
-    Saved ``valid-bf-*`` is PA (OmniAnomaly ``bf_search``); point oracle is live-only.
+    Saved ``valid-bf-*`` is PA; point oracle is live-only.
 
     Important: do **not** treat ``predictions["threshold"]`` / ``score_series.threshold``
     as the primary thr after a UI mode switch — those track the *active* overlay thr.
@@ -1658,7 +1499,7 @@ def mask_to_pred_labels(
     *,
     scores: np.ndarray | None = None,
     id_prefix: str = "pred",
-    source: str = "omnianomaly",
+    source: str = "model",
 ) -> list[dict[str, Any]]:
     """Boolean mask → UI prediction segments (no attribution)."""
     mask = np.asarray(mask, dtype=bool).reshape(-1)
@@ -1717,7 +1558,7 @@ def rebuild_pred_labels_for_threshold(
         df["time"],
         scores=score,
         id_prefix=id_prefix,
-        source=str(predictions.get("source") or "riad"),
+        source=str(predictions.get("source") or "model"),
     )
 
 
@@ -1749,8 +1590,8 @@ def enrich_predictions_for_ui(
     )
     thresholds = thresholds_from_pred_doc(doc)
     export_paper = doc.get("paper_metrics")
-    # Prefer shared VUS schema from any model export (RiAD/RoCA/MSRS/…).
-    # Do not replace with the legacy Omni/AT pot/best_f1 mapper.
+    # Prefer the shared metric schema from current model exports.
+    
     flat_vus = paper_metrics_from_flat_metrics(
         doc.get("metrics") or {},
         eval_split=split_choice,
@@ -2238,7 +2079,7 @@ def score_hover_arrays(
     return plot_ms[finite].tolist(), scores[finite].tolist()
 
 
-def score_cache_path(plmn: str, source: str = "omnianomaly") -> str:
+def score_cache_path(plmn: str, source: str = "model") -> str:
     safe = str(source).replace("/", "_")
     return os.path.join(CACHE_DIR, f"{plmn}_score_{safe}.pkl")
 
@@ -2292,7 +2133,7 @@ def ensure_score_column(
     if not predictions or not len(out):
         return out
     plmn = str(plmn or predictions.get("plmn") or "")
-    source = str(source or predictions.get("source") or "omnianomaly")
+    source = str(source or predictions.get("source") or "model")
     score_scale = predictions.get("score_scale")
     if not plmn:
         values = align_scores_to_df(out, predictions)
