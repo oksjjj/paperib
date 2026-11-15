@@ -4166,7 +4166,9 @@
     "test_held_out": true,
     "train_labels_used": false,
     "validation_labels_used_for_training": false,
-    "validation_labels_used_for_context_selection": false
+    "validation_labels_used_for_context_selection": false,
+    "vus_roc": 0.9986022308484972,
+    "auc_pr": 0.6618235358730675
   },
   "segmentation": {
     "method": "train_only_robust_profile_contiguous_dp",
@@ -50669,5 +50671,15 @@
       4.145877483097138e-06
     ],
     "threshold": 3.0
-  }
+  },
+  "paper_metrics": {
+    "primary_metric": "vus_pr",
+    "vus_pr": 0.46406907554137466,
+    "vus_roc": 0.9986022308484972,
+    "r_auc_pr": 0.7016740064613894,
+    "auc_pr": 0.6618235358730675,
+    "vus_window": 1,
+    "eval_split": "valid"
+  },
+  "vus_evaluated_at": "2026-11-15T13:07:58.105156+00:00"
 }

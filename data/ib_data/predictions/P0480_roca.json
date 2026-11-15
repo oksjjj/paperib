@@ -15349,7 +15349,13 @@
     "anomaly_ratio": 1.0,
     "seed": 2,
     "epochs": 20,
-    "lr": 0.0003
+    "lr": 0.0003,
+    "primary_metric": "vus_pr",
+    "vus_pr": 0.08669946817914213,
+    "vus_roc": 0.7174134253221071,
+    "r_auc_pr": 0.10367271869966231,
+    "auc_pr": 0.44799591516929277,
+    "vus_window": 6
   },
   "paper_metrics": {
     "event": {
@@ -15449,6 +15455,13 @@
     "threshold_method": "percentile",
     "score_polarity": "higher_is_anomaly",
     "eval_split": "valid",
-    "note": "PA-F1 / Accuracy excluded from primary reporting"
-  }
+    "note": "PA-F1 / Accuracy excluded from primary reporting",
+    "primary_metric": "vus_pr",
+    "vus_pr": 0.08669946817914213,
+    "vus_roc": 0.7174134253221071,
+    "r_auc_pr": 0.10367271869966231,
+    "auc_pr": 0.44799591516929277,
+    "vus_window": 6
+  },
+  "vus_evaluated_at": "2026-11-15T13:07:56.277008+00:00"
 }

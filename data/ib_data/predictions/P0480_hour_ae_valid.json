@@ -8989,7 +8989,9 @@
     ],
     "test_held_out": true,
     "train_labels_used": false,
-    "validation_labels_used_for_training": false
+    "validation_labels_used_for_training": false,
+    "vus_roc": 0.9065036111428503,
+    "auc_pr": 0.4841680247903961
   },
   "training": {
     "method": "24_hour_autoencoder_iterative_decontamination",
@@ -47152,5 +47154,15 @@
       0.0023083181586116552
     ],
     "threshold": 3.0
-  }
+  },
+  "paper_metrics": {
+    "primary_metric": "vus_pr",
+    "vus_pr": 0.13347465717105672,
+    "vus_roc": 0.9065036111428503,
+    "r_auc_pr": 0.15944588283077898,
+    "auc_pr": 0.4841680247903961,
+    "vus_window": 6,
+    "eval_split": "valid"
+  },
+  "vus_evaluated_at": "2026-11-15T13:07:56.201256+00:00"
 }
