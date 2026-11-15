@@ -4,7 +4,6 @@
 
 ```text
 results/
-├── riad/{PLMN}/
 │   ├── valid_metrics.json
 │   ├── hp_random_results.csv
 │   └── …
