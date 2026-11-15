@@ -1,1 +1,0 @@
-"""MSRS research prototype."""
