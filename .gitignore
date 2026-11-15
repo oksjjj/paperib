@@ -67,7 +67,6 @@ events.out.tfevents.*
 /_vendor/
 
 # --- Training checkpoints (metrics live under results/) ---
-/RiAD/model/
 /RoCA/model/
 
 # --- Local caches / analysis ---
