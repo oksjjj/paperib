@@ -1,9 +1,9 @@
 # RoCA × paperib
 
-Official contamination-robust TSAD ([ruiking04/RoCA](https://github.com/ruiking04/RoCA), MIT) adapted for IB comparison with RiAD.
+Official contamination-robust TSAD ([ruiking04/RoCA](https://github.com/ruiking04/RoCA), MIT) adapted for IB contaminated-training comparison.
 
 - Network / loss / augmentations: `RoCA/official/` (upstream excerpts)
-- Runner: Merlion-free; same valid-only export + VUS-PR metrics as RiAD
+- Runner: Merlion-free; valid-only export with shared evaluation metrics
 - Score: distance-to-center (`loss_n`, **higher = anomaly**)
 - Thr: train top-percentile (`--anomaly_ratio`)
 
@@ -17,7 +17,7 @@ cd RoCA
 Export: `data/ib_data/predictions/P0480_roca.json`  
 Checkpoint: `RoCA/model/P0480/paperib/roca.pt`
 
-라벨링 UI에서 예측 소스 `RoCA · …` 로 RiAD와 전환 비교.
+라벨링 UI에서 예측 소스 `RoCA · …` 로 결과를 확인.
 
 ## Defaults
 
