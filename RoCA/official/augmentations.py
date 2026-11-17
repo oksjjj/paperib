@@ -23,14 +23,9 @@ def DataTransform(sample, config):
     # weak augmentation: window의 feature별 크기를 랜덤하게 확대/축소한다.
     weak_aug = scaling(sample, config.augmentation.scale_ratio)
 
-    # 아래 방식들은 원본 코드에 있던 다른 후보 증강이다.
-    # 현재 paperib 실행에서는 사용하지 않으며 참고용으로 남겨둔다.
-    # weak_aug = magnitude_warp(sample, config.augmentation.jitter_scale_ratio)
-    # strong_aug = jitter(
-    #     permutation(sample, max_segments=config.augmentation.max_seg),
-    #     config.augmentation.jitter_ratio,
-    # )
-    # strong_aug = jitter(rotation(sample), config.augmentation.jitter_ratio)
+    # 원본 코드에는 magnitude_warp, permutation, rotation을 조합한
+    # 다른 증강 후보도 있었지만 현재 paperib 실행 경로에서는 사용하지 않는다.
+    # 필요하면 아래에 정의된 각 함수를 DataTransform에서 직접 호출해 비교할 수 있다.
 
     # strong augmentation: 원 신호에 Gaussian noise를 직접 더한다.
     strong_aug = jitter(sample, config.augmentation.jitter_ratio)
