@@ -465,6 +465,8 @@ def score_with_hour_models(
             x,
             batch_size=cfg.batch_size,
             device=device,
+            feature_columns=feature_columns,
+            direction_aware=True,
         )
         raw_mse[idx] = mse
         z_scores[idx] = (
