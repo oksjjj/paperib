@@ -527,6 +527,66 @@ def _model_metrics_tag(pred: dict) -> tuple[str, str]:
     return stem.upper() if len(stem) <= 6 else stem, "#334155"
 
 
+def _threshold_evaluation_table(pred: dict) -> Any | None:
+    block = pred.get("threshold_evaluation") or {}
+    methods = list(block.get("methods") or [])
+    if not methods:
+        return None
+
+    header = html.Tr(
+        [
+            html.Th("Method"),
+            html.Th("Event-F1"),
+            html.Th("Point-F1"),
+            html.Th("Precision"),
+            html.Th("Recall"),
+            html.Th("FA/day"),
+        ]
+    )
+    body = []
+    for row in methods:
+        body.append(
+            html.Tr(
+                [
+                    html.Td(str(row.get("label") or row.get("key") or "—")),
+                    html.Td(_fmt_opt(row.get("event_f1"))),
+                    html.Td(_fmt_opt(row.get("f1"))),
+                    html.Td(_fmt_opt(row.get("precision"))),
+                    html.Td(_fmt_opt(row.get("recall"))),
+                    html.Td(_fmt_opt(row.get("false_alarms_per_day"), digits=3)),
+                ]
+            )
+        )
+
+    return html.Div(
+        [
+            html.Div(
+                "ContextAE threshold comparison (validation)",
+                style={"fontWeight": "700", "marginBottom": "4px"},
+            ),
+            html.Div(
+                "각 threshold는 context별 clean TRAIN reconstruction error에서 계산하며, "
+                "validation label은 성능 평가에만 사용합니다.",
+                style={"fontSize": "11px", "color": "#64748b", "marginBottom": "6px"},
+            ),
+            html.Table(
+                [html.Thead(header), html.Tbody(body)],
+                style={
+                    "width": "100%",
+                    "borderCollapse": "collapse",
+                    "fontFamily": "monospace",
+                    "fontSize": "11px",
+                },
+            ),
+        ],
+        style={
+            "marginTop": "10px",
+            "paddingTop": "8px",
+            "borderTop": "1px solid #cbd5e1",
+        },
+    )
+
+
 def _detection_metrics_panel(pred: dict) -> list[Any]:
     """Detection metrics panel for validation-result inspection."""
     paper = pred.get("paper_metrics") or {}
@@ -648,6 +708,9 @@ def _detection_metrics_panel(pred: dict) -> list[Any]:
             style={"fontSize": "12px", "color": "#334155"},
         ),
     ]
+    threshold_table = _threshold_evaluation_table(pred)
+    if threshold_table is not None:
+        rows.append(threshold_table)
     return rows
 
 
