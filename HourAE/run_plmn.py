@@ -264,8 +264,6 @@ def reconstruction_mse(
     *,
     batch_size: int,
     device: torch.device,
-    feature_columns: list[str] | None = None,
-    direction_aware: bool = False,
 ) -> np.ndarray:
     x = torch.from_numpy(np.asarray(x_scaled, dtype=np.float32))
     loader = DataLoader(
@@ -276,37 +274,15 @@ def reconstruction_mse(
         drop_last=False,
     )
 
-    direction_mask: torch.Tensor | None = None
-    if direction_aware:
-        if feature_columns is None or len(feature_columns) != x.shape[1]:
-            raise ValueError(
-                "feature_columns must match x_scaled when direction_aware=True"
-            )
-        direction_mask = torch.tensor(
-            [str(col) == "M971" for col in feature_columns],
-            dtype=torch.bool,
-            device=device,
-        )
-
     model.eval()
     out: list[np.ndarray] = []
     for (xb,) in loader:
         xb = xb.to(device)
         recon = model(xb)
-        residual = xb - recon
-        if direction_mask is not None:
-            evidence = torch.where(
-                direction_mask.unsqueeze(0),
-                residual,
-                torch.clamp(residual, min=0.0),
-            )
-        else:
-            evidence = residual
-        mse = torch.mean(evidence ** 2, dim=1)
+        mse = torch.mean((recon - xb) ** 2, dim=1)
         out.append(mse.detach().cpu().numpy().astype(np.float64))
 
     return np.concatenate(out) if out else np.empty(0, dtype=np.float64)
-
 
 def cpu_state_dict(model: nn.Module) -> dict[str, torch.Tensor]:
     return {
@@ -328,7 +304,6 @@ def fit_hour(
     x_hour_raw: np.ndarray,
     *,
     hour: int,
-    feature_columns: list[str],
     cfg: Config,
     device: torch.device,
 ) -> HourArtifacts:
@@ -352,8 +327,6 @@ def fit_hour(
         x1,
         batch_size=cfg.batch_size,
         device=device,
-        feature_columns=feature_columns,
-        direction_aware=True,
     )
 
     stage1_cut = quantile_for_contamination(
@@ -384,8 +357,6 @@ def fit_hour(
         x2,
         batch_size=cfg.batch_size,
         device=device,
-        feature_columns=feature_columns,
-        direction_aware=True,
     )
 
     score_mean = float(np.mean(final_clean_scores))
@@ -440,7 +411,6 @@ def score_with_hour_models(
     artifacts: dict[int, HourArtifacts],
     *,
     n_features: int,
-    feature_columns: list[str],
     cfg: Config,
     device: torch.device,
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -601,12 +571,6 @@ def save_checkpoint(
     torch.save(
         {
             "feature_columns": cols,
-            "direction_aware_scoring": {
-                "enabled": True,
-                "bidirectional_features": ["M971"],
-                "increase_only_features": [c for c in cols if c != "M971"],
-                "residual_definition": "observed_minus_reconstructed",
-            },
             "config": asdict(cfg),
             "hours": {
                 str(hour): {
@@ -663,17 +627,11 @@ def write_prediction(
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "score_polarity": "higher_is_anomaly",
         "threshold": float(threshold),
-        "threshold_method": "per_hour_clean_train_directional_score_mean_plus_sigma",
+        "threshold_method": "per_hour_clean_train_mse_mean_plus_sigma",
         "timezone": cfg.timezone,
         "n_hour_models": 24,
         "feature_columns": cols,
         "feature_mode": "core",
-        "direction_aware_scoring": {
-            "enabled": True,
-            "bidirectional_features": ["M971"],
-            "increase_only_features": [c for c in cols if c != "M971"],
-            "residual_definition": "observed_minus_reconstructed",
-        },
         "n_scores": int(np.isfinite(scores).sum()),
         "n_pred_points": int(pred.sum()),
         "n_pred_segments": len(labels),
@@ -690,10 +648,9 @@ def write_prediction(
             "config": asdict(cfg),
             "hour_models": hour_summary(artifacts, cfg),
             "note": (
-                "Stage-1 removes the top direction-aware reconstruction-score tail. "
-                "M971 is bidirectional; all other core features contribute only "
-                "positive residual evidence. A fresh AutoEncoder is then trained "
-                "on retained train points. All fitting/scoring finishes before labels load."
+                "Stage-1 removes the top reconstruction-error tail. A fresh "
+                "AutoEncoder is then trained on retained train points. "
+                "All model fitting and split scoring finish before labels load."
             ),
         },
         "score_series": {
@@ -706,7 +663,7 @@ def write_prediction(
                 float(x) if np.isfinite(x) else None
                 for x in scores
             ],
-            "raw_directional_reconstruction_score": [
+            "raw_reconstruction_mse": [
                 float(x) if np.isfinite(x) else None
                 for x in raw_mse
             ],
@@ -757,7 +714,6 @@ def run(
         art = fit_hour(
             prep["train"][idx],
             hour=hour,
-            feature_columns=prep["cols"],
             cfg=cfg,
             device=device,
         )
@@ -776,7 +732,6 @@ def run(
         prep["train_hours"],
         artifacts,
         n_features=len(prep["cols"]),
-        feature_columns=prep["cols"],
         cfg=cfg,
         device=device,
     )
@@ -785,7 +740,6 @@ def run(
         prep["valid_hours"],
         artifacts,
         n_features=len(prep["cols"]),
-        feature_columns=prep["cols"],
         cfg=cfg,
         device=device,
     )
@@ -794,7 +748,6 @@ def run(
         prep["test_hours"],
         artifacts,
         n_features=len(prep["cols"]),
-        feature_columns=prep["cols"],
         cfg=cfg,
         device=device,
     )
