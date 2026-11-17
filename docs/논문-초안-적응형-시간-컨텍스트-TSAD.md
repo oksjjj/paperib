@@ -9,7 +9,7 @@
 
 # 초록
 
-실제 이동통신 운영 환경의 다변량 시계열에서는 학습 데이터에 이상 구간이 포함되어 있음에도 이상 레이블을 학습 단계에서 사용할 수 없는 경우가 많다. 또한 정상 상태의 분포가 하루 전체에서 일정하지 않고 시간대에 따라 달라질 수 있으며, 일부 지표는 값의 증가와 감소가 모두 중요하지만 다른 지표는 특정 방향의 변화만 운영상 이상으로 해석된다. 이러한 특성은 clean-normal training data를 가정하거나 하나의 전역 정상 분포를 학습하는 기존 시계열 이상 탐지 방법의 적용을 어렵게 한다.
+실제 이동통신 운영 환경의 다변량 시계열에서는 학습 데이터에 이상 구간이 포함되어 있음에도 이상 레이블을 학습 단계에서 사용할 수 없는 경우가 많다. 또한 정상 상태의 분포가 하루 전체에서 일정하지 않고 시간대에 따라 달라질 수 있다. 이러한 특성은 clean-normal training data를 가정하거나 하나의 전역 정상 분포를 학습하는 기존 시계열 이상 탐지 방법의 적용을 어렵게 한다.
 
 본 연구는 anomaly label을 사용하지 않는 contaminated training 환경에서 시간에 따른 정상성의 변화를 자동으로 발견하고, 각 시간 컨텍스트에 적합한 정상 모델을 학습하는 적응형 시간 컨텍스트 기반 이상 탐지 방법을 제안한다. 먼저 학습 데이터의 각 5분 time slot에 대해 여러 날짜의 관측치를 이용하여 median과 MAD 기반의 robust temporal profile을 구성한다. 이후 시간 순서를 유지하는 연속 분할을 적용하여 후보 컨텍스트 수 $K$별 최적 경계를 탐색하고, 학습 데이터만을 이용한 silhouette score를 기준으로 $K$를 선택한다. 각 컨텍스트에서는 AutoEncoder를 이용해 정상 패턴을 모델링하며, 1차 학습 후 높은 reconstruction error를 갖는 학습 샘플을 제거하고 새로운 AutoEncoder를 재학습하는 iterative decontamination을 적용한다.
 
@@ -43,7 +43,7 @@ $$
 p_N(X\mid C)
 $$
 
-셋째, 통계적으로 드문 변화가 모두 운영상 중요한 이상은 아니다. 일부 지표에서는 증가와 감소가 모두 중요하지만, 다른 지표에서는 특정 방향의 변화만 장애 또는 품질 저하와 관련될 수 있다. 따라서 단순한 reconstruction error만으로는 운영자의 판단 기준과 모델의 anomaly score 사이에 차이가 발생할 수 있다.
+셋째, 통계적으로 드문 변화가 모두 운영상 중요한 이상은 아니다. 전문가가 operational anomaly를 판단하는 feature 공간과 모델이 학습하는 feature 공간이 다르면 ground truth와 anomaly score의 의미가 어긋날 수 있다. 따라서 본 연구에서는 전문가 레이블링과 모델 학습에 동일한 11개 core feature를 사용한다.
 
 본 연구는 이러한 실제 이동통신 데이터의 특성을 바탕으로, **anomaly label을 사용하지 않는 contaminated training 환경에서 시간에 따라 변화하는 정상성을 적응적으로 학습하는 방법**을 연구한다.
 
@@ -135,7 +135,6 @@ $$
 
 **RQ5.** 제안 방법의 효과가 특정 개발용 사업자에만 국한되지 않고 서로 다른 10개 로밍 사업자에서 반복적으로 나타나는가?
 
-**RQ6.** feature별 운영 의미에 따른 방향성을 anomaly scoring에 반영할 경우 false alarm을 추가로 감소시킬 수 있는가? `[확장 실험 예정]`
 
 ## 1.5 연구의 기여
 
@@ -150,7 +149,6 @@ $$
 3. **Operational Evaluation on Real Telecom Data**  
    서로 다른 10개 인바운드 로밍 사업자를 대상으로 전문가가 작성한 operational ground truth를 이용하여 VUS-PR, PR-AUC, Event-F1, Event Recall, false alarms per day 등 ranking 성능과 실제 alert burden을 함께 평가한다.
 
-또한 feature별 이상 방향성을 반영하는 direction-aware scoring을 ContextAE와 HourAE에 적용하고, operational false alarm 감소 효과를 검증한다.
 
 ---
 
@@ -745,51 +743,6 @@ $$
 
 다만 P0480 preliminary 결과에서 ranking metric에 비해 FA/day가 여전히 높게 나타났기 때문에, mean + standard deviation 기반 calibration은 최종 방법의 한계로 남아 있다. 최종 연구에서는 train-only empirical quantile 또는 robust calibration을 추가로 비교할 예정이다.
 
-## 4.7 Direction-aware Anomaly Scoring
-
-실제 roaming metric은 feature에 따라 이상으로 해석되는 방향이 다르다. 본 연구의 11개 core feature 중 M971은 증가와 감소가 모두 anomaly가 될 수 있으며, 나머지 10개 feature는 증가 방향만 operational anomaly로 정의한다.
-
-AutoEncoder는 기존과 동일하게 전체 reconstruction MSE를 loss로 사용하여 학습한다. 방향성은 학습 loss를 변경하지 않고 anomaly score 계산 단계에 반영한다. RobustScaler로 변환된 feature 공간에서 residual을 다음과 같이 정의한다.
-
-$
-r_{t,f}=x_{t,f}-\hat{x}_{t,f}
-$
-
-RobustScaler는 feature별 양의 scale로 나누므로 residual의 부호는 원본 값에서의 증가·감소 방향과 동일하게 유지된다.
-
-양방향 feature 집합과 증가 방향 feature 집합은 다음과 같이 고정한다.
-
-$
-\mathcal{F}_{\pm}=\{\mathrm{M971}\}
-$
-
-$
-\mathcal{F}_{+}=\mathcal{F}\setminus\{\mathrm{M971}\}
-$
-
-feature별 direction-aware squared evidence는 다음과 같이 정의한다.
-
-$
-D_{t,f}
-=
-\begin{cases}
-r_{t,f}^{2}, & f\in\mathcal{F}_{\pm}\\
-\max(r_{t,f},0)^{2}, & f\in\mathcal{F}_{+}
-\end{cases}
-$
-
-최종 point-wise reconstruction score는
-
-$
-e_t=\frac{1}{F}\sum_{f=1}^{F}D_{t,f}
-$
-
-로 계산한다. 따라서 M971의 감소와 증가는 모두 score에 반영되지만, 나머지 실패/timeout 계열 feature에서 관측값이 reconstruction 값보다 감소한 경우에는 anomaly evidence로 반영하지 않는다.
-
-동일한 direction-aware score를 Stage 1 decontamination, final clean-train score calibration, validation/test inference에 일관되게 사용한다. 이에 따라 운영적으로 정상인 방향의 변화가 Stage 1에서 불필요하게 제거되거나 최종 anomaly score를 증가시키는 것을 방지한다.
-
-feature direction mapping은 validation 성능을 보고 선택한 것이 아니라 metric의 사전 operational semantics에 따라 고정한다.
-
 ---
 
 # 5. 실험 설계
@@ -805,20 +758,17 @@ feature direction mapping은 validation 성능을 보고 선택한 것이 아니
 3. iterative decontamination이 실제로 도움이 되는가?
 4. 결과가 여러 사업자에서 일관되게 나타나는가?
 
-5. feature direction semantics를 반영한 scoring이 false alarm을 감소시키는가?
-
 ## 5.2 비교 방법
 
 최종 ablation은 다음 구성을 기본으로 한다.
 
-| Method | Adaptive Context | Decontamination | Direction-aware |
-|---|---:|---:|---:|
-| Global AE | X | X | X |
-| Global AE + Decontamination | X | O | X |
-| HourAE-24 | Fixed 24 | O | X |
-| Adaptive Context AE | O | X | X |
-| Adaptive Context AE + Decontamination | O | O | X |
-| Full Model | O | O | O |
+| Method | Adaptive Context | Decontamination |
+|---|---:|---:|
+| Global AE | X | X |
+| Global AE + Decontamination | X | O |
+| HourAE-24 | Fixed 24 | O |
+| Adaptive Context AE | O | X |
+| ContextAE (Proposed) | O | O |
 
 가능한 경우 contaminated training을 직접 다루는 기존 TSAD 방법을 external baseline으로 추가한다.
 
@@ -1117,14 +1067,6 @@ $$
 
 현재 mean + $3\sigma$ threshold는 train과 validation score distribution shift에 민감하다. 따라서 최종 시스템에서는 robust train-only calibration을 별도 검토할 필요가 있다.
 
-## 8.5 Direction-aware Scoring의 필요성
-
-운영 metric의 의미를 고려하면 모든 reconstruction residual을 대칭적으로 처리하는 것이 적절하지 않을 수 있다. 운영상 의미 없는 방향의 deviation까지 anomaly evidence에 포함되면 정상적인 변동이 false alarm으로 연결될 수 있다.
-
-direction-aware scoring은 모델 입력값을 임의로 clipping하는 대신 원본 분포와 AutoEncoder 학습은 유지하고 scoring 단계에서 operational semantics를 반영한다는 장점이 있다.
-
-다만 이 요소의 효과는 현재 수치적으로 검증되지 않았으므로 최종 논문에서는 반드시 ablation을 통해 별도로 입증해야 한다.
-
 ---
 
 # 9. 한계
@@ -1159,7 +1101,7 @@ direction-aware scoring은 모델 입력값을 임의로 clipping하는 대신 �
 
 전체 feature를 사용한 P0480 development 실험에서는 adaptive temporal context가 anomaly ranking과 false alarm 측면에서 가능성을 보였다. 다만 feature protocol을 11개 core feature로 변경하였으므로 해당 수치는 최종 성능 근거가 아니라 연구 가설을 형성한 exploratory evidence로만 해석한다. 최종 결론은 동일한 11개 core feature 조건에서 모든 baseline과 제안 방법을 재실행한 결과를 바탕으로 제시한다.
 
-향후 나머지 9개 사업자에 대한 전문가 레이블링을 완료한 뒤 총 10개 사업자에서 동일한 방법을 평가하고, adaptive context, decontamination, direction-aware scoring의 개별 효과를 ablation을 통해 검증한다. 최종적으로는 여러 사업자에서 일관된 성능 향상이 관찰되는지를 통해 제안 방법의 일반성을 평가하고자 한다.
+향후 총 10개 사업자에서 동일한 방법을 평가하고, adaptive context와 decontamination의 개별 효과를 ablation을 통해 검증한다. 최종적으로는 여러 사업자에서 일관된 성능 향상이 관찰되는지를 통해 제안 방법의 일반성을 평가하고자 한다.
 
 ---
 
@@ -1512,7 +1454,6 @@ direction-aware scoring은 모델 입력값을 임의로 clipping하는 대신 �
 - RoCA, HourAE, ContextAE 등 기존 결과는 11개 core feature 기준으로 모두 재실행한다.
 - 나머지 9개 사업자 레이블링 후 최종 main table을 갱신한다.
 - 최종 방법을 확정한 이후 P0480 Test와 나머지 사업자 Test를 평가한다.
-- direction-aware scoring은 구현되었으며, 최종 contribution 여부는 direction-off ablation 결과를 확인한 뒤 확정한다.
 - Global AE / Global AE + Decontamination ablation을 반드시 추가한다.
 - 가능하면 contaminated-training 대표 baseline을 동일한 10개 사업자에서 재실행한다.
 - 최종 논문에서는 `P0480`, `M###`와 같은 내부 ID를 제거하고 `Operator 1`, `Feature 1` 형식으로 익명화한다.
