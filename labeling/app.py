@@ -641,6 +641,8 @@ def _detection_metrics_panel(pred: dict) -> list[Any]:
         or pred.get("threshold_method")
         or "percentile"
     )
+    direction_cfg = pred.get("direction_aware_scoring") or {}
+    direction_enabled = bool(direction_cfg.get("enabled"))
     rows: list[Any] = [
         html.Div(
             f"{tag} metrics — VUS · Event-F1 · Point P/R/F1 · operational · {split}",
@@ -652,7 +654,19 @@ def _detection_metrics_panel(pred: dict) -> list[Any]:
         ),
         html.Div(
             "VUS는 threshold-independent score ranking 평가이며, 아래 Event/Point/FA 지표는 현재 threshold 기준입니다.",
-            style={"fontSize": "11px", "color": "#64748b", "marginBottom": "8px"},
+            style={"fontSize": "11px", "color": "#64748b", "marginBottom": "4px"},
+        ),
+        html.Div(
+            (
+                "Direction-aware scoring: M971=양방향, 나머지 core feature=증가 방향만"
+                if direction_enabled
+                else "Direction-aware scoring: off / legacy run"
+            ),
+            style={
+                "fontSize": "11px",
+                "color": "#475569",
+                "marginBottom": "8px",
+            },
         ),
         html.Div(
             f"VUS-PR = {_fmt_opt(vus_pr)}  "
