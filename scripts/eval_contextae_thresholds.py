@@ -171,6 +171,8 @@ def _clean_train_scores(
             x1,
             batch_size=int(cfg.batch_size),
             device=torch.device("cpu"),
+            feature_columns=ckpt_cols,
+            direction_aware=True,
         )
         clean = stage1_scores <= float(item["stage1_threshold_mse"])
         if int(clean.sum()) < 8:
@@ -187,6 +189,8 @@ def _clean_train_scores(
             x2,
             batch_size=int(cfg.batch_size),
             device=torch.device("cpu"),
+            feature_columns=ckpt_cols,
+            direction_aware=True,
         )
         scores = np.asarray(scores, dtype=np.float64)
         scores = scores[np.isfinite(scores)]
@@ -423,8 +427,13 @@ def evaluate_plmn(plmn: str, args: argparse.Namespace) -> tuple[list[dict[str, A
     pred_doc = _load_json(pred_path)
     ss = pred_doc.get("score_series") or {}
     times = pd.to_datetime(ss.get("times") or [], utc=True)
+    raw_values = (
+        ss.get("raw_directional_reconstruction_score")
+        or ss.get("raw_reconstruction_mse")
+        or []
+    )
     raw_mse = np.asarray(
-        [np.nan if x is None else float(x) for x in (ss.get("raw_reconstruction_mse") or [])],
+        [np.nan if x is None else float(x) for x in raw_values],
         dtype=np.float64,
     )
     context_ids = np.asarray(ss.get("context_ids") or [], dtype=np.int16)
@@ -447,6 +456,12 @@ def evaluate_plmn(plmn: str, args: argparse.Namespace) -> tuple[list[dict[str, A
         checkpoint = torch.load(
             ckpt_path,
             map_location="cpu",
+        )
+    direction_cfg = checkpoint.get("direction_aware_scoring") or {}
+    if not bool(direction_cfg.get("enabled")):
+        raise RuntimeError(
+            "ContextAE checkpoint is not direction-aware. "
+            "Rerun ContextAE with the current code before threshold evaluation."
         )
     clean_scores, cfg = _clean_train_scores(plmn, checkpoint)
     specs = _method_specs(args, cfg)
@@ -499,7 +514,7 @@ def evaluate_plmn(plmn: str, args: argparse.Namespace) -> tuple[list[dict[str, A
         "threshold_source": "context-wise final clean TRAIN reconstruction error",
         "validation_labels_used_for_threshold_selection": False,
         "validation_labels_used_for_evaluation_only": True,
-        "score_basis": "raw_reconstruction_mse",
+        "score_basis": "raw_directional_reconstruction_score",
         "vus_pr": vus_pr,
         "methods": methods,
         "note": (
