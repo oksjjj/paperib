@@ -1,4 +1,4 @@
-"""Shared PLMN loading, chronological split, scaling, and windowing utilities."""
+"""PLMN 데이터 로딩, 시간순 분할, 스케일링, 윈도우 생성을 함께 사용하는 공통 유틸리티."""
 
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ DEFAULT_VALID_RATIO = 0.2
 
 
 def feature_columns(df: pd.DataFrame) -> list[str]:
-    """Paper core counters (``metric_columns``); rates are never included."""
+    """논문에서 사용하는 core counter만 반환한다. rate 계열 파생 지표는 모델 입력에서 제외한다."""
     return [c for c in metric_columns(df) if not is_rate_metric(c)]
 
 
@@ -47,7 +47,7 @@ def split_indices(
 
 
 def sliding_windows(arr: np.ndarray, window: int) -> np.ndarray:
-    """(T, F) → (N, window, F) contiguous windows."""
+    """(T, F) 형태의 연속 시계열을 (N, window, F) 형태의 겹치는 윈도우로 변환한다."""
     t, f = arr.shape
     if t < window:
         raise ValueError(f"need T>={window}, got {t}")
@@ -67,9 +67,15 @@ def prepare_plmn(
     train_ratio: float = DEFAULT_TRAIN_RATIO,
     valid_ratio: float = DEFAULT_VALID_RATIO,
 ) -> dict[str, Any]:
-    """Load one PLMN, fit MinMaxScaler on train only, and return split arrays/meta."""
+    """한 사업자를 불러와 시간순으로 분할하고, TRAIN에만 MinMaxScaler를 fit한 뒤 split 배열과 메타정보를 반환한다.
+
+    주의:
+    이 함수는 RoCA처럼 window 기반 baseline에서 편리하게 쓰기 위한 공통 함수다.
+    ContextAE와 HourAE는 학습 중 label을 아예 읽지 않기 위해 각 파일의
+    prepare_unlabeled_plmn()을 별도로 사용한다.
+    """
     if plmn not in PAPER_PLMNS and plmn != PAPER_PLMNS[0]:
-        # Allow paper set; warn is enough for research tooling.
+        # 논문 대상 사업자 외의 입력도 연구 도구에서는 실행 가능하도록 막지 않는다.
         pass
     df = load_plmn(plmn)
     cols = feature_columns(df)
