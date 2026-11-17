@@ -1,4 +1,9 @@
-"""Build labeling-UI prediction JSON for RoCA."""
+"""RoCA validation 결과를 labeling UI와 공통 평가 코드가 읽는 JSON 형식으로 저장한다.
+
+이 파일은 모델을 학습하지 않는다.
+run_plmn.py에서 이미 계산된 score, threshold, validation label을 받아
+연속 anomaly segment와 metric을 정리하여 prediction JSON을 만든다.
+"""
 
 from __future__ import annotations
 
@@ -23,6 +28,12 @@ def _mask_to_labels(
     *,
     source: str = "roca",
 ) -> list[dict[str, Any]]:
+    """point 단위 anomaly boolean mask를 연속된 range label 목록으로 변환한다.
+
+    UI에서는 개별 point보다 연속 anomaly 구간을 하나의 prediction segment로
+    표시하는 것이 편하므로 True가 이어지는 구간을 묶는다.
+    각 segment의 대표 score는 해당 구간의 최대 anomaly score다.
+    """
     times = pd.to_datetime(pd.Series(times), utc=True)
     mask = np.asarray(mask, dtype=bool).reshape(-1)
     scores = np.asarray(scores, dtype=np.float64).reshape(-1)
@@ -68,13 +79,22 @@ def write_roca_prediction(
     metrics_extra: dict[str, Any] | None = None,
     source: str = "roca",
 ) -> str:
+    """RoCA validation score와 평가 결과를 prediction JSON으로 저장한다."""
+
     os.makedirs(PRED_DIR, exist_ok=True)
     scores = np.asarray(scores_valid, dtype=np.float64)
+
+    # score가 유효하고 TRAIN에서 정한 threshold를 초과하면 anomaly point로 판단한다.
     pred = np.isfinite(scores) & (scores > threshold)
     labels = _mask_to_labels(times_valid, pred, scores, source=source)
 
+    # ContextAE/HourAE와 동일한 공통 metric 함수를 사용해 비교 조건을 맞춘다.
     eval_bundle = evaluate_valid(
-        y_valid, scores, threshold, vus_window=None, sample_minutes=5.0
+        y_valid,
+        scores,
+        threshold,
+        vus_window=None,
+        sample_minutes=5.0,
     )
     point = eval_bundle["point"]
     event = eval_bundle["event"]
@@ -109,9 +129,10 @@ def write_roca_prediction(
             "scores": [float(v) if np.isfinite(v) else None for v in scores],
             "threshold": float(threshold),
             "note": (
-                "RoCA score = distance-to-center (loss_n; higher = more anomalous); "
-                "threshold = train score q0.99 by default. "
-                "Upstream: ruiking04/RoCA."
+                "RoCA score는 hypersphere center 거리 기반 loss_n이며 "
+                "값이 클수록 anomaly에 가깝다. "
+                "기본 threshold는 TRAIN score q0.99이다. "
+                "원본 구현: ruiking04/RoCA."
             ),
         },
         "score_polarity": "higher_is_anomaly",
@@ -174,7 +195,7 @@ def write_roca_prediction(
             "threshold_method": "percentile",
             "score_polarity": "higher_is_anomaly",
             "eval_split": "valid",
-            "note": "PA-F1 / Accuracy excluded from primary reporting",
+            "note": "PA-F1과 Accuracy는 primary reporting에서 제외함",
         },
     }
     path = os.path.join(PRED_DIR, f"{plmn}_{source}.json")
