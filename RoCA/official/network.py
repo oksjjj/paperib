@@ -154,10 +154,9 @@ class base_Model(nn.Module):
         hidden = x.permute(0, 2, 1)
 
         # Encoder는 전체 window를 읽고 마지막 hidden/cell state를 만든다.
-        # 아래 주석 코드는 명시적인 0 state를 넣던 원본 대안이며 현재는 사용하지 않는다.
-        # enc_hidden = self.init_hidden_state(hidden.shape[0])
+        # 원본에는 init_hidden_state()로 0 state를 명시적으로 전달하는 대안도 있었지만,
+        # 현재 구현은 PyTorch LSTM의 기본 0 초기화를 그대로 사용한다.
         _, enc_hidden = self.encoder(hidden)
-        # _, enc_hidden = self.encoder(hidden, enc_hidden)
 
         # 3단계: Decoder는 encoder의 마지막 state에서 시작한다.
         dec_hidden = enc_hidden
