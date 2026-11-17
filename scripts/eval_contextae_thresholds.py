@@ -29,7 +29,6 @@ import argparse
 import csv
 import importlib.util
 import json
-import math
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -438,11 +437,17 @@ def evaluate_plmn(plmn: str, args: argparse.Namespace) -> tuple[list[dict[str, A
 
     y = _label_mask(times, _load_json(label_path))
 
-    checkpoint = torch.load(
-        ckpt_path,
-        map_location="cpu",
-        weights_only=False,
-    )
+    try:
+        checkpoint = torch.load(
+            ckpt_path,
+            map_location="cpu",
+            weights_only=False,
+        )
+    except TypeError:
+        checkpoint = torch.load(
+            ckpt_path,
+            map_location="cpu",
+        )
     clean_scores, cfg = _clean_train_scores(plmn, checkpoint)
     specs = _method_specs(args, cfg)
 
