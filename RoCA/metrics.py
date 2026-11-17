@@ -1,4 +1,8 @@
-"""Reuse shared paperib evaluation metrics."""
+"""RoCA에서도 ContextAE/HourAE와 동일한 paperib 평가 함수를 사용하기 위한 연결 모듈.
+
+모델마다 metric 구현이 달라지는 것을 막기 위해 실제 계산은
+common/metrics.py의 evaluate_valid()를 그대로 재사용한다.
+"""
 
 from __future__ import annotations
 
