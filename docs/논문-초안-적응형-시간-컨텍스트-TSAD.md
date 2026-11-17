@@ -150,7 +150,7 @@ $$
 3. **Operational Evaluation on Real Telecom Data**  
    서로 다른 10개 인바운드 로밍 사업자를 대상으로 전문가가 작성한 operational ground truth를 이용하여 VUS-PR, PR-AUC, Event-F1, Event Recall, false alarms per day 등 ranking 성능과 실제 alert burden을 함께 평가한다.
 
-추가적으로 feature별 이상 방향성을 반영하는 direction-aware scoring을 확장하여 operational false alarm 감소 효과를 검증할 예정이다.
+또한 feature별 이상 방향성을 반영하는 direction-aware scoring을 ContextAE와 HourAE에 적용하고, operational false alarm 감소 효과를 검증한다.
 
 ---
 
@@ -745,46 +745,50 @@ $$
 
 다만 P0480 preliminary 결과에서 ranking metric에 비해 FA/day가 여전히 높게 나타났기 때문에, mean + standard deviation 기반 calibration은 최종 방법의 한계로 남아 있다. 최종 연구에서는 train-only empirical quantile 또는 robust calibration을 추가로 비교할 예정이다.
 
-## 4.7 Direction-aware Anomaly Scoring `[확장 예정]`
+## 4.7 Direction-aware Anomaly Scoring
 
-실제 roaming metric은 feature에 따라 이상으로 해석되는 방향이 다르다. 일부 feature는 증가와 감소가 모두 중요하지만, 다른 feature는 증가 방향만 운영상 anomaly로 해석될 수 있다.
+실제 roaming metric은 feature에 따라 이상으로 해석되는 방향이 다르다. 본 연구의 11개 core feature 중 M971은 증가와 감소가 모두 anomaly가 될 수 있으며, 나머지 10개 feature는 증가 방향만 operational anomaly로 정의한다.
 
-최종 reconstruction residual을 다음과 같이 정의한다.
+AutoEncoder는 기존과 동일하게 전체 reconstruction MSE를 loss로 사용하여 학습한다. 방향성은 학습 loss를 변경하지 않고 anomaly score 계산 단계에 반영한다. RobustScaler로 변환된 feature 공간에서 residual을 다음과 같이 정의한다.
 
-$$
+$
 r_{t,f}=x_{t,f}-\hat{x}_{t,f}
-$$
+$
 
-context와 feature별 train residual의 median과 MAD를 이용해 정규화하면
+RobustScaler는 feature별 양의 scale로 나누므로 residual의 부호는 원본 값에서의 증가·감소 방향과 동일하게 유지된다.
 
-$$
-z_{t,f}
-=
-\frac{
-r_{t,f}
--
-\operatorname{median}(r_{c_t,f}^{train})
-}{
-1.4826\cdot MAD(r_{c_t,f}^{train})+\epsilon
-}
-$$
+양방향 feature 집합과 증가 방향 feature 집합은 다음과 같이 고정한다.
 
-으로 표현할 수 있다.
+$
+\mathcal{F}_{\pm}=\{\mathrm{M971}\}
+$
 
-양방향 변화가 중요한 feature 집합을 $\mathcal{F}_{\pm}$, 증가 방향만 중요한 feature 집합을 $\mathcal{F}_{+}$라 하면 direction-aware evidence는 다음과 같이 정의할 수 있다.
+$
+\mathcal{F}_{+}=\mathcal{F}\setminus\{\mathrm{M971}\}
+$
 
-$$
+feature별 direction-aware squared evidence는 다음과 같이 정의한다.
+
+$
 D_{t,f}
 =
 \begin{cases}
-|z_{t,f}|, & f\in\mathcal{F}_{\pm}\\
-\max(z_{t,f},0), & f\in\mathcal{F}_{+}
+r_{t,f}^{2}, & f\in\mathcal{F}_{\pm}\\
+\max(r_{t,f},0)^{2}, & f\in\mathcal{F}_{+}
 \end{cases}
-$$
+$
 
-본 확장에서는 이 score를 최종 inference뿐 아니라 Stage 1 decontamination에도 동일하게 적용하여, 운영적으로 정상인 방향의 변화가 train에서 불필요하게 제거되는 것을 방지하고자 한다.
+최종 point-wise reconstruction score는
 
-feature direction mapping은 validation anomaly 성능을 보고 결정하지 않고, metric의 사전 operational semantics에 따라 정의한다.
+$
+e_t=\frac{1}{F}\sum_{f=1}^{F}D_{t,f}
+$
+
+로 계산한다. 따라서 M971의 감소와 증가는 모두 score에 반영되지만, 나머지 실패/timeout 계열 feature에서 관측값이 reconstruction 값보다 감소한 경우에는 anomaly evidence로 반영하지 않는다.
+
+동일한 direction-aware score를 Stage 1 decontamination, final clean-train score calibration, validation/test inference에 일관되게 사용한다. 이에 따라 운영적으로 정상인 방향의 변화가 Stage 1에서 불필요하게 제거되거나 최종 anomaly score를 증가시키는 것을 방지한다.
+
+feature direction mapping은 validation 성능을 보고 선택한 것이 아니라 metric의 사전 operational semantics에 따라 고정한다.
 
 ---
 
@@ -801,9 +805,7 @@ feature direction mapping은 validation anomaly 성능을 보고 결정하지 �
 3. iterative decontamination이 실제로 도움이 되는가?
 4. 결과가 여러 사업자에서 일관되게 나타나는가?
 
-direction-aware scoring이 구현된 이후에는 다섯 번째 질문을 추가한다.
-
-5. feature direction semantics가 false alarm을 감소시키는가?
+5. feature direction semantics를 반영한 scoring이 false alarm을 감소시키는가?
 
 ## 5.2 비교 방법
 
@@ -1510,7 +1512,7 @@ direction-aware scoring은 모델 입력값을 임의로 clipping하는 대신 �
 - RoCA, HourAE, ContextAE 등 기존 결과는 11개 core feature 기준으로 모두 재실행한다.
 - 나머지 9개 사업자 레이블링 후 최종 main table을 갱신한다.
 - 최종 방법을 확정한 이후 P0480 Test와 나머지 사업자 Test를 평가한다.
-- direction-aware scoring은 구현 및 ablation 완료 전까지 확정 contribution으로 과장하지 않는다.
+- direction-aware scoring은 구현되었으며, 최종 contribution 여부는 direction-off ablation 결과를 확인한 뒤 확정한다.
 - Global AE / Global AE + Decontamination ablation을 반드시 추가한다.
 - 가능하면 contaminated-training 대표 baseline을 동일한 10개 사업자에서 재실행한다.
 - 최종 논문에서는 `P0480`, `M###`와 같은 내부 ID를 제거하고 `Operator 1`, `Feature 1` 형식으로 익명화한다.
