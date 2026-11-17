@@ -1,11 +1,12 @@
-"""Shared paperib evaluation metrics.
+"""paperib 실험에서 공통으로 사용하는 평가 지표 모음.
 
-Primary: VUS-PR
-Event: Event-F1
-Additional: PR-AUC, Precision, Recall, F1
-Operational: False Alarms / day, Detection Delay
+핵심 지표: VUS-PR
+구간 단위 지표: Event-F1
+추가 지표: PR-AUC, Precision, Recall, F1
+운영 지표: False Alarms / day, Detection Delay
 
-Point-Adjusted F1 and Accuracy are intentionally omitted from primary reporting.
+Point-Adjusted F1과 Accuracy는 이상구간을 과도하게 유리하게 평가할 수 있으므로
+논문의 primary reporting에서는 의도적으로 제외한다.
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ from sklearn.metrics import average_precision_score
 
 
 def _segments(mask: np.ndarray) -> list[tuple[int, int]]:
-    """Inclusive index ranges of contiguous True runs."""
+    """연속된 True 구간을 (시작 인덱스, 끝 인덱스) 형태로 추출한다. 끝 인덱스도 구간에 포함된다."""
     m = np.asarray(mask, dtype=bool).reshape(-1)
     segs: list[tuple[int, int]] = []
     i = 0
@@ -58,7 +59,11 @@ def point_prf(y_true: np.ndarray, y_pred: np.ndarray) -> dict[str, float | int]:
 
 
 def event_f1(y_true: np.ndarray, y_pred: np.ndarray) -> dict[str, float | int]:
-    """Event-level P/R/F1: overlap ⇒ hit (no point-adjustment fill)."""
+    """Event 단위 Precision/Recall/F1을 계산한다.
+
+    GT 이상구간과 예측구간이 한 점이라도 겹치면 해당 event를 탐지한 것으로 본다.
+    Point-adjustment처럼 GT 전체 구간을 자동으로 예측으로 채우지는 않는다.
+    """
     gt = _segments(y_true)
     pr = _segments(y_pred)
     if not gt and not pr:
@@ -99,7 +104,7 @@ def false_alarms_per_day(
     *,
     sample_minutes: float = 5.0,
 ) -> dict[str, float | int]:
-    """Pred events with no GT overlap, normalized by observation days."""
+    """GT 이상구간과 전혀 겹치지 않는 예측 event 수를 관측 일수로 나누어 FA/day를 계산한다."""
     gt = _segments(y_true)
     pr = _segments(y_pred)
     fa = 0
@@ -121,9 +126,10 @@ def detection_delay(
     *,
     sample_minutes: float = 5.0,
 ) -> dict[str, float | int | None]:
-    """Mean delay (minutes) from GT event start to first overlapping pred hit.
+    """GT event 시작부터 첫 예측 hit까지의 탐지 지연시간(분)을 계산한다.
 
-    Missed events are excluded from the mean; ``n_missed`` is reported separately.
+    끝까지 탐지되지 않은 event는 평균 지연시간 계산에서는 제외하고,
+    놓친 event 수는 n_missed로 따로 기록한다.
     """
     gt = _segments(y_true)
     pred = np.asarray(y_pred, dtype=bool).reshape(-1)
@@ -160,11 +166,10 @@ def pr_auc(y_true: np.ndarray, score_high_is_anomaly: np.ndarray) -> float | Non
 
 
 def _median_event_length(y_true: np.ndarray) -> int:
-    """Median GT event length in points; at least 1.
+    """GT anomaly event 길이의 중앙값을 point 단위로 계산한다. 최소값은 1이다.
 
-    VUS recommends choosing the tolerance window from external knowledge such as
-    the labeled anomaly length. Using GT event length keeps evaluation tolerance
-    independent from each model's input window.
+    VUS tolerance window를 모델의 입력 window와 연결하지 않고,
+    전문가가 표시한 실제 anomaly 길이를 기준으로 정하기 위해 사용한다.
     """
     lengths = [b - a + 1 for a, b in _segments(np.asarray(y_true, dtype=bool))]
     if not lengths:
@@ -176,9 +181,9 @@ def resolve_vus_window(
     y_true: np.ndarray,
     sliding_window: int | None = None,
 ) -> int:
-    """Resolve one model-independent VUS tolerance window.
+    """모든 모델에 공통으로 사용할 VUS tolerance window를 결정한다.
 
-    None or non-positive values mean auto: median GT event length.
+    값이 없거나 0 이하이면 GT event 길이 중앙값을 자동으로 사용한다.
     """
     if sliding_window is None or int(sliding_window) <= 0:
         return _median_event_length(y_true)
@@ -189,7 +194,7 @@ def score_distribution(
     scores_high_is_anomaly: np.ndarray,
     threshold: float,
 ) -> dict[str, float | None]:
-    """Compact score-distribution diagnostics for train-to-valid sanity checks."""
+    """train과 validation score 분포가 크게 어긋나는지 확인하기 위한 간단한 분포 통계를 만든다."""
     s = np.asarray(scores_high_is_anomaly, dtype=np.float64).reshape(-1)
     s = s[np.isfinite(s)]
     if s.size == 0:
@@ -216,7 +221,7 @@ def event_score_diagnostics(
     scores_high_is_anomaly: np.ndarray,
     threshold: float,
 ) -> list[dict[str, float | int | bool | None]]:
-    """Per-GT-event score/rank diagnostics."""
+    """각 GT anomaly event마다 score와 전체 score 내 percentile을 진단용으로 계산한다."""
     y = np.asarray(y_true, dtype=bool).reshape(-1)
     s = np.asarray(scores_high_is_anomaly, dtype=np.float64).reshape(-1)
     n = min(len(y), len(s))
@@ -263,9 +268,10 @@ def vus_pr(
     *,
     sliding_window: int | None = None,
 ) -> dict[str, float | int | None]:
-    """VUS-PR via official ``vus`` package (Paparrizos et al.).
+    """공식 vus 패키지를 이용해 VUS-PR 계열 지표를 계산한다.
 
-    ``score_high_is_anomaly`` must be higher-for-anomaly (e.g. reconstruction MSE).
+    score_high_is_anomaly는 값이 클수록 더 anomalous해야 한다.
+    예: AutoEncoder reconstruction MSE.
     """
     from vus.metrics import get_metrics
 
@@ -283,7 +289,7 @@ def vus_pr(
             "vus_roc": None,
             "vus_window": vus_window,
         }
-    # Fill leading NaNs (window warm-up) with nearest finite for VUS length match.
+    # window 기반 모델의 초기 warm-up NaN 때문에 길이가 달라지지 않도록 첫 유효 score로 앞부분을 채운다.
     s2 = s.copy()
     if not ok.all():
         finite_idx = np.flatnonzero(ok)
@@ -292,7 +298,7 @@ def vus_pr(
         for i in range(first + 1, n):
             if not np.isfinite(s2[i]):
                 s2[i] = s2[i - 1]
-    # Min-max to [0,1] as in VUS examples.
+    # VUS 예제와 동일하게 score를 [0, 1] 범위로 min-max 정규화한다. 순위는 변하지 않는다.
     lo, hi = float(np.min(s2)), float(np.max(s2))
     if hi > lo:
         s2 = (s2 - lo) / (hi - lo)
@@ -338,10 +344,10 @@ def evaluate_valid(
     vus_window: int | None = None,
     sample_minutes: float = 5.0,
 ) -> dict[str, Any]:
-    """Full metric bundle for one operator evaluation split.
+    """한 사업자의 하나의 평가 split에 대해 논문에서 필요한 전체 metric 묶음을 계산한다.
 
-    ``scores_high_is_anomaly``: reconstruction MSE (higher = more anomalous).
-    Anomaly when ``score > threshold``.
+    scores_high_is_anomaly는 값이 클수록 이상인 score이며,
+    현재 binary prediction은 score > threshold일 때 anomaly로 판단한다.
     """
     y = np.asarray(y_true, dtype=bool).reshape(-1)
     scores = np.asarray(scores_high_is_anomaly, dtype=np.float64).reshape(-1)
@@ -351,7 +357,7 @@ def evaluate_valid(
     pred = np.zeros(n, dtype=bool)
     pred[ok] = scores[ok] > float(threshold)
 
-    # Align metrics to first finite score (window warm-up).
+    # window 기반 모델의 warm-up 구간을 제외하기 위해 첫 유효 score부터 metric을 맞춰 계산한다.
     if ok.any():
         first = int(np.flatnonzero(ok)[0])
         y_e, pred_e, s_e = y[first:], pred[first:], scores[first:]
