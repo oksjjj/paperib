@@ -49151,7 +49151,7 @@
   },
   "vus_evaluated_at": "2026-11-15T13:09:58.294190+00:00",
   "threshold_evaluation": {
-    "evaluated_at": "2026-11-17T05:01:03.895701+00:00",
+    "evaluated_at": "2026-11-17T05:06:20.183727+00:00",
     "eval_split": "valid",
     "model": "context_ae",
     "threshold_source": "context-wise final clean TRAIN reconstruction error",
@@ -49203,86 +49203,6 @@
         }
       },
       {
-        "key": "quantile_0.99",
-        "label": "Quantile q=0.99",
-        "kind": "quantile",
-        "parameters": {
-          "q": 0.99
-        },
-        "event_f1": 0.0603448275862069,
-        "event_precision": 0.03111111111111111,
-        "event_recall": 1.0,
-        "n_gt_events": 14,
-        "n_pred_events": 450,
-        "n_hit_gt": 14,
-        "precision": 0.03473053892215569,
-        "recall": 1.0,
-        "f1": 0.06712962962962964,
-        "tp": 29,
-        "fp": 806,
-        "fn": 0,
-        "false_alarms_per_day": 16.64475079533404,
-        "n_false_alarm_events": 436,
-        "mean_detection_delay_min": 0.0,
-        "median_detection_delay_min": 0.0,
-        "n_pred_points": 835,
-        "threshold_min": 1.6530492866877484e-05,
-        "threshold_median": 0.0011758391193870924,
-        "threshold_max": 0.0023351477459073074,
-        "thresholds_by_context": {
-          "0": 1.6530492866877484e-05,
-          "1": 0.0023351477459073074
-        },
-        "fit_details_by_context": {
-          "0": {
-            "q": 0.99
-          },
-          "1": {
-            "q": 0.99
-          }
-        }
-      },
-      {
-        "key": "quantile_0.995",
-        "label": "Quantile q=0.995",
-        "kind": "quantile",
-        "parameters": {
-          "q": 0.995
-        },
-        "event_f1": 0.07466666666666666,
-        "event_precision": 0.038781163434903045,
-        "event_recall": 1.0,
-        "n_gt_events": 14,
-        "n_pred_events": 361,
-        "n_hit_gt": 14,
-        "precision": 0.04447852760736196,
-        "recall": 1.0,
-        "f1": 0.08516886930983847,
-        "tp": 29,
-        "fp": 623,
-        "fn": 0,
-        "false_alarms_per_day": 13.247083775185578,
-        "n_false_alarm_events": 347,
-        "mean_detection_delay_min": 0.0,
-        "median_detection_delay_min": 0.0,
-        "n_pred_points": 652,
-        "threshold_min": 4.874763453699462e-05,
-        "threshold_median": 0.001960422026004382,
-        "threshold_max": 0.0038720964174717696,
-        "thresholds_by_context": {
-          "0": 4.874763453699462e-05,
-          "1": 0.0038720964174717696
-        },
-        "fit_details_by_context": {
-          "0": {
-            "q": 0.995
-          },
-          "1": {
-            "q": 0.995
-          }
-        }
-      },
-      {
         "key": "quantile_0.999",
         "label": "Quantile q=0.999",
         "kind": "quantile",
@@ -49323,90 +49243,82 @@
         }
       },
       {
-        "key": "mad_3",
-        "label": "Median + 3·1.4826MAD",
-        "kind": "mad",
+        "key": "quantile_0.9995",
+        "label": "Quantile q=0.9995",
+        "kind": "quantile",
         "parameters": {
-          "k": 3.0
+          "q": 0.9995
         },
-        "event_f1": 0.03669724770642201,
-        "event_precision": 0.018691588785046728,
+        "event_f1": 0.16666666666666669,
+        "event_precision": 0.09090909090909091,
         "event_recall": 1.0,
         "n_gt_events": 14,
-        "n_pred_events": 749,
+        "n_pred_events": 165,
         "n_hit_gt": 14,
-        "precision": 0.017417417417417418,
-        "recall": 1.0,
-        "f1": 0.03423848878394333,
-        "tp": 29,
-        "fp": 1636,
-        "fn": 0,
-        "false_alarms_per_day": 28.059384941675507,
-        "n_false_alarm_events": 735,
+        "precision": 0.12217194570135746,
+        "recall": 0.9310344827586207,
+        "f1": 0.21600000000000003,
+        "tp": 27,
+        "fp": 194,
+        "fn": 2,
+        "false_alarms_per_day": 5.726405090137858,
+        "n_false_alarm_events": 150,
         "mean_detection_delay_min": 0.0,
         "median_detection_delay_min": 0.0,
-        "n_pred_points": 1665,
-        "threshold_min": 2.130942224454202e-06,
-        "threshold_median": 4.6448805089997334e-05,
-        "threshold_max": 9.076666795554047e-05,
+        "n_pred_points": 221,
+        "threshold_min": 0.000658959669410358,
+        "threshold_median": 0.014306510216267896,
+        "threshold_max": 0.027954060763125434,
         "thresholds_by_context": {
-          "0": 2.130942224454202e-06,
-          "1": 9.076666795554047e-05
+          "0": 0.000658959669410358,
+          "1": 0.027954060763125434
         },
         "fit_details_by_context": {
           "0": {
-            "median": 7.531077699240996e-07,
-            "mad": 3.097788692230097e-07,
-            "k": 3.0
+            "q": 0.9995
           },
           "1": {
-            "median": 2.9889199140598066e-05,
-            "mad": 1.3687096725334413e-05,
-            "k": 3.0
+            "q": 0.9995
           }
         }
       },
       {
-        "key": "mad_4",
-        "label": "Median + 4·1.4826MAD",
-        "kind": "mad",
+        "key": "quantile_0.9999",
+        "label": "Quantile q=0.9999",
+        "kind": "quantile",
         "parameters": {
-          "k": 4.0
+          "q": 0.9999
         },
-        "event_f1": 0.038834951456310676,
-        "event_precision": 0.019801980198019802,
+        "event_f1": 0.3695652173913044,
+        "event_precision": 0.22666666666666666,
         "event_recall": 1.0,
         "n_gt_events": 14,
-        "n_pred_events": 707,
+        "n_pred_events": 75,
         "n_hit_gt": 14,
-        "precision": 0.01878238341968912,
-        "recall": 1.0,
-        "f1": 0.036872218690400506,
-        "tp": 29,
-        "fp": 1515,
-        "fn": 0,
-        "false_alarms_per_day": 26.455991516436907,
-        "n_false_alarm_events": 693,
-        "mean_detection_delay_min": 0.0,
+        "precision": 0.25274725274725274,
+        "recall": 0.7931034482758621,
+        "f1": 0.38333333333333336,
+        "tp": 23,
+        "fp": 68,
+        "fn": 6,
+        "false_alarms_per_day": 2.2142099681866387,
+        "n_false_alarm_events": 58,
+        "mean_detection_delay_min": 0.35714285714285715,
         "median_detection_delay_min": 0.0,
-        "n_pred_points": 1544,
-        "threshold_min": 2.590220375964236e-06,
-        "threshold_median": 5.682468896824275e-05,
-        "threshold_max": 0.00011105915756052127,
+        "n_pred_points": 91,
+        "threshold_min": 0.0015529330340453037,
+        "threshold_median": 0.3749029199644529,
+        "threshold_max": 0.7482529068948605,
         "thresholds_by_context": {
-          "0": 2.590220375964236e-06,
-          "1": 0.00011105915756052127
+          "0": 0.0015529330340453037,
+          "1": 0.7482529068948605
         },
         "fit_details_by_context": {
           "0": {
-            "median": 7.531077699240996e-07,
-            "mad": 3.097788692230097e-07,
-            "k": 4.0
+            "q": 0.9999
           },
           "1": {
-            "median": 2.9889199140598066e-05,
-            "mad": 1.3687096725334413e-05,
-            "k": 4.0
+            "q": 0.9999
           }
         }
       },
@@ -49451,126 +49363,6 @@
             "median": 2.9889199140598066e-05,
             "mad": 1.3687096725334413e-05,
             "k": 5.0
-          }
-        }
-      },
-      {
-        "key": "pot_a0.01",
-        "label": "POT α=0.01",
-        "kind": "pot",
-        "parameters": {
-          "alpha": 0.01,
-          "u_quantile": 0.98,
-          "min_exceedances": 20
-        },
-        "event_f1": 0.060215053763440864,
-        "event_precision": 0.031042128603104215,
-        "event_recall": 1.0,
-        "n_gt_events": 14,
-        "n_pred_events": 451,
-        "n_hit_gt": 14,
-        "precision": 0.03464755077658303,
-        "recall": 1.0,
-        "f1": 0.06697459584295612,
-        "tp": 29,
-        "fp": 808,
-        "fn": 0,
-        "false_alarms_per_day": 16.682926829268293,
-        "n_false_alarm_events": 437,
-        "mean_detection_delay_min": 0.0,
-        "median_detection_delay_min": 0.0,
-        "n_pred_points": 837,
-        "threshold_min": 1.661673270525384e-05,
-        "threshold_median": 0.0011562134417868056,
-        "threshold_max": 0.0022958101508683574,
-        "thresholds_by_context": {
-          "0": 1.661673270525384e-05,
-          "1": 0.0022958101508683574
-        },
-        "fit_details_by_context": {
-          "0": {
-            "u_quantile": 0.98,
-            "u": 6.49217357931776e-06,
-            "alpha": 0.01,
-            "n_train": 14683,
-            "n_exceedances": 294,
-            "exceedance_fraction": 0.0200231560307839,
-            "fallback": false,
-            "gpd_shape": 1.3236416717687232,
-            "gpd_scale": 8.893827759548735e-06,
-            "conditional_cdf": 0.500578231292517
-          },
-          "1": {
-            "u_quantile": 0.98,
-            "u": 0.001154054519720378,
-            "alpha": 0.01,
-            "n_train": 6817,
-            "n_exceedances": 137,
-            "exceedance_fraction": 0.020096816781575474,
-            "fallback": false,
-            "gpd_shape": 0.868760259468433,
-            "gpd_scale": 0.0011896705230276048,
-            "conditional_cdf": 0.5024087591240876
-          }
-        }
-      },
-      {
-        "key": "pot_a0.005",
-        "label": "POT α=0.005",
-        "kind": "pot",
-        "parameters": {
-          "alpha": 0.005,
-          "u_quantile": 0.98,
-          "min_exceedances": 20
-        },
-        "event_f1": 0.07253886010362695,
-        "event_precision": 0.03763440860215054,
-        "event_recall": 1.0,
-        "n_gt_events": 14,
-        "n_pred_events": 372,
-        "n_hit_gt": 14,
-        "precision": 0.042584434654919234,
-        "recall": 1.0,
-        "f1": 0.08169014084507041,
-        "tp": 29,
-        "fp": 652,
-        "fn": 0,
-        "false_alarms_per_day": 13.667020148462354,
-        "n_false_alarm_events": 358,
-        "mean_detection_delay_min": 0.0,
-        "median_detection_delay_min": 0.0,
-        "n_pred_points": 681,
-        "threshold_min": 4.1932433631038315e-05,
-        "threshold_median": 0.0022060907173755903,
-        "threshold_max": 0.004370249001120143,
-        "thresholds_by_context": {
-          "0": 4.1932433631038315e-05,
-          "1": 0.004370249001120143
-        },
-        "fit_details_by_context": {
-          "0": {
-            "u_quantile": 0.98,
-            "u": 6.49217357931776e-06,
-            "alpha": 0.005,
-            "n_train": 14683,
-            "n_exceedances": 294,
-            "exceedance_fraction": 0.0200231560307839,
-            "fallback": false,
-            "gpd_shape": 1.3236416717687232,
-            "gpd_scale": 8.893827759548735e-06,
-            "conditional_cdf": 0.7502891156462586
-          },
-          "1": {
-            "u_quantile": 0.98,
-            "u": 0.001154054519720378,
-            "alpha": 0.005,
-            "n_train": 6817,
-            "n_exceedances": 137,
-            "exceedance_fraction": 0.020096816781575474,
-            "fallback": false,
-            "gpd_shape": 0.868760259468433,
-            "gpd_scale": 0.0011896705230276048,
-            "conditional_cdf": 0.7512043795620438
           }
         }
       },
@@ -49631,6 +49423,186 @@
             "gpd_shape": 0.868760259468433,
             "gpd_scale": 0.0011896705230276048,
             "conditional_cdf": 0.9502408759124088
+          }
+        }
+      },
+      {
+        "key": "pot_a0.0005",
+        "label": "POT α=0.0005",
+        "kind": "pot",
+        "parameters": {
+          "alpha": 0.0005,
+          "u_quantile": 0.98,
+          "min_exceedances": 20
+        },
+        "event_f1": 0.19753086419753085,
+        "event_precision": 0.1095890410958904,
+        "event_recall": 1.0,
+        "n_gt_events": 14,
+        "n_pred_events": 146,
+        "n_hit_gt": 14,
+        "precision": 0.13471502590673576,
+        "recall": 0.896551724137931,
+        "f1": 0.23423423423423423,
+        "tp": 26,
+        "fp": 167,
+        "fn": 3,
+        "false_alarms_per_day": 4.96288441145281,
+        "n_false_alarm_events": 130,
+        "mean_detection_delay_min": 0.0,
+        "median_detection_delay_min": 0.0,
+        "n_pred_points": 193,
+        "threshold_min": 0.0008880262546733007,
+        "threshold_median": 0.017284595332150654,
+        "threshold_max": 0.033681164409628005,
+        "thresholds_by_context": {
+          "0": 0.0008880262546733007,
+          "1": 0.033681164409628005
+        },
+        "fit_details_by_context": {
+          "0": {
+            "u_quantile": 0.98,
+            "u": 6.49217357931776e-06,
+            "alpha": 0.0005,
+            "n_train": 14683,
+            "n_exceedances": 294,
+            "exceedance_fraction": 0.0200231560307839,
+            "fallback": false,
+            "gpd_shape": 1.3236416717687232,
+            "gpd_scale": 8.893827759548735e-06,
+            "conditional_cdf": 0.9750289115646259
+          },
+          "1": {
+            "u_quantile": 0.98,
+            "u": 0.001154054519720378,
+            "alpha": 0.0005,
+            "n_train": 6817,
+            "n_exceedances": 137,
+            "exceedance_fraction": 0.020096816781575474,
+            "fallback": false,
+            "gpd_shape": 0.868760259468433,
+            "gpd_scale": 0.0011896705230276048,
+            "conditional_cdf": 0.9751204379562044
+          }
+        }
+      },
+      {
+        "key": "pot_a0.0001",
+        "label": "POT α=0.0001",
+        "kind": "pot",
+        "parameters": {
+          "alpha": 0.0001,
+          "u_quantile": 0.98,
+          "min_exceedances": 20
+        },
+        "event_f1": 0.4050632911392405,
+        "event_precision": 0.25396825396825395,
+        "event_recall": 1.0,
+        "n_gt_events": 14,
+        "n_pred_events": 63,
+        "n_hit_gt": 14,
+        "precision": 0.3125,
+        "recall": 0.8620689655172413,
+        "f1": 0.4587155963302752,
+        "tp": 25,
+        "fp": 55,
+        "fn": 4,
+        "false_alarms_per_day": 1.7942735949098623,
+        "n_false_alarm_events": 47,
+        "mean_detection_delay_min": 0.35714285714285715,
+        "median_detection_delay_min": 0.0,
+        "n_pred_points": 80,
+        "threshold_min": 0.007476691532848016,
+        "threshold_median": 0.07223669562471087,
+        "threshold_max": 0.13699669971657372,
+        "thresholds_by_context": {
+          "0": 0.007476691532848016,
+          "1": 0.13699669971657372
+        },
+        "fit_details_by_context": {
+          "0": {
+            "u_quantile": 0.98,
+            "u": 6.49217357931776e-06,
+            "alpha": 0.0001,
+            "n_train": 14683,
+            "n_exceedances": 294,
+            "exceedance_fraction": 0.0200231560307839,
+            "fallback": false,
+            "gpd_shape": 1.3236416717687232,
+            "gpd_scale": 8.893827759548735e-06,
+            "conditional_cdf": 0.9950057823129251
+          },
+          "1": {
+            "u_quantile": 0.98,
+            "u": 0.001154054519720378,
+            "alpha": 0.0001,
+            "n_train": 6817,
+            "n_exceedances": 137,
+            "exceedance_fraction": 0.020096816781575474,
+            "fallback": false,
+            "gpd_shape": 0.868760259468433,
+            "gpd_scale": 0.0011896705230276048,
+            "conditional_cdf": 0.9950240875912408
+          }
+        }
+      },
+      {
+        "key": "pot_a5e-05",
+        "label": "POT α=5e-05",
+        "kind": "pot",
+        "parameters": {
+          "alpha": 5e-05,
+          "u_quantile": 0.98,
+          "min_exceedances": 20
+        },
+        "event_f1": 0.4324324324324324,
+        "event_precision": 0.27586206896551724,
+        "event_recall": 1.0,
+        "n_gt_events": 14,
+        "n_pred_events": 58,
+        "n_hit_gt": 14,
+        "precision": 0.3287671232876712,
+        "recall": 0.8275862068965517,
+        "f1": 0.47058823529411764,
+        "tp": 24,
+        "fp": 49,
+        "fn": 5,
+        "false_alarms_per_day": 1.6033934252386004,
+        "n_false_alarm_events": 42,
+        "mean_detection_delay_min": 0.35714285714285715,
+        "median_detection_delay_min": 0.0,
+        "n_pred_points": 73,
+        "threshold_min": 0.01871428455928127,
+        "threshold_median": 0.13453044408984982,
+        "threshold_max": 0.2503466036204184,
+        "thresholds_by_context": {
+          "0": 0.01871428455928127,
+          "1": 0.2503466036204184
+        },
+        "fit_details_by_context": {
+          "0": {
+            "u_quantile": 0.98,
+            "u": 6.49217357931776e-06,
+            "alpha": 5e-05,
+            "n_train": 14683,
+            "n_exceedances": 294,
+            "exceedance_fraction": 0.0200231560307839,
+            "fallback": false,
+            "gpd_shape": 1.3236416717687232,
+            "gpd_scale": 8.893827759548735e-06,
+            "conditional_cdf": 0.9975028911564626
+          },
+          "1": {
+            "u_quantile": 0.98,
+            "u": 0.001154054519720378,
+            "alpha": 5e-05,
+            "n_train": 6817,
+            "n_exceedances": 137,
+            "exceedance_fraction": 0.020096816781575474,
+            "fallback": false,
+            "gpd_shape": 0.868760259468433,
+            "gpd_scale": 0.0011896705230276048,
+            "conditional_cdf": 0.9975120437956204
           }
         }
       }
