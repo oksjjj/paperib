@@ -13,9 +13,8 @@ This experiment changes only the context partitioning relative to HourAE.
 8. Load human labels only after all models and scores are fixed.
 9. Train the fixed 24-hour HourAE baseline with the same hyperparameters and compare validation metrics.
 
-Direction-aware scoring is applied consistently to stage-1 decontamination,
-final clean-train calibration, and split scoring. M971 is bidirectional; all
-other core features contribute anomaly evidence only when observed > reconstructed.
+Anomaly scoring uses the symmetric mean squared reconstruction error across
+all core features.
 """
 
 from __future__ import annotations
@@ -567,8 +566,6 @@ def reconstruction_mse(
     *,
     batch_size: int,
     device: torch.device,
-    feature_columns: list[str] | None = None,
-    direction_aware: bool = False,
 ) -> np.ndarray:
     x = torch.from_numpy(np.asarray(x_scaled, dtype=np.float32))
     loader = DataLoader(
@@ -579,39 +576,15 @@ def reconstruction_mse(
         drop_last=False,
     )
 
-    direction_mask: torch.Tensor | None = None
-    if direction_aware:
-        if feature_columns is None or len(feature_columns) != x.shape[1]:
-            raise ValueError(
-                "feature_columns must match x_scaled when direction_aware=True"
-            )
-        direction_mask = torch.tensor(
-            [str(col) == "M971" for col in feature_columns],
-            dtype=torch.bool,
-            device=device,
-        )
-
     model.eval()
     out: list[np.ndarray] = []
     for (xb,) in loader:
         xb = xb.to(device)
         recon = model(xb)
-        residual = xb - recon
-        if direction_mask is not None:
-            # M971: increase/decrease are both anomalous.
-            # Other core features: only increases above reconstruction are anomalous.
-            evidence = torch.where(
-                direction_mask.unsqueeze(0),
-                residual,
-                torch.clamp(residual, min=0.0),
-            )
-        else:
-            evidence = residual
-        mse = torch.mean(evidence ** 2, dim=1)
+        mse = torch.mean((recon - xb) ** 2, dim=1)
         out.append(mse.detach().cpu().numpy().astype(np.float64))
 
     return np.concatenate(out) if out else np.empty(0, dtype=np.float64)
-
 
 def cpu_state_dict(model: nn.Module) -> dict[str, torch.Tensor]:
     return {
@@ -633,7 +606,6 @@ def fit_context_model(
     x_context_raw: np.ndarray,
     *,
     context_id: int,
-    feature_columns: list[str],
     cfg: Config,
     device: torch.device,
 ) -> ContextArtifacts:
@@ -660,8 +632,6 @@ def fit_context_model(
         x1,
         batch_size=cfg.batch_size,
         device=device,
-        feature_columns=feature_columns,
-        direction_aware=True,
     )
 
     stage1_cut = quantile_for_contamination(
@@ -693,8 +663,6 @@ def fit_context_model(
         x2,
         batch_size=cfg.batch_size,
         device=device,
-        feature_columns=feature_columns,
-        direction_aware=True,
     )
 
     score_mean = float(np.mean(final_clean_scores))
@@ -749,7 +717,6 @@ def score_with_context_models(
     artifacts: dict[int, ContextArtifacts],
     *,
     n_features: int,
-    feature_columns: list[str],
     cfg: Config,
     device: torch.device,
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -936,12 +903,6 @@ def save_checkpoint(
     torch.save(
         {
             "feature_columns": cols,
-            "direction_aware_scoring": {
-                "enabled": True,
-                "bidirectional_features": ["M971"],
-                "increase_only_features": [c for c in cols if c != "M971"],
-                "residual_definition": "observed_minus_reconstructed",
-            },
             "config": asdict(cfg),
             "segmentation": segmentation_payload(segment_info),
             "contexts": {
@@ -1006,18 +967,12 @@ def write_prediction(
         "score_polarity": "higher_is_anomaly",
         "threshold": float(threshold),
         "threshold_method": (
-            "per_context_clean_train_directional_score_mean_plus_sigma"
+            "per_context_clean_train_mse_mean_plus_sigma"
         ),
         "timezone": cfg.timezone,
         "n_context_models": int(segment_info["selected_k"]),
         "feature_columns": cols,
         "feature_mode": "core",
-        "direction_aware_scoring": {
-            "enabled": True,
-            "bidirectional_features": ["M971"],
-            "increase_only_features": [c for c in cols if c != "M971"],
-            "residual_definition": "observed_minus_reconstructed",
-        },
         "n_scores": int(np.isfinite(scores).sum()),
         "n_pred_points": int(pred.sum()),
         "n_pred_segments": len(labels),
@@ -1044,8 +999,7 @@ def write_prediction(
             ),
             "note": (
                 "K and contiguous time boundaries are determined from TRAIN profiles "
-                "only. Direction-aware scoring uses bidirectional residual evidence "
-                "for M971 and positive residual evidence only for all other core features."
+                "only. Anomaly scoring uses symmetric mean squared reconstruction error."
             ),
         },
         "score_series": {
@@ -1059,7 +1013,7 @@ def write_prediction(
                 float(x) if np.isfinite(x) else None
                 for x in scores
             ],
-            "raw_directional_reconstruction_score": [
+            "raw_reconstruction_mse": [
                 float(x) if np.isfinite(x) else None
                 for x in raw_mse
             ],
@@ -1259,7 +1213,6 @@ def run(
         art = fit_context_model(
             prep["train"][idx],
             context_id=context_id,
-            feature_columns=prep["cols"],
             cfg=cfg,
             device=device,
         )
@@ -1278,7 +1231,6 @@ def run(
         train_context_ids,
         artifacts,
         n_features=len(prep["cols"]),
-        feature_columns=prep["cols"],
         cfg=cfg,
         device=device,
     )
@@ -1287,7 +1239,6 @@ def run(
         valid_context_ids,
         artifacts,
         n_features=len(prep["cols"]),
-        feature_columns=prep["cols"],
         cfg=cfg,
         device=device,
     )
@@ -1296,7 +1247,6 @@ def run(
         test_context_ids,
         artifacts,
         n_features=len(prep["cols"]),
-        feature_columns=prep["cols"],
         cfg=cfg,
         device=device,
     )
