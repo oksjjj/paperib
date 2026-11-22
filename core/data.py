@@ -1,7 +1,7 @@
 """UI와 독립적인 연구용 데이터 로딩, 시간순 분할, 스케일링 유틸리티.
 
-이 파일은 모델 학습 코드가 labeling/tool.py를 import하지 않도록 하기 위한 공통 계층이다.
-raw CSV를 PLMN별로 모으고 시간순으로 정렬한 뒤, 모델이 필요한 core feature만 제공한다.
+이 파일은 모델 학습·평가·UI가 함께 사용하는 데이터 접근의 canonical 공통 계층이다.
+raw CSV 로딩, 공통 cache, PLMN ranking, 시간순 분할과 모델용 전처리를 UI와 독립적으로 제공한다.
 """
 
 from __future__ import annotations
