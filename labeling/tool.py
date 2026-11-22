@@ -1,4 +1,10 @@
-"""이상구간 라벨링 UI가 사용하는 공통 기능 모음.
+"""이상구간 라벨링 UI 내부에서 사용하는 호환 구현 모음.
+
+중요:
+- 모델 학습 코드는 이 파일을 import하지 않는다.
+- 공통 연구 코드는 core/에 있다.
+- app.py는 data_view.py / ui_labels.py / ui_predictions.py / plotting.py를 통해 접근한다.
+- 이 파일은 기존 UI 함수들을 한 번에 옮기면서 생길 수 있는 회귀를 줄이기 위해 내부 구현으로 남겨둔다.
 
 이 파일은 크게 다음 역할을 담당한다.
 - PLMN/feature 이름과 논문용 core feature 정의
