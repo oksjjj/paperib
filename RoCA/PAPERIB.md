@@ -67,7 +67,7 @@ VALID label과 평가
 
 ## 3. 입력 전처리와 MinMax 정규화
 
-RoCA는 `common/data.py::prepare_plmn()`을 통해 데이터를 준비한다.
+RoCA는 `core/data.py::prepare_plmn()`을 통해 데이터를 준비한다.
 
 먼저 11개 core feature를 가져오고 다음 처리를 수행한다.
 
