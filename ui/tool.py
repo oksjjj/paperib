@@ -1,14 +1,13 @@
-"""이상구간 라벨링 UI 내부에서 사용하는 호환 구현 모음.
+"""이상구간 라벨링 UI 내부에서 사용하는 화면 로직 모음.
 
 중요:
 - 모델 학습 코드는 이 파일을 import하지 않는다.
 - 공통 연구 코드는 core/에 있다.
 - app.py는 data_view.py / ui_labels.py / ui_predictions.py / plotting.py를 통해 접근한다.
-- 이 파일은 기존 UI 함수들을 한 번에 옮기면서 생길 수 있는 회귀를 줄이기 위해 내부 구현으로 남겨둔다.
 
 이 파일은 크게 다음 역할을 담당한다.
 - PLMN/feature 이름과 논문용 core feature 정의
-- 원본 데이터와 캐시 로딩
+- core 데이터 로더를 이용한 화면용 데이터 조회
 - 전문가 label 저장/수정
 - 모델 prediction 및 anomaly score 정렬
 - 평가 metric 계산
@@ -23,6 +22,7 @@ import json
 import os
 import re
 import uuid
+from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -31,6 +31,15 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+
+from core.data import (
+    CACHE_DIR as CORE_CACHE_DIR,
+    DATA_DIR as CORE_DATA_DIR,
+    LABEL_DIR as CORE_LABEL_DIR,
+    RANK_CACHE_PATH as CORE_RANK_CACHE_PATH,
+    load_or_build_ranking as core_load_or_build_ranking,
+    load_plmn as core_load_plmn,
+)
 
 KST = ZoneInfo("Asia/Seoul")
 # 화면에 표시할 날짜는 Asia/Seoul 기준의 한국식 형식을 사용한다.
@@ -45,13 +54,12 @@ _KST_PARSE_FMTS = (
     "%Y/%m/%d %H:%M",
 )
 
-DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "ib_data", "raw")
-IB_DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "ib_data")
-LABEL_DIR = os.path.join(IB_DATA_DIR, "labels")
+DATA_DIR = str(CORE_DATA_DIR)
+IB_DATA_DIR = str(CORE_DATA_DIR.parent)
+LABEL_DIR = str(CORE_LABEL_DIR)
 PRED_DIR = os.path.join(IB_DATA_DIR, "predictions")
-RANK_CACHE_PATH = os.path.join(LABEL_DIR, "plmn_rank.csv")
-CACHE_DIR = os.path.join(os.path.dirname(__file__), "cache")
-RANK_SIGNATURE_PATH = os.path.join(CACHE_DIR, "plmn_rank.signature")
+RANK_CACHE_PATH = str(CORE_RANK_CACHE_PATH)
+CACHE_DIR = str(CORE_CACHE_DIR)
 
 # 논문 평가에 사용하는 10개 사업자 목록이다. UI 순서도 이 순서를 그대로 사용한다.
 PAPER_PLMNS: tuple[str, ...] = (
@@ -295,42 +303,13 @@ def load_plmn(
     *,
     use_cache: bool = True,
 ) -> pd.DataFrame:
-    """한 사업자의 시계열을 여러 CSV에서 모아 시간순으로 정렬해 반환한다. 반복 로딩을 줄이기 위해 pickle cache를 사용한다."""
-    os.makedirs(CACHE_DIR, exist_ok=True)
-    cache_path = os.path.join(CACHE_DIR, f"{plmn}.pkl")
-    signature = _data_signature(data_dir)
-
-    if use_cache and os.path.exists(cache_path):
-        try:
-            cached = pd.read_pickle(cache_path)
-            if cached.attrs.get("signature") == signature:
-                # 최신 pickle에는 rate가 저장되어 있으므로, 오래된 캐시에 rate가 없을 때만 다시 계산한다.
-                return add_rate_columns(cached)
-        except Exception:
-            pass
-
-    csv_files = sorted(f for f in os.listdir(data_dir) if f.endswith(".csv"))
-    parts = []
-    for file in csv_files:
-        temp = pd.read_csv(os.path.join(data_dir, file))
-        temp = temp[temp["PLMN"] == plmn]
-        if not temp.empty:
-            parts.append(temp)
-    if not parts:
-        raise ValueError(f"No rows found for PLMN={plmn}")
-    df = pd.concat(parts, ignore_index=True)
-    df = df.sort_values("time").reset_index(drop=True)
-    df["time"] = pd.to_datetime(df["time"], utc=True)
-    df = add_rate_columns(df, force=True)
-    df.attrs["signature"] = signature
-
-    if use_cache:
-        try:
-            df.to_pickle(cache_path)
-        except Exception:
-            pass
-    return df
-
+    """공통 core 데이터 로더를 사용하고 UI 표시용 rate column만 파생해 반환한다."""
+    df = core_load_plmn(
+        plmn,
+        data_dir=Path(data_dir),
+        use_cache=use_cache,
+    ).copy()
+    return add_rate_columns(df, force=True)
 
 def display_training_feature(
     metric: str,
@@ -583,30 +562,8 @@ def load_or_build_ranking(
     *,
     paper_only: bool = False,
 ) -> pd.DataFrame:
-    """현재 raw 데이터 snapshot과 맞는 PLMN 순위 cache를 읽고, 오래되었으면 다시 계산한다."""
-    ensure_label_dir()
-    os.makedirs(CACHE_DIR, exist_ok=True)
-    signature = _data_signature(DATA_DIR)
-    cached_signature = None
-    if os.path.exists(RANK_SIGNATURE_PATH):
-        try:
-            with open(RANK_SIGNATURE_PATH, encoding="utf-8") as f:
-                cached_signature = f.read().strip()
-        except OSError:
-            pass
-
-    if os.path.exists(RANK_CACHE_PATH) and cached_signature == signature:
-        rank_df = pd.read_csv(RANK_CACHE_PATH)
-    elif any(f.endswith(".csv") for f in os.listdir(DATA_DIR)):
-        rank_df = _build_ranking_from_data()
-        save_ranking_cache(rank_df, signature)
-    elif os.path.exists(RANK_CACHE_PATH):
-        rank_df = pd.read_csv(RANK_CACHE_PATH)
-    else:
-        raise FileNotFoundError(f"No source CSV or ranking cache found under {DATA_DIR}")
-
-    if top_n is not None:
-        rank_df = rank_df.head(top_n).copy()
+    """core.data가 관리하는 PLMN 순위를 읽고 UI 표시용 이름만 덧붙인다."""
+    rank_df = core_load_or_build_ranking(top_n=top_n)
 
     if paper_only:
         rank_df = filter_paper_plmns(rank_df)
@@ -616,63 +573,6 @@ def load_or_build_ranking(
         rank_df["PLMN_name"] = [plmn_original_short(p) or "" for p in rank_df["PLMN"]]
         rank_df["PLMN_display"] = [display_plmn(p) for p in rank_df["PLMN"]]
     return rank_df
-
-
-def save_ranking_cache(rank_df: pd.DataFrame, signature: str | None = None) -> None:
-    """PLMN 순위와 그 순위를 만들 때 사용한 raw 데이터 signature를 저장한다."""
-    ensure_label_dir()
-    os.makedirs(CACHE_DIR, exist_ok=True)
-    rank_df.to_csv(RANK_CACHE_PATH, index=False)
-    with open(RANK_SIGNATURE_PATH, "w", encoding="utf-8") as f:
-        f.write(signature or _data_signature(DATA_DIR))
-
-
-def _build_ranking_from_data() -> pd.DataFrame:
-    csv_files = sorted(f for f in os.listdir(DATA_DIR) if f.endswith(".csv"))
-    sums: dict[str, int] = {}
-    for file in csv_files:
-        chunk = pd.read_csv(os.path.join(DATA_DIR, file), usecols=["PLMN", "M971"])
-        part = chunk.groupby("PLMN")["M971"].sum()
-        for plmn, value in part.items():
-            sums[plmn] = sums.get(plmn, 0) + int(value)
-    rank_df = (
-        pd.DataFrame({"PLMN": list(sums.keys()), "M971_sum": list(sums.values())})
-        .sort_values("M971_sum", ascending=False)
-        .reset_index(drop=True)
-    )
-    rank_df.insert(0, "rank", rank_df.index + 1)
-    return rank_df
-
-
-def _data_signature(data_dir: str) -> str:
-    """raw 데이터 파일 목록/크기/수정시간으로 cache 유효성을 판단할 fingerprint를 만든다."""
-    csv_files = sorted(f for f in os.listdir(data_dir) if f.endswith(".csv"))
-    newest = 0.0
-    total = 0
-    for file in csv_files:
-        stat = os.stat(os.path.join(data_dir, file))
-        newest = max(newest, stat.st_mtime)
-        total += stat.st_size
-    return f"{len(csv_files)}-{int(newest)}-{total}"
-
-
-def clear_plmn_cache(plmn: str | None = None) -> int:
-    """사업자별 pickle cache를 삭제하고 삭제된 파일 수를 반환한다."""
-    if not os.path.isdir(CACHE_DIR):
-        return 0
-    targets = (
-        [f"{plmn}.pkl"]
-        if plmn
-        else [f for f in os.listdir(CACHE_DIR) if f.endswith(".pkl")]
-    )
-    removed = 0
-    for name in targets:
-        path = os.path.join(CACHE_DIR, name)
-        if os.path.exists(path):
-            os.remove(path)
-            removed += 1
-    return removed
-
 
 def all_metric_columns(df: pd.DataFrame) -> list[str]:
     """time/PLMN/anomaly score를 제외한 모든 수치형 series column을 반환한다."""
