@@ -1,6 +1,6 @@
 """모델 prediction/score를 라벨링 UI에 표시하는 helper facade."""
 
-from tool import (
+from labeling.tool import (
     ANOMALY_SCORE_KEY,
     anomaly_score_at_time,
     apply_threshold_mode,
