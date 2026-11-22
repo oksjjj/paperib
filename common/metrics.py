@@ -323,7 +323,7 @@ def vus_pr(
         "vus_pr": _f(res.get("VUS_PR")),
         "auc_pr": _f(res.get("AUC_PR")),
         "r_auc_pr": _f(res.get("R_AUC_PR")),
-        "vus_roc": _f(res.get("VUS_ROC")),  # auxiliary only
+        "vus_roc": _f(res.get("VUS_ROC")),  # VUS-ROC은 보조 지표로만 사용한다.
         "vus_window": vus_window,
     }
 
