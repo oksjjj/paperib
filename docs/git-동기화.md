@@ -16,8 +16,8 @@
 |------|------|
 | `*_mapping.txt` | masked ↔ 원본명 역매핑 |
 | `data/ib_data/_local_raw_full/` | 전체 사업자 raw |
-| `*.pt` / `ContextAE/model/` / `HourAE/model/` / `RoCA/model/` | 가중치 (용량) |
-| `ui/cache/*.pkl` | 로컬 캐시 (preprocess로 재생성) |
+| `*.pt` / 모델 checkpoint 디렉터리 | 가중치 (용량) |
+| `data/ib_data/cache/*.pkl` | 로컬 공통 캐시 (`scripts/build_ui_cache.py`로 재생성) |
 
 paper raw 재생성:
 
