@@ -1,20 +1,21 @@
 #!/usr/bin/env python3
-"""Data-driven contextual AutoEncoder with K train-only context models.
+"""TRAIN 데이터에서 시간 context를 자동으로 찾는 ContextAE 실행 코드.
 
-This experiment changes only the context partitioning relative to HourAE.
+HourAE와 비교했을 때 AE 구조와 decontamination 방식은 그대로 두고,
+시간대를 나누는 방식만 데이터 기반 adaptive segmentation으로 바꾼 실험이다.
 
-1. Split data chronologically into train/valid/test.
-2. Using TRAIN only, map each local 5-minute slot to one robust temporal profile.
-3. Partition the 288 daily slots into K contiguous temporal regimes.
-4. For each K, find the minimum-SSE contiguous segmentation by dynamic programming.
-5. Select K using train-only silhouette score, unless --k explicitly fixes K.
-6. Train one iterative-decontamination AutoEncoder per discovered context.
-7. Score each point with the AutoEncoder assigned to its local 5-minute slot.
-8. Load human labels only after all models and scores are fixed.
-9. Train the fixed 24-hour HourAE baseline with the same hyperparameters and compare validation metrics.
+전체 흐름:
+1. 데이터를 시간순으로 TRAIN / VALID / TEST로 분할한다.
+2. TRAIN만 사용해 하루의 각 5분 slot을 robust temporal profile로 표현한다.
+3. 하루 288개 slot을 K개의 연속 시간 context로 나눈다.
+4. 각 K에 대해 Dynamic Programming으로 구간 내부 SSE가 최소인 연속 분할을 찾는다.
+5. --k를 고정하지 않았다면 TRAIN-only silhouette score가 가장 높은 K를 선택한다.
+6. 각 context마다 iterative decontamination AutoEncoder를 학습한다.
+7. 각 point는 자신의 5분 slot이 속한 context의 AutoEncoder로 score를 계산한다.
+8. 모든 모델 학습과 score 생성이 끝난 뒤에만 전문가 label을 읽어 평가한다.
+9. 같은 하이퍼파라미터의 고정 24시간 HourAE baseline도 함께 학습해 VALID 성능을 비교한다.
 
-Anomaly scoring uses the symmetric mean squared reconstruction error across
-all core features.
+Anomaly score는 11개 core feature의 대칭적인 reconstruction MSE를 사용한다.
 """
 
 from __future__ import annotations
