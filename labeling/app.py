@@ -5009,14 +5009,14 @@ app.clientside_callback(
         else if (trig.prop_id.indexOf('btn-zoom-out') === 0) action = 'out';
         if (!action) return window.dash_clientside.no_update;
 
-        // Drop pending rebuilds that could race the hard figure replace.
+        // figure 전체 교체와 충돌할 수 있는 예약된 재생성 작업은 먼저 취소한다.
         if (window.__rebuildTimer) {
             clearTimeout(window.__rebuildTimer);
             window.__rebuildTimer = null;
         }
         window.__ignoreDataXClampUntil = Date.now() + 5000;
 
-        // Live plot range — required after drag-zoom when server/view-range lag.
+        // drag-zoom 직후 서버 상태가 늦을 수 있으므로 브라우저가 실제로 보여주는 현재 범위를 읽는다.
         var view = window.__readGraphView && window.__readGraphView();
         return {
             action: action,
@@ -5062,10 +5062,10 @@ app.clientside_callback(
         var hasYRate = cmd.y_rate && cmd.y_rate.length === 2;
         var hasYScore = cmd.y_score && cmd.y_score.length === 2;
         var touchY = (cmd.touch_y !== false);
-        // Pan drag-end: skip live axis patches — they yank X back before rebuild.
+        // pan 종료 직후에는 실시간 축 patch를 하지 않는다. 재생성 전에 x축이 되돌아갈 수 있기 때문이다.
         var liveAxes = (cmd.live_axes !== false);
-        // Always allow rebuild-only cmds (pan high-res refresh). Do not early-return
-        // when Y bounds are missing — that skipped pan refine entirely.
+        // pan 고해상도 갱신처럼 재생성만 필요한 명령은 항상 허용한다.
+        // Y 범위가 없다는 이유로 조기 종료하면 pan 정밀 갱신 전체가 빠질 수 있다.
         var host = document.getElementById('graph');
         var gd = host && host.querySelector('.js-plotly-plot');
         if (!gd || !window.Plotly) {
@@ -5078,7 +5078,7 @@ app.clientside_callback(
         if (liveAxes && hasX) {
             patch['xaxis.autorange'] = false;
             patch['xaxis.range'] = [cmd.x[0], cmd.x[1]];
-            // Shared time axis across score / metrics / human / model (± rate).
+            // score / metric / 전문가 / 모델 패널은 하나의 시간축을 공유한다. rate 패널이 있으면 함께 공유한다.
             ['xaxis2', 'xaxis3', 'xaxis4', 'xaxis5'].forEach(function(ax) {
                 patch[ax + '.autorange'] = false;
                 patch[ax + '.range'] = [cmd.x[0], cmd.x[1]];
@@ -5088,10 +5088,10 @@ app.clientside_callback(
             var fl = gd._fullLayout || {};
             var hasY3 = !!fl.yaxis3;
             var hasY2 = !!fl.yaxis2;
-            // Layouts:
-            // 4-row core: score + metrics + human + model
-            // 5-row: score + rate + metrics + human + model
-            // Labels tracks are never Y-auto'd from metrics commands.
+            // 가능한 subplot 구성:
+            // 기본 4행: score + metrics + 전문가 label + 모델 prediction
+            // rate가 있으면 5행: score + rate + metrics + 전문가 label + 모델 prediction
+            // label track의 y축은 metric Y 자동 명령의 영향을 받지 않는다.
             var metricsKey = 'yaxis';
             var rateKey = null;
             var scoreKey = null;
@@ -5109,7 +5109,7 @@ app.clientside_callback(
                 var y2title = axisTitle('yaxis2');
                 var y3title = axisTitle('yaxis3');
                 if (isLabelAxisTitle(y3title) || isLabelAxisTitle(axisTitle('yaxis4'))) {
-                    // score + metrics + human(+ model)
+                    // score + metrics + 전문가 label(+ 모델 prediction)
                     metricsKey = 'yaxis2';
                     rateKey = null;
                 } else if (/rate/i.test(String(y2title))) {
@@ -5167,12 +5167,12 @@ app.clientside_callback(
                 window.__rebuildTimer = null;
             }
             var delay = (cmd.rebuild_ms != null) ? cmd.rebuild_ms : 300;
-            // rebuild_ms < 0 → Y-only / no remount (keeps plot height & x-axis put).
+            // rebuild_ms < 0이면 Y축만 바꾸고 figure는 다시 mount하지 않아 높이와 x축을 유지한다.
             if (delay < 0) return;
             var seq = cmd.seq;
             var fire = function() {
                 window.__rebuildTimer = null;
-                // Another pan started — wait until the pointer is up again.
+                // 새로운 pan이 시작되었으므로 pointer가 다시 올라올 때까지 재생성을 미룬다.
                 if (window.__graphPointerDown) {
                     window.__rebuildTimer = setTimeout(fire, 120);
                     return;
@@ -5191,7 +5191,7 @@ app.clientside_callback(
         };
         if (Object.keys(patch).length) {
             window.__clampingDataX = true;
-            // Keep layout height/domain stable when only Y changes.
+            // Y축만 바꿀 때는 layout 높이와 subplot domain을 그대로 유지한다.
             if (!hasX && (hasY || hasYRate || hasYScore)) {
                 var yKey2 = (gd._fullLayout && gd._fullLayout.yaxis3) ? 'yaxis3' : 'yaxis2';
                 patch[yKey2 + '.fixedrange'] = true;
@@ -5226,7 +5226,7 @@ app.clientside_callback(
 app.clientside_callback(
     """
     function(payload) {
-        // Silent pan rebuild: refresh traces without Dash graph.figure (no snap).
+        // pan 정밀 갱신은 Dash graph.figure를 건드리지 않고 trace만 바꿔 카메라가 튀지 않게 한다.
         if (!payload || !window.Plotly) {
             return window.dash_clientside.no_update;
         }
@@ -5260,7 +5260,7 @@ app.clientside_callback(
                 autosize: true,
                 height: wantH
             });
-            // Keep the live camera; bump datarevision so Scattergl replaces buffers.
+            // 현재 카메라는 유지하고 datarevision만 올려 Scattergl buffer를 새 데이터로 교체한다.
             if (gd2.layout && gd2.layout.uirevision != null) {
                 layout.uirevision = gd2.layout.uirevision;
             }
@@ -5289,7 +5289,7 @@ app.clientside_callback(
             var cfg = gd2.config || {responsive: true, displayModeBar: true};
             window.__clampingDataX = true;
             window.__ignoreDataXClampUntil = Date.now() + 1500;
-            // Y from the rebuilt figure (Y 자동); never touch X after react.
+            // Y축은 재생성된 figure의 자동 범위를 쓰고 react 이후 x축은 절대 다시 건드리지 않는다.
             var yPatch = {};
             ['yaxis', 'yaxis2', 'yaxis3', 'yaxis4', 'yaxis5'].forEach(function(key) {
                 var ax = layout[key];
@@ -5349,16 +5349,16 @@ app.clientside_callback(
         window.__valueInspectMode = mode === 'inspect';
         window.__editRangeMode = mode === 'edit_range';
         window.__labelPlaceMode = (mode === 'label_range' || mode === 'label_point');
-        // Tip engine on for place/edit/inspect/pan/zoom. 값 탐색에서는
-        // anomaly-score 패널에서만 tip을 띄움 (pointermove 필터).
+        // 배치/편집/값 탐색/pan/zoom 모드에서는 custom tip 엔진을 사용한다.
+        // 값 탐색 모드에서는 anomaly-score 패널 위에서만 floating tip을 띄운다.
         window.__showPlaceTimeTip = (
             mode === 'label_range' || mode === 'label_point'
             || mode === 'edit_range' || mode === 'inspect'
             || mode === 'pan' || mode === 'pan_keep_y'
             || mode === 'zoom'
         );
-        // Leaving 값 탐색: drop the blue dotted spike immediately (server
-        // figure rebuild clears the solid value_cursor shape).
+        // 값 탐색 모드를 벗어나면 파란 점선 cursor를 즉시 지운다.
+        // 실선 value_cursor shape는 다음 서버 figure 재생성에서 함께 정리된다.
         if (mode !== 'inspect') {
             var leaveSpike = document.getElementById('place-time-spike');
             if (leaveSpike) leaveSpike.style.display = 'none';
@@ -5401,7 +5401,7 @@ app.clientside_callback(
                     return;
                 }
                 if (window.__inspectInFlight) {
-                    // Wait for the current figure update, then send accumulated steps.
+                    // 현재 figure 갱신이 끝난 뒤 누적된 키 이동 횟수를 한 번에 서버로 보낸다.
                     if (!window.__inspectFlushTimer) {
                         window.__inspectFlushTimer = setTimeout(window.__flushInspectKeys, 40);
                     }
@@ -5412,7 +5412,7 @@ app.clientside_callback(
                 window.__inspectPendingStep = 0;
                 window.__inspectInFlight = true;
                 clearTimeout(window.__inspectInFlightWatchdog);
-                // If the server returns no_update (no figure event), unlock after a beat.
+                // 서버가 no_update를 반환해 figure 이벤트가 없으면 잠깐 뒤 키 잠금을 해제한다.
                 window.__inspectInFlightWatchdog = setTimeout(function() {
                     window.__inspectInFlight = false;
                     if ((window.__inspectPendingStep || 0) !== 0 && window.__flushInspectKeys) {
@@ -5430,7 +5430,7 @@ app.clientside_callback(
 
             window.__valueInspectKeyHandler = function(event) {
                 if (isTextEntry(event.target)) return;
-                // Esc cancels in-progress range placement (any mode).
+                // Esc 키는 어떤 모드에서도 진행 중인 range label 배치를 취소한다.
                 if (event.key === 'Escape') {
                     event.preventDefault();
                     event.stopPropagation();
@@ -5446,7 +5446,7 @@ app.clientside_callback(
                 var step = event.key === 'ArrowLeft' ? -1 : 1;
                 window.__inspectPendingStep = (window.__inspectPendingStep || 0) + step;
                 if (window.__inspectFlushTimer) return;
-                // Coalesce key-repeat into one server step burst (no clientside cursor fight).
+                // 키 반복 입력은 하나의 step 묶음으로 합쳐 clientside cursor와 서버 상태가 서로 싸우지 않게 한다.
                 window.__inspectFlushTimer = setTimeout(window.__flushInspectKeys, 30);
             };
             window.addEventListener('keydown', window.__valueInspectKeyHandler, true);
@@ -5507,7 +5507,7 @@ app.clientside_callback(
             var host = document.getElementById('graph');
             var gd = host && host.querySelector('.js-plotly-plot');
             if (gd && window.Plotly && window.__desiredDragmode !== undefined) {
-                // Stable layout.uirevision keeps the old dragmode; force the mode radio.
+                // 안정된 layout.uirevision이 이전 dragmode를 유지할 수 있으므로 mode radio 값으로 dragmode를 강제한다.
                 window.Plotly.relayout(gd, {dragmode: window.__desiredDragmode});
             }
             if (gd && window.__installCustomEdgeEdit) {
@@ -5562,10 +5562,10 @@ app.clientside_callback(
         }
         window.__syncEditRangePointerStyle();
 
-        // Always redefine so hot reloads pick up coord / snap fixes.
+        // hot reload 후 좌표/snap 수정이 바로 반영되도록 helper를 매번 다시 정의한다.
         window.__plotPlaceUtils = function(gd) {
                 function plotAreaRect() {
-                    // Prefer top x-axis subplot so p2d pixels match clientX.
+                    // clientX와 pixel 변환이 맞도록 가장 위쪽 x축 subplot을 우선 사용한다.
                     try {
                         var fl = gd._fullLayout;
                         var plot0 = fl && fl._plots && (fl._plots.xy || fl._plots.x2y2);
@@ -5597,7 +5597,7 @@ app.clientside_callback(
                 }
 
                 function yHitRect() {
-                    // Allow clicks across stacked panels.
+                    // 세로로 쌓인 모든 subplot 영역에서 click을 허용한다.
                     if (window.__combinedPlotRect) {
                         var dual = window.__combinedPlotRect(gd);
                         if (dual) return dual;
@@ -5678,9 +5678,9 @@ app.clientside_callback(
                     if (!(typeof ms === 'number' && isFinite(ms))) return String(xVal);
                     var snapped = (samples && samples.length)
                         ? nearestSampleMs(ms, samples) : null;
-                    // NOTE: isFinite(null)===true in JS — must check null explicitly.
+                    // 주의: JavaScript에서는 isFinite(null)이 true이므로 null은 반드시 별도로 검사한다.
                     if (snapped == null || !(typeof snapped === 'number' && isFinite(snapped))) {
-                        // Data is 5-minute; snap wall-clock when sample list missing.
+                        // sample 목록이 없으면 5분 cadence 기준으로 시간을 반올림해 맞춘다.
                         var step = 5 * 60 * 1000;
                         snapped = Math.round(ms / step) * step;
                     }
@@ -5710,8 +5710,8 @@ app.clientside_callback(
                 var host = document.getElementById('graph');
                 var gd = host && host.querySelector('.js-plotly-plot');
                 var layout = gd && gd._fullLayout;
-                // The placeholder figure has its own default ranges; recording
-                // them would later be replayed onto the real data.
+                // 초기 placeholder figure의 기본 축 범위는 실제 데이터 범위가 아니므로
+                // 이를 저장하면 나중에 실제 데이터 figure에 잘못된 범위가 재적용될 수 있다.
                 if (!gd || !gd._fullData || !gd._fullData.length) return null;
                 if (!layout) return null;
                 var xr = (layout.xaxis && layout.xaxis.range)
@@ -5723,7 +5723,7 @@ app.clientside_callback(
                 var view = {
                     x: [String(xr[0]), String(xr[1])]
                 };
-                // Metrics = title "value" (never human/model label tracks).
+                // metric subplot은 제목이 'value'인 축으로 찾고 전문가/모델 label track은 제외한다.
                 var yAxis = null;
                 ['yaxis', 'yaxis2', 'yaxis3', 'yaxis4', 'yaxis5'].forEach(function(key) {
                     var ax = layout[key];
@@ -5733,7 +5733,7 @@ app.clientside_callback(
                     if (/value/i.test(String(t))) yAxis = ax;
                 });
                 if (!yAxis) {
-                    // Fallback: score(+rate)+metrics+human+model.
+                    // 축 제목으로 찾지 못하면 score(+rate)+metrics+전문가+모델 순서로 fallback한다.
                     if (layout.yaxis5) yAxis = layout.yaxis3;
                     else if (layout.yaxis4) yAxis = layout.yaxis2;
                     else yAxis = layout.yaxis2 || layout.yaxis;
@@ -5745,8 +5745,8 @@ app.clientside_callback(
             };
         }
 
-        // Union of both subplot plot areas (top xy + bottom x2y2).
-        // Always redefine so hot reloads pick up the dual-panel fix.
+        // 위/아래 subplot의 실제 plot 영역을 합친 범위를 pointer hit 영역으로 사용한다.
+        // dual-panel 수정이 hot reload 후에도 반영되도록 매번 helper를 다시 정의한다.
         window.__combinedPlotRect = function(gd) {
             try {
                 if (!gd) return null;
@@ -5823,10 +5823,10 @@ app.clientside_callback(
                     return isNaN(t) ? NaN : t;
                 }
 
-                // Final sync only. Live plotly_relayouting + Plotly.relayout during
-                // box-zoom cancels the gesture and jumps to a bad range (flat lines).
-                // Skip while panning: matched axes already follow, and re-applying
-                // ranges on mouseup causes the visible "snap back then forward".
+                // box-zoom 중에는 최종 동기화만 한다. 실시간 plotly_relayouting과 Plotly.relayout을 같이 쓰면
+                // gesture가 취소되고 잘못된 범위로 튀어 선이 평평해지는 문제가 생길 수 있다.
+                // pan 중에는 shared axis가 이미 따라가므로 별도 동기화를 건너뛴다.
+                // mouseup에서 범위를 다시 적용하면 화면이 뒤로 갔다 앞으로 오는 현상이 생긴다.
                 gd.on('plotly_relayout', function(ed) {
                     if (window.__syncingSharedX || window.__clampingDataX || !ed) return;
                     if (window.__graphPointerDown) return;
@@ -5858,7 +5858,7 @@ app.clientside_callback(
                     });
                 });
 
-                // Hide Plotly's per-subplot zoombox; we draw a dual-panel band.
+                // Plotly 기본 subplot별 zoom box는 숨기고 두 패널을 가로지르는 custom band를 그린다.
                 if (!document.getElementById('dual-zoom-style')) {
                     var st = document.createElement('style');
                     st.id = 'dual-zoom-style';
@@ -5872,7 +5872,7 @@ app.clientside_callback(
                     document.head.appendChild(st);
                 }
 
-                // Visual-only zoom band across both panels (does not touch axes).
+                // 두 패널 전체에 시각적 zoom band만 그리며 실제 축 값은 이 단계에서 바꾸지 않는다.
                 var dragStart = null;
                 function ensureBand() {
                     var band = document.getElementById('dual-zoom-band');
@@ -5937,14 +5937,14 @@ app.clientside_callback(
                     dragStart = null;
                     hideBand();
                 }
-                // Bubble phase so Plotly's own zoom gesture is not disturbed.
+                // Plotly 기본 zoom gesture를 방해하지 않도록 bubble phase에서 pointer 이벤트를 처리한다.
                 gd.addEventListener('mousedown', onDown, false);
                 window.addEventListener('mousemove', onMove, true);
                 window.addEventListener('mouseup', onUp, true);
                 window.addEventListener('blur', onUp, true);
             };
 
-        // Custom edge edit: ↔ cursor + horizontal drag only on crimson edges.
+        // 선택 label의 진홍색 edge에서만 ↔ cursor와 가로 drag 편집을 허용한다.
         if (!window.__installCustomEdgeEdit) {
             window.__installCustomEdgeEdit = function() {
                 var host = document.getElementById('graph');
@@ -6133,7 +6133,7 @@ app.clientside_callback(
                     var xa = fl && fl.xaxis;
                     var edges = collectEditEdges(gd);
                     if (!xa || !edges.length) return null;
-                    // Prefer the top x-axis plot rect so d2p pixels match clientX.
+                    // clientX와 data 좌표 변환이 맞도록 위쪽 x축 plot rect를 우선 사용한다.
                     var r = null;
                     try {
                         var plot0 = fl._plots && (fl._plots.xy || fl._plots.x2y2);
@@ -6149,7 +6149,7 @@ app.clientside_callback(
                         if (!el) return null;
                         r = el.getBoundingClientRect();
                     }
-                    // Y: allow hits across stacked panels (combined rect).
+                    // y 방향 hit 영역은 쌓인 subplot 전체를 합친 영역으로 본다.
                     var yR = plotHitRect(gd) || r;
                     if (clientX < r.left || clientX > r.right ||
                         clientY < yR.top || clientY > yR.bottom) {
@@ -6190,7 +6190,7 @@ app.clientside_callback(
                         snapped = nearestSampleMs(ms, samples);
                     }
                     if (snapped == null || !(typeof snapped === 'number' && isFinite(snapped))) {
-                        // Always snap to 5-minute wall clock (data cadence).
+                        // 데이터 cadence에 맞춰 항상 5분 단위 시각으로 snap한다.
                         var step = 5 * 60 * 1000;
                         snapped = Math.round(ms / step) * step;
                     }
@@ -6415,8 +6415,8 @@ app.clientside_callback(
             };
         }
 
-        // Clamp pan/zoom so the window never leaves the dataset [tmin, tmax].
-        // Only on final relayout (not every drag tick) to avoid fighting the gesture.
+        // pan/zoom 시간창이 데이터 범위 [tmin,tmax] 밖으로 나가지 않도록 제한한다.
+        // drag 중 매 tick마다가 아니라 최종 relayout에서만 보정해 사용자 gesture와 충돌하지 않게 한다.
         if (!window.__clampPanToData) {
             window.__ms = function(v) {
                 if (v == null) return NaN;
@@ -6429,14 +6429,14 @@ app.clientside_callback(
                 gd.__dataXClamp = true;
                 gd.on('plotly_relayout', function(eventData) {
                     if (window.__clampingDataX || !eventData) return;
-                    // Skip while a server figure is settling (avoids fighting zoom-in).
+                    // 서버 figure가 적용되는 중에는 보정을 건너뛰어 zoom-in과 충돌하지 않게 한다.
                     if (window.__ignoreDataXClampUntil &&
                         Date.now() < window.__ignoreDataXClampUntil) {
                         return;
                     }
-                    // Don't fight an in-progress pan gesture.
+                    // 진행 중인 pan gesture에는 서버가 개입하지 않는다.
                     if (window.__graphPointerDown) return;
-                    // Never expand a deliberate zoom back via autorange echoes.
+                    // autorange echo가 사용자가 의도적으로 줄인 zoom 범위를 다시 넓히지 못하게 한다.
                     if (eventData['xaxis.autorange'] || eventData['xaxis2.autorange']
                         || eventData['xaxis3.autorange']
                         || eventData['xaxis4.autorange']
@@ -6486,10 +6486,10 @@ app.clientside_callback(
                         if (na < tmin) na = tmin;
                     }
                     if (Math.abs(na - a) < 0.5 && Math.abs(nb - b) < 0.5) {
-                        // In-bounds: shared-panel sync mirrors the other axis.
+                        // 범위 안이면 shared-panel 동기화가 다른 subplot 축도 같은 값으로 맞춘다.
                         return;
                     }
-                    // Keep the same value type Plotly emitted (string/number).
+                    // Plotly가 보낸 값의 타입(string/number)을 그대로 유지한다.
                     function shiftRaw(orig, delta) {
                         var t = window.__ms(orig);
                         if (!isFinite(t)) return orig;
@@ -6516,7 +6516,7 @@ app.clientside_callback(
             };
         }
 
-        // Empty-area / band clicks → snapped time. Always redefine; rebind with V6.
+        // 빈 영역이나 label band click은 가장 가까운 sample 시간으로 변환한다. helper는 매번 다시 bind한다.
         window.__installPlotClickHost = function() {
                 var host = document.getElementById('graph');
                 if (!host) return;
@@ -6526,7 +6526,7 @@ app.clientside_callback(
                 var ptrDown = null;
 
                 function labelTrackInfo(gd, clientX, clientY) {
-                    // Returns {track:'human'|'model', rect} when over a label strip.
+                    // label strip 위에 있으면 어떤 track인지와 해당 rect를 반환한다.
                     try {
                         var fl = gd._fullLayout;
                         var plots = fl && fl._plots;
@@ -6596,7 +6596,7 @@ app.clientside_callback(
 
                 host.addEventListener('click', function(ev) {
                     if (ev.button !== 0) return;
-                    // 값 탐색: pointerup handles WebGL score-panel picks; avoid double emit.
+                    // 값 탐색에서는 pointerup이 WebGL score-panel click을 처리하므로 중복 emit을 막는다.
                     if (window.__currentClickMode === 'inspect') return;
                     if (window.__skipNextShapeClick) {
                         window.__skipNextShapeClick = false;
@@ -6604,7 +6604,7 @@ app.clientside_callback(
                     }
                     if (window.__edgeDragging) return;
                     var mode = window.__currentClickMode;
-                    // Trace hits: Plotly clickData has the exact x (label modes).
+                    // trace를 직접 누른 경우 Plotly clickData의 정확한 x 시간을 label 배치에 사용한다.
                     if (mode === 'label_range' || mode === 'label_point') {
                         var t = ev.target;
                         if (t && t.closest && t.closest(
@@ -6616,8 +6616,8 @@ app.clientside_callback(
                     emitSnap(ev.clientX, ev.clientY);
                 }, true);
 
-                // Short clicks: select labels even when Plotly zoom/pan swallows click.
-                // Labels track: allow slightly larger movement (thin strip + pan mode).
+                // 짧은 click은 Plotly zoom/pan이 이벤트를 소비하더라도 label 선택으로 해석할 수 있게 별도 처리한다.
+                // label track은 얇고 pan 모드에서도 누르기 쉽도록 click 허용 이동거리를 조금 넓게 잡는다.
                 host.addEventListener('pointerup', function(ev) {
                     if (ev.button !== 0) return;
                     if (window.__edgeDragging) return;
@@ -6628,7 +6628,7 @@ app.clientside_callback(
                         return;
                     }
                     var mode = window.__currentClickMode;
-                    // Placement modes use click (empty) + clickData (traces).
+                    // label 배치 모드는 빈 영역 click과 trace clickData를 모두 사용한다.
                     if (mode === 'label_range' || mode === 'label_point') return;
                     var gd1 = host.querySelector('.js-plotly-plot');
                     var info1 = gd1 && labelTrackInfo(gd1, ev.clientX, ev.clientY);
@@ -6643,7 +6643,7 @@ app.clientside_callback(
                 }, true);
             };
 
-        // Human/model label subplots: never pan/zoom — clicks select bars.
+        // 전문가/모델 label subplot은 pan/zoom하지 않고 click을 segment 선택에만 사용한다.
         window.__disableLabelTrackDrag = function(gd) {
                 if (!gd || !gd._fullLayout) return;
                 try {
@@ -6748,7 +6748,7 @@ app.clientside_callback(
             if (!window.__scrubStalePendingRangeFill) {
                 window.__scrubStalePendingRangeFill = function(gd, force) {
                     if (!gd || !gd.layout || !window.Plotly) return;
-                    // Never scrub while the user is placing a 2-click range.
+                    // 사용자가 두 번 클릭해 range를 만드는 중에는 임시 preview를 자동 정리하지 않는다.
                     if (!force && window.__currentClickMode === 'label_range') {
                         return;
                     }
@@ -6778,7 +6778,7 @@ app.clientside_callback(
             }
         }
 
-        // Always (re)define — not gated on pending-preview install.
+        // pending preview 설치 여부와 관계없이 helper를 항상 다시 정의한다.
         window.__installPlaceTimeTip = function(gd) {
                 if (!gd) return;
                 if (gd.__placeTimeTipBoundV8) return;
@@ -6792,7 +6792,7 @@ app.clientside_callback(
                     if (!tip) {
                         tip = document.createElement('div');
                         tip.id = 'place-time-tip';
-                        // Mirror fig.layout.hoverlabel (white / monospace / 11px).
+                        // custom tip 스타일은 fig.layout.hoverlabel의 흰 배경/고정폭 글꼴/11px 설정과 맞춘다.
                         tip.style.cssText = [
                             'position:fixed',
                             'z-index:99999',
@@ -6817,7 +6817,7 @@ app.clientside_callback(
                     if (!spike) {
                         spike = document.createElement('div');
                         spike.id = 'place-time-spike';
-                        // Match layout.xaxis spikedash/spikecolor/spikethickness.
+                        // custom spike도 layout.xaxis의 dash/color/thickness 설정과 맞춘다.
                         spike.style.cssText = [
                             'position:fixed',
                             'z-index:99998',
@@ -6863,8 +6863,8 @@ app.clientside_callback(
                     var fl = gd._fullLayout;
                     var xa = fl && fl.xaxis;
                     if (!xa) return;
-                    // Prefer the combined top+bottom subplot area so the cursor
-                    // spans both rate and metric panels.
+                    // cursor가 여러 subplot을 자연스럽게 가로지르도록 위/아래 plot 영역의 합친 범위를 사용한다.
+                    // rate와 metric 패널 모두에서 같은 세로 cursor가 보이게 한다.
                     var rect = (window.__combinedPlotRect && window.__combinedPlotRect(gd))
                         || plotRect;
                     if (!rect) return;
@@ -6899,7 +6899,7 @@ app.clientside_callback(
                     return (Math.abs(ms - a) <= Math.abs(ms - b)) ? a : b;
                 }
 
-                // Fallback when sample_ms missing: round to 5-minute wall clock.
+                // sample_ms가 없으면 5분 wall-clock 기준으로 시간을 반올림한다.
                 function snapFiveMinMs(ms) {
                     if (!isFinite(ms)) return NaN;
                     var step = 5 * 60 * 1000;
@@ -6961,8 +6961,8 @@ app.clientside_callback(
                     window.__plotHoverCache = cache;
                     return cache;
                 }
-                // Figure updates call this before Plotly.react so arrays are cached
-                // even if the user has not hovered yet.
+                // figure 업데이트는 Plotly.react 전에 이 함수를 호출해 hover용 배열을 cache한다.
+                // 사용자가 아직 hover하지 않았어도 필요한 데이터가 준비되게 한다.
                 window.__ingestHoverMeta = ingestHoverMeta;
                 window.__withCachedHoverMeta = function(layout) {
                     if (!layout) return layout;
@@ -6986,9 +6986,9 @@ app.clientside_callback(
                 };
 
                 function scorePanelVisible() {
-                    // 3-row layout: yaxis=score, yaxis2=rate, yaxis3=metrics.
-                    // 2-row (no score subplot): never treat the top drag as score —
-                    // otherwise the tip covers S_RATE hover with "Anomaly score".
+                    // 3행 구성에서는 yaxis=score, yaxis2=rate, yaxis3=metrics다.
+                    // score subplot이 없는 2행 구성에서는 위쪽 drag 영역을 score로 해석하면 안 된다.
+                    // 잘못 해석하면 S_RATE hover 위에 'Anomaly score' tip이 뜰 수 있다.
                     var fl = gd._fullLayout;
                     if (fl && fl.yaxis3) return true;
                     var meta = (gd.layout && gd.layout.meta) || {};
@@ -7004,7 +7004,7 @@ app.clientside_callback(
                             || cache.score_threshold != null
                             || meta.score_threshold != null;
                         if (!hasScore) return false;
-                        // Score is the topmost nsewdrag only when the score row exists.
+                        // score row가 실제로 있을 때만 가장 위 nsewdrag 영역을 score 패널로 본다.
                         var drags = gd.querySelectorAll('.nsewdrag');
                         var best = null;
                         var bestTop = Infinity;
@@ -7039,7 +7039,7 @@ app.clientside_callback(
                     return Date.UTC(y, mo - 1, d, h, mi, sec);
                 }
 
-                // Same as Plotly hoverformat / hovertemplate %{x|%Y년 %m월 %d일 %H:%M}
+                // 시간 표시는 Plotly hoverformat과 동일한 한국식 연-월-일 시:분 형식을 사용한다.
                 function formatHoverTime(ms) {
                     var d = new Date(ms);
                     function pad(n) { return (n < 10 ? '0' : '') + n; }
@@ -7051,7 +7051,7 @@ app.clientside_callback(
                 function formatScoreNumber(v) {
                     if (v == null || !isFinite(v)) return String(v);
                     var a = Math.abs(v);
-                    // LSTM-AD residuals are often |s| << 1; toFixed(2) shows as 0.00.
+                    // 일부 모델 score는 1보다 매우 작을 수 있어 toFixed(2)만 쓰면 모두 0.00처럼 보일 수 있다.
                     if (a !== 0 && a < 0.01) return v.toPrecision(3);
                     if (a >= 1000) return v.toFixed(1);
                     return v.toFixed(4);
@@ -7072,7 +7072,7 @@ app.clientside_callback(
                     text += '\\nAnomaly score = ' + formatScoreNumber(score);
                     if (thr != null) {
                         text += '\\nthreshold = ' + formatScoreNumber(thr);
-                        // paperib default: higher score = anomaly
+                        // paperib 기본 규칙은 score가 클수록 anomaly에 가깝다는 것이다.
                         var higher = true;
                         if (cache.score_polarity === 'lower_is_anomaly'
                             || cache.score_polarity === 'low'
@@ -7123,7 +7123,7 @@ app.clientside_callback(
                         hideTip();
                         return;
                     }
-                    // Hide while dragging (box-zoom / pan / edge edit).
+                    // box-zoom/pan/edge 편집 중에는 floating tip을 숨긴다.
                     if (ev.buttons || window.__edgeDragging) {
                         hideTip();
                         return;
@@ -7145,7 +7145,7 @@ app.clientside_callback(
                         return;
                     }
                     var overScore = inScorePanel(ev.clientY);
-                    // 값 탐색: floating tip only on anomaly-score panel (bottom panel has the rest).
+                    // 값 탐색 모드에서는 anomaly-score 패널에서만 floating tip을 보이고 나머지 값은 아래 패널에서 보여준다.
                     if (window.__valueInspectMode && !overScore) {
                         hideTip();
                         return;
@@ -7166,10 +7166,10 @@ app.clientside_callback(
                         hideTip();
                         return;
                     }
-                    // Always one custom spike at the snapped time (Plotly spikes off).
+                    // Plotly 기본 spike 대신 snap된 시간에 custom 세로선 하나만 그린다.
                     showSpikeAtMs(snapped, rect);
-                    // Anomaly-score panel: time + score tip.
-                    // Other panels: empty-area time tip only (Plotly owns series hover).
+                    // anomaly-score 패널에서는 시간과 score를 tip으로 보여준다.
+                    // 다른 패널의 빈 영역에서는 시간만 보여주고 series hover는 Plotly 기본 기능에 맡긴다.
                     var wantScore = overScore;
                     if (!overScore) {
                         var hoverdata = gd._hoverdata;
@@ -7214,7 +7214,7 @@ app.clientside_callback(
             window.__ignoreDataXClampUntil = Date.now() + 1500;
             if (!gd || !window.Plotly) return;
 
-            // Standalone hover-cache helpers (tip install may not have run yet).
+            // tip 엔진이 아직 설치되지 않았어도 동작할 수 있도록 hover cache helper를 독립적으로 정의한다.
             if (!window.__ingestHoverMeta) {
                 window.__ingestHoverMeta = function(rawMeta) {
                     var meta = rawMeta || {};
@@ -7264,9 +7264,9 @@ app.clientside_callback(
                 };
             }
 
-            // Track pan/zoom pointer so deferred rebuilds wait for continuous drags.
-            // Do NOT fire rebuild on pointerup — that races plotly_relayout and
-            // briefly paints the pre-pan window before the real refine lands.
+            // 연속 drag가 끝난 뒤에만 지연 재생성이 실행되도록 pan/zoom pointer 상태를 추적한다.
+            // pointerup 즉시 재생성을 실행하면 plotly_relayout과 race가 생기므로 바로 실행하지 않는다.
+            // 그렇지 않으면 실제 정밀 갱신 전에 pan 이전 화면이 잠깐 다시 보일 수 있다.
             if (!window.__installGraphPointerGuard) {
                 window.__installGraphPointerGuard = function(root) {
                     if (!root || root.__graphPointerGuardBound) return;
@@ -7283,13 +7283,13 @@ app.clientside_callback(
                     var up = function() {
                         if (!window.__graphPointerDown) return;
                         window.__graphPointerDown = false;
-                        // Resume a rebuild that was deferred mid-drag; axis-cmd
-                        // after relayout is preferred, this is only a fallback.
+                        // drag 중 미뤄진 재생성이 있으면 pointerup 뒤 다시 예약한다.
+                        // 정상 경로는 relayout 이후 axis-cmd이며 여기 처리는 fallback이다.
                         if (window.__pendingPanRebuild) {
                             window.__pendingPanRebuild = false;
-                            // Relayout → axis-cmd will schedule; if it already
-                            // ran while pointer was down, fire() retries — nothing
-                            // to do here except clear the flag.
+                            // relayout → axis-cmd가 재생성을 예약하며, 이미
+                            // pointer가 눌린 동안 실행되었다면 fire()가 재시도하므로
+                            // 여기서는 보류 flag만 정리하면 된다.
                         }
                     };
                     root.addEventListener('pointerdown', down, true);
@@ -7327,7 +7327,7 @@ app.clientside_callback(
                         window.Plotly.relayout(gd, {dragmode: window.__desiredDragmode});
                     }
                 }
-                // Relayout can recreate drag nodes — re-disable Labels track.
+                // relayout 후 drag node가 다시 만들어질 수 있으므로 label track의 pan/zoom 비활성화를 다시 적용한다.
                 if (window.__disableLabelTrackDrag) {
                     setTimeout(function() {
                         window.__disableLabelTrackDrag(gd);
@@ -7342,8 +7342,8 @@ app.clientside_callback(
                 }
             }
 
-            // Force full layout sync so edge-drag relayout patches never stick
-            // after the server sends the updated label shapes.
+            // edge drag가 남긴 임시 relayout patch가 화면에 남지 않도록 전체 layout을 다시 동기화한다.
+            // 서버가 수정된 label shape를 보낸 뒤 최종 상태로 맞추기 위한 처리다.
             if (figure && figure.data && figure.layout && !window.__edgeDragging) {
                 var cfg = gd.config || {responsive: true, displayModeBar: true};
                 var hostH = host.clientHeight || 420;
@@ -7352,9 +7352,9 @@ app.clientside_callback(
                     autosize: true,
                     height: wantH
                 });
-                // Ingest/preserve hover arrays: later figures often omit sample_ms
-                // (one-shot push) and Plotly.react would wipe them from layout.meta
-                // before the tip ever runs — tip then shows score "(없음)".
+                // hover용 배열을 읽어 browser cache에 보존한다. 이후 figure는 sample_ms를 생략할 수 있기 때문이다.
+                // sample_ms는 최초 한 번만 전달되므로 그대로 두면 Plotly.react가 layout.meta에서 지울 수 있다.
+                // 그 전에 tip이 실행되면 실제 score가 있어도 '(없음)'으로 보일 수 있다.
                 if (window.__withCachedHoverMeta) {
                     layout = window.__withCachedHoverMeta(layout);
                 } else if (window.__ingestHoverMeta && layout.meta) {
@@ -7365,9 +7365,9 @@ app.clientside_callback(
                     || window.__currentClickMode === 'pan_keep_y'
                     || window.__desiredDragmode === 'pan'
                 );
-                // Pan refine: Dash already Plotly.react'd this figure. A second
-                // react (especially after setTimeout) briefly flashes the pre-pan
-                // traces, then the refined ones. Only sync Y; leave X/data alone.
+                // pan 정밀 갱신에서는 Dash가 이미 Plotly.react를 수행했으므로 두 번째
+                // react를 다시 호출하면 특히 setTimeout 뒤 pan 이전
+                // trace가 잠깐 보였다가 바뀔 수 있다. 여기서는 Y만 맞추고 X/data는 건드리지 않는다.
                 if (isPanMode && !window.__graphPointerDown && !window.__edgeDragging) {
                     try {
                         var yOnly = {};
@@ -7394,8 +7394,8 @@ app.clientside_callback(
                     }
                     return;
                 }
-                // While the pointer is down, keep the live camera; otherwise use
-                // the rebuilt figure's zoom_x (matches the pan that just finished).
+                // pointer가 눌린 동안에는 현재 브라우저 카메라를 유지하고, 손을 뗀 뒤에는
+                // 방금 끝난 pan에 맞춰 재생성된 figure의 zoom_x를 사용한다.
                 var keepX = null;
                 try {
                     if (window.__graphPointerDown) {
@@ -7427,9 +7427,9 @@ app.clientside_callback(
                     }
                 }
                 window.Plotly.react(gd, figure.data, layout, cfg).then(function() {
-                    // Re-apply axis ranges after react. Stable/layout races
-                    // (e.g. anomaly select→줌) can leave the previous Y scale even
-                    // when the figure JSON already has Y-auto bounds for the window.
+                    // react 뒤 축 범위를 다시 적용해 layout race를 정리한다.
+                    // 예를 들어 anomaly 선택→줌 과정에서 figure JSON에는 새 Y 자동 범위가 있어도
+                    // 실제 화면에는 이전 Y scale이 남을 수 있기 때문이다.
                     try {
                         var patch = {};
                         var meta = layout.meta || {};
