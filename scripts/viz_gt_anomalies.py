@@ -150,7 +150,7 @@ def plot_gt_segment(x, y, pred, start, end, index, n_total, context_mult,
     green = '#c8e6c9'
     line_c = '#1f4e79'
     red = '#d32f2f'
-    fn_c = '#1565c0'  # blue: missed GT (not a model prediction)
+    fn_c = '#1565c0'  # 파란색: 실제 anomaly지만 모델이 놓친 FN 구간
 
     if gt_only:
         title = (
