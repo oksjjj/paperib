@@ -1,7 +1,7 @@
 # ContextAE: 연속 시간구간 기반 K-context AutoEncoder
 
 > 실제 구현 위치: `models/contextae/`  
-> `ContextAE/run_plmn.py`는 이전 실행 경로를 위한 호환 wrapper입니다.
+> 실행도 `python -m models.contextae.run_plmn` 경로를 사용합니다.
 
 이 실험은 기존 HourAE의 **고정 24개 시간대 분할**을
 TRAIN 데이터에서 자동으로 찾은 **K개의 연속 시간구간**으로 교체합니다.
