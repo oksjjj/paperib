@@ -7,7 +7,6 @@ raw CSV 로딩, 공통 cache, PLMN ranking, 시간순 분할과 모델용 전처
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from typing import Any
 
@@ -243,20 +242,6 @@ def chrono_split_bounds(
         "test_start": times.iloc[valid_end],
         "t_max": t_max,
     }
-
-
-def sliding_windows(arr: np.ndarray, window: int) -> np.ndarray:
-    """(T, F) 연속 시계열을 (N, window, F) 겹치는 window 배열로 변환한다."""
-    t, f = arr.shape
-    if t < window:
-        raise ValueError(f"window={window}을 만들기에는 T={t}가 너무 짧습니다.")
-    n = t - window + 1
-    out = np.lib.stride_tricks.as_strided(
-        np.ascontiguousarray(arr),
-        shape=(n, window, f),
-        strides=(arr.strides[0], arr.strides[0], arr.strides[1]),
-    )
-    return np.array(out, copy=True)
 
 
 def prepare_plmn(

@@ -17,7 +17,6 @@ PAPER_PLMNS: tuple[str, ...] = (
     "P2291",
     "P0110",
 )
-PAPER_PLMN_SET: frozenset[str] = frozenset(PAPER_PLMNS)
 
 # 전문가가 실제 anomaly 판단에 사용하는 11개 core counter.
 # 모델 입력 순서도 이 순서를 그대로 사용한다.
@@ -34,7 +33,6 @@ CORE_FEATURES: tuple[str, ...] = (
     "M419",
     "M618",
 )
-CORE_FEATURE_SET: frozenset[str] = frozenset(CORE_FEATURES)
 
 def metric_columns(df: pd.DataFrame) -> list[str]:
     """DataFrame에 실제로 존재하는 11개 core feature를 고정 순서대로 반환한다."""

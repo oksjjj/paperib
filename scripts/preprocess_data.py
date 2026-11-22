@@ -17,7 +17,6 @@ import argparse
 import ast
 import csv
 import os
-import sys
 from pickle import dump
 
 import numpy as np

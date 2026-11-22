@@ -37,7 +37,6 @@ os.chdir(ROOT)
 from core.features import PAPER_PLMNS, metric_columns  # noqa: E402
 
 from ui.data_view import (  # noqa: E402
-    M971_COL,
     chrono_split_bounds,
     display_metric,
     display_plmn,
@@ -247,14 +246,6 @@ def _store_draft_reasons(
     state["draft_note"] = (note or "").strip()
 
 
-def _draft_reason_kwargs() -> dict[str, Any]:
-    return {
-        "reasons": list(state.get("draft_reasons") or []),
-        "fail_metrics": list(state.get("draft_fail_metrics") or []),
-        "note": state.get("draft_note") or "",
-    }
-
-
 def _flush_reasons_to_label(
     label_id: str | None,
     *,
@@ -414,97 +405,6 @@ def _fmt_prf(
     if tp is not None or fp is not None or fn is not None:
         counts = f"  TP={tp} FP={fp} FN={fn}"
     return f"P={_f(precision)}  R={_f(recall)}  F1={_f(f1)}{counts}"
-
-
-def _fmt_metric_line(m: dict | None, title: str) -> str:
-    if not m:
-        return f"{title}: —"
-    return (
-        f"{title}: "
-        + _fmt_prf(
-            m.get("precision"),
-            m.get("recall"),
-            m.get("f1"),
-            tp=m.get("TP"),
-            fp=m.get("FP"),
-            fn=m.get("FN"),
-        )
-    )
-
-
-def _mode_block(
-    title: str,
-    *,
-    active: bool,
-    thr: float | None,
-    paper: dict | None,
-    live: dict | None,
-    note: str,
-) -> html.Div:
-    border = "#7c3aed" if active else "#e2e8f0"
-    bg = "#f5f3ff" if active else "#f8fafc"
-    badge = " ← 그래프 오버레이" if active else ""
-    children: list[Any] = [
-        html.Div(
-            f"{title}{badge}",
-            style={
-                "fontWeight": "700",
-                "color": "#5b21b6" if active else "#334155",
-                "marginBottom": "4px",
-            },
-        ),
-        html.Div(
-            note,
-            style={"fontSize": "11px", "color": "#64748b", "marginBottom": "4px"},
-        ),
-    ]
-    thr_s = f"{thr:.4f}" if isinstance(thr, (int, float)) else "—"
-    children.append(
-        html.Div(
-            f"threshold={thr_s}",
-            style={"fontFamily": "monospace", "fontSize": "12px", "marginBottom": "2px"},
-        )
-    )
-    if paper:
-        children.append(
-            html.Div(
-                "저장 metrics (PA): "
-                + _fmt_prf(
-                    paper.get("precision"),
-                    paper.get("recall"),
-                    paper.get("f1"),
-                    tp=paper.get("TP"),
-                    fp=paper.get("FP"),
-                    fn=paper.get("FN"),
-                ),
-                style={"fontFamily": "monospace", "fontSize": "12px"},
-            )
-        )
-    if live:
-        children.append(
-            html.Div(
-                _fmt_metric_line(live.get("point"), "Point-wise (live)"),
-                style={"fontFamily": "monospace", "fontSize": "12px"},
-            )
-        )
-        children.append(
-            html.Div(
-                _fmt_metric_line(live.get("point_adjust"), "Point-adjust PA (live)"),
-                style={"fontFamily": "monospace", "fontSize": "12px"},
-            )
-        )
-    if not paper and not live:
-        children.append(html.I("이 모드의 메트릭이 없습니다."))
-    return html.Div(
-        children,
-        style={
-            "border": f"1px solid {border}",
-            "borderRadius": "6px",
-            "padding": "8px 10px",
-            "marginBottom": "6px",
-            "background": bg,
-        },
-    )
 
 
 def _fmt_opt(v: Any, *, digits: int = 4) -> str:
@@ -751,28 +651,6 @@ def _detection_metrics_children() -> list[Any]:
             )
         ]
     return _detection_metrics_panel(pred)
-
-
-def _enrich_current_predictions(*, threshold_mode: str | None = None) -> None:
-    """현재 로드된 PLMN과 prediction source에 대해 threshold/metric/overlay 정보를 다시 계산해 UI 상태를 갱신한다."""
-    df = state.get("df")
-    preds = state.get("predictions")
-    if df is None or not preds:
-        return
-    mode = threshold_mode or state.get("threshold_mode") or "pot"
-    msplit = state.get("metrics_eval_split") or "valid"
-    human = ((state.get("doc") or {}).get("labels")) or []
-    state["predictions"] = enrich_predictions_for_ui(
-        df,
-        preds,
-        human,
-        threshold_mode=mode,
-        metrics_split=msplit,
-    )
-    state["threshold_mode"] = state["predictions"].get("threshold_mode") or mode
-    state["metrics_eval_split"] = (
-        state["predictions"].get("metrics_eval_split") or msplit
-    )
 
 
 def _metrics_split_options(pred: dict | None = None) -> list[dict]:
@@ -1846,69 +1724,6 @@ def _place_label_click(ts, click_mode: str):
     )
 
 
-def _shape_x_from_relayout(relayout, idx: int):
-    """Plotly shape 편집 relayout payload에서 특정 shape의 x 위치를 읽는다."""
-    if relayout is None:
-        return None
-    for key in (f"shapes[{idx}].x0", f"shapes[{idx}].x1"):
-        if key in relayout:
-            try:
-                return parse_time(relayout[key])
-            except (ValueError, TypeError):
-                return None
-    shapes = relayout.get("shapes")
-    if isinstance(shapes, (list, tuple)) and 0 <= idx < len(shapes):
-        shape = shapes[idx] or {}
-        raw = shape.get("x0", shape.get("x1"))
-        if raw is None:
-            return None
-        try:
-            return parse_time(raw)
-        except (ValueError, TypeError):
-            return None
-    return None
-
-
-def _apply_label_edge_from_relayout(relayout) -> str | None:
-    """highlight edge가 drag된 relayout 이벤트를 전문가 label 시간 수정으로 반영한다."""
-    label_id = state.get("highlight_id")
-    idxs = state.get("highlight_shape_idxs") or {}
-    if not label_id or state["doc"] is None or not idxs:
-        return None
-    item = _label_by_id(label_id)
-    if item is None:
-        return None
-
-    start_idx = idxs.get("start")
-    end_idx = idxs.get("end")
-    if start_idx is None:
-        return None
-
-    new_start = _shape_x_from_relayout(relayout, start_idx)
-    new_end = (
-        _shape_x_from_relayout(relayout, end_idx)
-        if end_idx is not None and end_idx != start_idx
-        else None
-    )
-    if new_start is None and new_end is None:
-        return None
-
-    start_ts = parse_time(item["start"])
-    end_ts = parse_time(item["end"])
-    if new_start is not None:
-        start_ts = _snap_to_data_time(new_start)
-    if new_end is not None:
-        end_ts = _snap_to_data_time(new_end)
-    elif item.get("kind") == "point" or start_idx == end_idx:
-        end_ts = start_ts
-
-    update_label(state["doc"], label_id, start=start_ts, end=end_ts)
-    _bump_label_rev()
-    item = _label_by_id(label_id)
-    when = f"{format_kst(item['start'])} → {format_kst(item['end'])}"
-    return f"구간 조절: {when} — Save Labels로 저장"
-
-
 def _apply_label_edge_from_drag(payload) -> str | None:
     """가로 방향 edge drag 이벤트를 선택된 전문가 label의 시작/끝 수정으로 반영한다."""
     if not payload or state["doc"] is None:
@@ -2255,35 +2070,6 @@ def _scale_x_from_left(factor: float, *, y_auto: bool = True) -> bool:
     return True
 
 
-def _relayout_has_shape_edit(relayout) -> bool:
-    if not relayout:
-        return False
-    if "shapes" in relayout:
-        return True
-    return any(str(k).startswith("shapes[") for k in relayout)
-
-
-def _relayout_moved_non_edge(relayout) -> bool:
-    """highlight edge 이외의 Plotly shape가 이동한 relayout인지 확인한다."""
-    if not _relayout_has_shape_edit(relayout):
-        return False
-    idxs = state.get("highlight_shape_idxs") or {}
-    edge_idxs = {i for i in (idxs.get("start"), idxs.get("end")) if i is not None}
-    if "shapes" in relayout:
-        # figure 전체 교체 이벤트는 바로 직전 edge 수정이 아니면 label edge drag로 해석하지 않는다.
-        return True
-    touched = set()
-    for key in relayout:
-        text = str(key)
-        if not text.startswith("shapes["):
-            continue
-        try:
-            touched.add(int(text.split("[", 1)[1].split("]", 1)[0]))
-        except (IndexError, ValueError):
-            return True
-    return bool(touched - edge_idxs)
-
-
 def _same_time_window(
     a: tuple[pd.Timestamp, pd.Timestamp] | None,
     b: tuple[pd.Timestamp, pd.Timestamp] | None,
@@ -2540,58 +2326,6 @@ def _apply_axes_from_relayout(
         _reset_y()
         return True
     return False
-
-
-def _pin_y(y_range) -> bool:
-    """Y+/Y- 버튼으로 정한 명시적 y축 범위를 서버 상태에 저장한다."""
-    try:
-        ymin = float(y_range[0])
-        ymax = float(y_range[1])
-    except (ValueError, TypeError):
-        return False
-    if ymax <= ymin:
-        return False
-    drawn = state.get("y_rendered")
-    if state.get("y_auto") and drawn is not None and _same_range(drawn, (ymin, ymax)):
-        return False
-    state["y_min"], state["y_max"] = ymin, ymax
-    state["y_auto"] = False
-    state["y_gen"] = int(state.get("y_gen") or 0) + 1
-    return True
-
-
-def _sync_zoom_from_view(view_range) -> None:
-    """브라우저가 실제로 보여주는 x축 범위를 서버 상태에 반영하는 비상/디버그용 동기화 함수다."""
-    if state["df"] is None or not view_range:
-        return
-    if time.monotonic() < float(state.get("zoom_guard_until") or 0):
-        return
-    if isinstance(view_range, dict):
-        x_range = view_range.get("x")
-    elif isinstance(view_range, (list, tuple)) and len(view_range) == 2:
-        x_range = view_range
-    else:
-        return
-
-    if x_range and len(x_range) == 2:
-        try:
-            start_ts = parse_time(x_range[0])
-            end_ts = parse_time(x_range[1])
-        except (ValueError, TypeError):
-            start_ts = end_ts = None
-        if start_ts is not None and end_ts is not None and end_ts > start_ts:
-            incoming = _clamp_zoom(start_ts, end_ts)
-            if _same_time_window(incoming, state.get("zoom_rendered")):
-                return
-            if _same_time_window(incoming, state.get("zoom_rendered_prev")):
-                return
-            # 서버가 확대 상태라고 판단하는 동안 늦게 도착한 전체 범위 relayout echo는 무시한다.
-            if not state.get("x_full_view", True) and _same_time_window(
-                incoming, data_time_bounds(state["df"])
-            ):
-                return
-            state["zoom_start"], state["zoom_end"] = incoming
-            _note_x_window_changed()
 
 
 def _force_adopt_browser_x(view_range) -> bool:

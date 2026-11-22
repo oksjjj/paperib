@@ -63,7 +63,6 @@ PRED_DIR = os.path.join(IB_DATA_DIR, "predictions")
 RANK_CACHE_PATH = str(CORE_RANK_CACHE_PATH)
 CACHE_DIR = str(CORE_CACHE_DIR)
 
-CORE_FEATURE_MODE = "core"
 
 # 그래프는 metric 패널 높이를 고정하고 anomaly score 영역을 항상 위쪽에 확보한다.
 # 사람 label과 모델 prediction은 서로 겹치지 않도록 아래쪽에 각각 별도 track을 사용한다.
@@ -124,7 +123,6 @@ SERIES_COLORWAY = (
 # 아래 이름이 붙은 shape/annotation은 실제 label이 아니라 라벨링 작업 중 잠깐 표시하는 안내선이다.
 PENDING_ANCHOR_NAME = "pending_range_anchor"
 PENDING_RANGE_FILL_NAME = "pending_range_fill"
-LABEL_HIGHLIGHT_NAME = "label_highlight"
 LABEL_HIGHLIGHT_START = "label_highlight_start"
 LABEL_HIGHLIGHT_END = "label_highlight_end"
 VALUE_CURSOR_NAME = "value_cursor"
@@ -213,9 +211,6 @@ def display_plmn(plmn: str) -> str:
 
 
 M971_COL = "M971"
-REF_LINE_WIDTH = 2
-REF_LINE_DASH = "3px,2px"
-REF_LINE = dict(width=REF_LINE_WIDTH, dash=REF_LINE_DASH)
 def load_plmn(
     plmn: str,
     data_dir: str = DATA_DIR,
@@ -486,16 +481,6 @@ def load_or_build_ranking(
         rank_df["PLMN_name"] = [plmn_original_short(p) or "" for p in rank_df["PLMN"]]
         rank_df["PLMN_display"] = [display_plmn(p) for p in rank_df["PLMN"]]
     return rank_df
-
-def all_metric_columns(df: pd.DataFrame) -> list[str]:
-    """time/PLMN/anomaly score를 제외한 모든 수치형 series column을 반환한다."""
-    return [
-        c
-        for c in df.columns
-        if c not in ("time", "PLMN", ANOMALY_SCORE_KEY)
-    ]
-
-
 
 def label_path(plmn: str) -> str:
     ensure_label_dir()
@@ -959,15 +944,6 @@ def is_roca_prediction(
     src = str(source or (predictions or {}).get("source") or "")
     model = str((predictions or {}).get("model") or "")
     return src.startswith("roca") or model == "roca"
-
-
-def is_paper_backbone_prediction(
-    predictions: dict[str, Any] | None,
-    *,
-    source: str | None = None,
-) -> bool:
-    """현재 유지 중인 contamination-robust backbone 계열 prediction인지 판별한다."""
-    return is_roca_prediction(predictions, source=source)
 
 
 def has_vus_paper_metrics(predictions: dict[str, Any] | None) -> bool:
@@ -1765,20 +1741,6 @@ def _ensure_score_index(predictions: dict[str, Any] | None) -> dict[str, Any] | 
     return index
 
 
-def prediction_score_lookup(
-    predictions: dict[str, Any] | None,
-) -> dict[pd.Timestamp, float]:
-    """특정 UTC sample time의 anomaly score를 찾는 호환용 helper다."""
-    index = _ensure_score_index(predictions)
-    if not index or len(index["ns"]) == 0:
-        return {}
-    out: dict[pd.Timestamp, float] = {}
-    for ns, score in zip(index["ns"], index["scores"]):
-        ts = pd.Timestamp(int(ns), unit="ns", tz="UTC")
-        out[ts] = float(score)
-    return out
-
-
 def align_scores_to_df(
     df: pd.DataFrame,
     predictions: dict[str, Any] | None,
@@ -2112,35 +2074,6 @@ def model_overlays_for_plot(
     return out
 
 
-def labels_to_frame(doc: dict[str, Any]) -> pd.DataFrame:
-    rows = []
-    for item in doc.get("labels", []):
-        kind = item.get("kind", "point")
-        start = format_kst(item.get("start"))
-        end = format_kst(item.get("end"))
-        interval = start if kind == "point" else f"{start} → {end}"
-        rows.append(
-            {
-                "id": item.get("id"),
-                "형식": "점" if kind == "point" else "구간",
-                "시각 / 구간 (KST)": interval,
-                "판정 기준": label_reason_summary(item),
-                "updated_at": format_kst(item.get("updated_at"), seconds=True),
-            }
-        )
-    if not rows:
-        return pd.DataFrame(
-            columns=[
-                "id",
-                "형식",
-                "시각 / 구간 (KST)",
-                "판정 기준",
-                "updated_at",
-            ]
-        )
-    return pd.DataFrame(rows)
-
-
 LABEL_REASON_DEFS: list[tuple[str, str]] = [
     ("attempt_drop", "M971 급락"),
     ("attempt_spike", "M971 급증"),
@@ -2375,30 +2308,6 @@ def _should_embed_ranked_hover(
         pd.to_datetime(end, utc=True) - pd.to_datetime(start, utc=True)
     ).total_seconds()
     return 0 < win < full * HOVER_RANKED_MAX_FRAC
-
-
-def ranked_hover_text(
-    row: pd.Series,
-    cols: list[str],
-    *,
-    sep: str = "<br>",
-    top_n: int | None = None,
-    extra_pairs: list[tuple[str, float]] | None = None,
-) -> str:
-    pairs = ranked_metric_pairs(row, cols, nonzero_only=True)
-    if extra_pairs:
-        pairs = pairs + list(extra_pairs)
-        pairs.sort(key=lambda x: x[1], reverse=True)
-    attempt = _row_attempt(row)
-    shown = pairs if top_n is None else pairs[:top_n]
-    lines = [
-        f"{display_metric(name)}="
-        f"{format_metric_value(val, metric=name, attempt=attempt)}"
-        for name, val in shown
-    ]
-    if top_n is not None and len(pairs) > top_n:
-        lines.append(f"... +{len(pairs) - top_n} more (아래 패널 스크롤)")
-    return sep.join(lines)
 
 
 def _ranked_hover_texts_matrix(
@@ -2950,43 +2859,6 @@ def pred_line(
     return f"{text}  ({item.get('id')})"
 
 
-def predictions_to_frame(doc: dict[str, Any] | None) -> pd.DataFrame:
-    """model prediction segment 목록을 표 형태 DataFrame으로 변환한다."""
-    rows = []
-    for item in (doc or {}).get("labels") or []:
-        tops = item.get("top_metrics") or []
-        top_str = ", ".join(
-            f"{display_metric(str(t.get('metric')))}"
-            f"({float(t.get('contribution', 0)):.1f})"
-            for t in tops[:5]
-            if t.get("metric")
-        )
-        kind = item.get("kind", "point")
-        start = format_kst(item.get("start"))
-        end = format_kst(item.get("end"))
-        interval = start if kind == "point" else f"{start} → {end}"
-        rows.append(
-            {
-                "id": item.get("id"),
-                "형식": "점" if kind == "point" else "구간",
-                "시각 / 구간 (KST)": interval,
-                "기여 metric (상위)": top_str,
-                "score": item.get("score"),
-            }
-        )
-    if not rows:
-        return pd.DataFrame(
-            columns=[
-                "id",
-                "형식",
-                "시각 / 구간 (KST)",
-                "기여 metric (상위)",
-                "score",
-            ]
-        )
-    return pd.DataFrame(rows)
-
-
 def label_highlight_overlays(
     item: dict[str, Any],
     *,
@@ -3062,22 +2934,6 @@ def pending_anchor_shape(ts, *, row: int | None = None) -> dict[str, Any]:
         line=dict(color="royalblue", width=3, dash="dot"),
         layer="above",
         editable=False,
-        name=PENDING_ANCHOR_NAME,
-    )
-
-
-def pending_anchor_annotation(ts) -> dict[str, Any]:
-    return dict(
-        x=to_plot_time(ts),
-        y=1.0,
-        xref="x",
-        yref="paper",
-        text="① 시작(왼쪽) — 오른쪽으로 이동 후 끝점 클릭",
-        showarrow=False,
-        yshift=-8,
-        font=dict(size=11, color="white"),
-        bgcolor="royalblue",
-        borderpad=3,
         name=PENDING_ANCHOR_NAME,
     )
 
@@ -3714,95 +3570,3 @@ def _style_panel_separation(
     if anns:
         fig.layout.annotations = tuple(anns)
 
-
-def build_metric_figure(
-    df: pd.DataFrame,
-    doc: dict[str, Any],
-    metric: str,
-    *,
-    start: pd.Timestamp | None = None,
-    end: pd.Timestamp | None = None,
-    filter_data: bool = False,
-    width: int | None = None,
-    max_points: int = 3000,
-) -> go.Figure:
-    view = _filter_df(df, start, end) if filter_data else df
-    if not len(view):
-        idx = []
-    elif filter_data:
-        idx = minmax_indices(view[metric].to_numpy(), max_points)
-    else:
-        idx = window_indices(
-            view[metric].to_numpy(), window_positions(view, start, end), max_points
-        )
-    fig = go.Figure()
-    fig.add_trace(
-        go.Scattergl(
-            x=to_plot_times(view["time"].to_numpy()[idx]),
-            y=view[metric].to_numpy()[idx],
-            mode="lines",
-            name=display_metric(metric),
-            line=dict(width=1.5, color="steelblue"),
-            hovertemplate="%{x|%Y년 %m월 %d일 %H:%M}<br>%{y:,.0f}<extra></extra>",
-        )
-    )
-    for item in doc.get("labels", []):
-        add_label_indicator(fig, item)
-    fig.update_layout(
-        title=f"{display_plmn(str(doc.get('plmn')))} — {display_metric(metric)}",
-        height=216,
-        dragmode="zoom",
-        showlegend=False,
-        margin=dict(l=40, r=20, t=50, b=40),
-        xaxis_title="시간 (KST)",
-        yaxis_title=display_metric(metric),
-        uirevision=f"{doc.get('plmn')}-{metric}",
-    )
-    if width:
-        fig.update_layout(width=width, autosize=False)
-    else:
-        fig.update_layout(autosize=True)
-    fig.update_yaxes(fixedrange=True)
-    tmin, tmax = data_time_bounds(view if len(view) else df)
-    x0 = pd.to_datetime(start, utc=True) if start is not None else tmin
-    x1 = pd.to_datetime(end, utc=True) if end is not None else tmax
-    x0, x1 = clamp_time_range(x0, x1, tmin, tmax)
-    fig.update_xaxes(
-        range=[to_plot_time(x0), to_plot_time(x1)],
-        autorange=False,
-        type="date",
-        tickformat="%Y년 %m월 %d일\n%H:%M",
-        hoverformat="%Y년 %m월 %d일 %H:%M",
-        showspikes=True,
-        spikemode="across",
-        spikesnap="cursor",
-        spikedash="dot",
-        spikecolor="royalblue",
-        spikethickness=1,
-    )
-    return fig
-
-
-def suggest_zscore_points(
-    df: pd.DataFrame,
-    threshold: float = 3.0,
-) -> pd.DataFrame:
-    """참고용으로 각 metric의 절대 z-score가 threshold를 넘는 시점을 제안한다."""
-    cols = metric_columns(df)
-    mask = pd.Series(False, index=df.index)
-    hit_metrics = [[] for _ in range(len(df))]
-    for col in cols:
-        std = df[col].std(ddof=0)
-        if std == 0 or pd.isna(std):
-            continue
-        z = ((df[col] - df[col].mean()) / std).abs() > threshold
-        for i in df.index[z]:
-            hit_metrics[i].append(col)
-        mask |= z
-    out = df.loc[mask, ["time"]].copy()
-    out["time"] = [format_kst(t) for t in out["time"]]
-    out["n_metrics"] = [len(hit_metrics[i]) for i in out.index]
-    out["metrics"] = [
-        ", ".join(display_metric(m) for m in hit_metrics[i][:8]) for i in out.index
-    ]
-    return out.reset_index(drop=True)

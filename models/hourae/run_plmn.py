@@ -23,10 +23,9 @@ from __future__ import annotations
 
 import argparse
 import json
-import random
 import sys
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -34,9 +33,6 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import torch
-from sklearn.preprocessing import RobustScaler
-from torch import nn
-from torch.utils.data import DataLoader, TensorDataset
 
 REPO = Path(__file__).resolve().parents[2]
 ROOT = REPO / "HourAE"
@@ -50,21 +46,13 @@ from core.labels import human_anomaly_mask, load_labels
 from core.metrics import evaluate_valid, resolve_vus_window
 
 
-from models.hourae.model import PointAutoEncoder
 from models.hourae.training import (
     Config,
     HourArtifacts,
     set_seed,
     device_for_run,
-    split_indices,
     prepare_unlabeled_plmn,
-    fit_scaler,
-    train_ae,
-    reconstruction_mse,
-    cpu_state_dict,
-    quantile_for_contamination,
     fit_hour,
-    build_final_model,
     score_with_hour_models,
 )
 

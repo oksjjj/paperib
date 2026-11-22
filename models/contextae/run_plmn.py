@@ -22,10 +22,9 @@ from __future__ import annotations
 
 import argparse
 import json
-import random
 import sys
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -33,10 +32,6 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import torch
-from sklearn.metrics import silhouette_score
-from sklearn.preprocessing import RobustScaler
-from torch import nn
-from torch.utils.data import DataLoader, TensorDataset
 
 REPO = Path(__file__).resolve().parents[2]
 ROOT = REPO / "ContextAE"
@@ -56,12 +51,8 @@ def _load_hourae():
     return mod
 
 
-from models.contextae.model import PointAutoEncoder
 from models.contextae.context import (
-    robust_mad,
     build_train_slot_profiles,
-    build_segment_cost_matrix,
-    optimal_contiguous_partition,
     fit_context_segmentation,
     context_ids_from_slots,
     slot_label,
@@ -71,16 +62,8 @@ from models.contextae.training import (
     ContextArtifacts,
     set_seed,
     device_for_run,
-    split_indices,
-    local_slot_ids,
     prepare_unlabeled_plmn,
-    fit_scaler,
-    train_ae,
-    reconstruction_mse,
-    cpu_state_dict,
-    quantile_for_contamination,
     fit_context_model,
-    build_final_model,
     score_with_context_models,
 )
 
