@@ -471,7 +471,7 @@ score_block()
 
 ## 14. threshold
 
-현재 paperib wrapper의 기본 RoCA threshold는 TRAIN score quantile이다.
+현재 paperib 구현의 기본 RoCA threshold는 TRAIN score quantile이다.
 
 기본:
 
