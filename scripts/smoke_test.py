@@ -105,12 +105,12 @@ def main() -> None:
     def _ui_facades() -> None:
         # app.py 자체는 Dash 서버용 startup state를 만들기 때문에 여기서는
         # app이 사용하는 역할별 facade까지만 import한다.
-        import labeling.data_view  # noqa: F401
-        import labeling.plotting  # noqa: F401
-        import labeling.ui_labels  # noqa: F401
-        import labeling.ui_predictions  # noqa: F401
+        import ui.data_view  # noqa: F401
+        import ui.plotting  # noqa: F401
+        import ui.ui_labels  # noqa: F401
+        import ui.ui_predictions  # noqa: F401
 
-    check("labeling UI facade imports", _ui_facades)
+    check("UI facade imports", _ui_facades)
 
     if DATA_DIR.exists() and any(DATA_DIR.glob("*.csv")):
         def _data_load() -> None:
