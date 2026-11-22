@@ -1,6 +1,6 @@
 """Plotly figure 생성과 화면 범위 제어에 필요한 UI helper facade."""
 
-from tool import (
+from labeling.tool import (
     FIGURE_HEIGHT,
     build_figure,
     clamp_time_range,
