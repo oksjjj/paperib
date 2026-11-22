@@ -11,7 +11,7 @@ repo-root top100.txt. By default this script caches that set (and prunes
 other pickles).
 
 Usage:
-  # After adding/replacing files in data/
+  # raw CSV를 추가하거나 교체한 뒤
   python labeling/preprocess.py
   python labeling/preprocess.py --force          # wipe pickles, full rebuild
   python labeling/preprocess.py --all            # every PLMN seen in CSV
@@ -54,7 +54,7 @@ def _read_plmn_list(path: str | Path) -> list[str]:
 
 
 def _prune_caches(keep: set[str]) -> int:
-    """Remove labeling/cache/*.pkl whose PLMN is not in keep."""
+    """keep 목록에 없는 사업자의 labeling/cache/*.pkl을 삭제하고 삭제 개수를 반환한다."""
     if not os.path.isdir(CACHE_DIR):
         return 0
     removed = 0
@@ -74,7 +74,11 @@ def _build_all_caches(
     targets: set[str] | None,
     force: bool,
 ) -> tuple[pd.DataFrame, int]:
-    """Scan every CSV once, write per-PLMN pickles, return ranking frame."""
+    """모든 CSV를 한 번씩만 읽어 사업자별 pickle을 만들고 트래픽 순위 DataFrame을 반환한다.
+
+    파일마다 모든 사업자를 반복해서 다시 읽는 대신, 한 번의 scan에서 PLMN별 조각을
+    모아두었다가 마지막에 합치므로 대량 CSV에서도 불필요한 I/O를 줄인다.
+    """
     ensure_label_dir()
     os.makedirs(CACHE_DIR, exist_ok=True)
     signature = _data_signature(DATA_DIR)
@@ -106,7 +110,7 @@ def _build_all_caches(
             print(f"  [{i}/{len(csv_files)}] {file}  (groups={len(parts)})")
     print(f"scan done in {time.time() - t_scan:.1f}s")
 
-    # Full ranking always written (all PLMNs seen in M971 sums)
+    # 선택된 캐시 대상과 관계없이 M971 합계를 확인할 수 있는 모든 PLMN의 전체 순위는 항상 저장한다.
     rank_df = (
         pd.DataFrame({"PLMN": list(m971_sum.keys()), "M971_sum": list(m971_sum.values())})
         .sort_values("M971_sum", ascending=False)
@@ -190,7 +194,7 @@ def preprocess(
         targets = set(rank_df.head(top)["PLMN"].astype(str).tolist())
         print(f"filtering to top {top}: {len(targets)} PLMNs")
     else:
-        # Default: top100.txt (future data is limited to this set)
+        # 별도 옵션이 없으면 top100.txt를 기준으로 캐시 대상을 제한한다.
         path = _default_top100_path()
         if not path.is_file():
             raise FileNotFoundError(
