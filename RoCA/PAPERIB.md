@@ -1,13 +1,13 @@
 # RoCA × paperib 학습 가이드
 
 > 실제 구현 위치: `models/roca/`  
-> `RoCA/` 아래 Python 파일은 이전 import/실행 경로를 위한 호환 wrapper입니다.
+> 실행과 import는 모두 `models.roca` 경로를 사용합니다.
 
 이 디렉터리는 공개된 RoCA 구현을 paperib의 인바운드 로밍 데이터에 적용하기 위한 코드다.
 
-원본 구현은 `ruiking04/RoCA`이며 MIT License를 따른다. 원본 출처는 `official/ORIGIN.txt`, 라이선스는 `official/LICENSE`에서 확인할 수 있다.
+원본 구현은 `ruiking04/RoCA`이며 MIT License를 따른다. 원본 출처는 `models/roca/official/ORIGIN.txt`, 라이선스는 `models/roca/official/LICENSE`에서 확인할 수 있다.
 
-이 저장소에서는 원본의 핵심 network, loss, augmentation 로직을 `RoCA/official/`에 유지하고, paperib 데이터 로딩과 평가를 연결하는 wrapper를 별도로 작성했다.
+이 저장소에서는 원본의 핵심 network, loss, augmentation 로직은 `models/roca/official/`에 유지하고, paperib 데이터 로딩과 평가는 `models/roca/`에서 직접 연결한다.
 
 ## 1. 먼저 볼 파일
 
