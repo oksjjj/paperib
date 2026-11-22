@@ -1,22 +1,20 @@
 # -*- coding: utf-8 -*-
-"""
-GT anomaly segment viewer (OmniAnomaly paper Fig.1 style).
+"""GT anomaly segment를 개별 PNG로 저장해 확인하는 시각화 스크립트.
 
-Saves every ground-truth anomaly segment as its own PNG, with normal
-context of 10× segment length on both sides.
+각 정답 anomaly 구간을 중심으로 양쪽에 anomaly 길이의 약 10배 normal context를 함께 그린다.
 
-Modes:
-  --gt_only   : GT bands only (no model scores; use before training)
-  default     : overlay TP/FP/FN from saved test_score (no point adjustment)
+모드:
+  --gt_only : 모델 score 없이 GT band만 표시
+  기본값    : 저장된 test_score를 이용해 TP/FP/FN 표시
+              point adjustment는 적용하지 않음
 
-  TP : GT anomaly & predicted      → red filled circles
-  FP : normal & predicted          → red triangles
-  FN : GT anomaly & not predicted  → blue open circles
+표시:
+  TP : GT anomaly이면서 예측 anomaly → 빨간 채운 원
+  FP : normal인데 예측 anomaly      → 빨간 삼각형
+  FN : GT anomaly인데 예측 normal   → 파란 빈 원
 
-Examples:
-    python scripts/viz_gt_anomalies.py --dataset machine-1-1 --gt_only
-    python scripts/viz_gt_anomalies.py --dataset SMAP --gt_only
-    python scripts/viz_gt_anomalies.py --dataset SMAP --run_name prior_noes_nf_lr5e-4_eps1e-3_gclip5
+사용 예:
+  python scripts/viz_gt_anomalies.py --dataset machine-1-1 --gt_only
 """
 from __future__ import annotations
 
