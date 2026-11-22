@@ -24,7 +24,7 @@ data/
 
 ```bash
 # CSV는 data/ib_data/raw/ 에 둠
-python scripts/build_ui_cache.py
+python scripts/build_ib_cache.py
 python ui/app.py
 ```
 
