@@ -278,7 +278,7 @@ def main():
         score, pred, thr, thr_src, score_path = _load_pred(
             cfg.result_dir, args.threshold,
         )
-        # Align with score length (sliding window last-point scores)
+        # window 기반 모델은 window 마지막 point부터 score가 생기므로 GT 길이를 score 배열과 맞춘다.
         x = x[-len(score):]
         y = y[-len(score):]
         pred = np.asarray(pred, dtype=bool).reshape(-1)
