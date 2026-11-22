@@ -1,7 +1,7 @@
 # HourAE: 24-hour contextual iterative AutoEncoder
 
 > 실제 구현 위치: `models/hourae/`  
-> `HourAE/run_plmn.py`는 이전 실행 경로를 위한 호환 wrapper입니다.
+> 실행도 `python -m models.hourae.run_plmn` 경로를 사용합니다.
 
 This reproduces the user's earlier point-based strategy using 24 AutoEncoders.
 
