@@ -34,16 +34,16 @@ if REPO not in sys.path:
     sys.path.insert(0, REPO)
 os.chdir(ROOT)
 
+from core.features import PAPER_PLMNS, metric_columns  # noqa: E402
+
 from ui.data_view import (  # noqa: E402
     M971_COL,
-    PAPER_PLMNS,
     chrono_split_bounds,
     display_metric,
     display_plmn,
     format_kst,
     load_or_build_ranking,
     load_plmn,
-    metric_columns,
     parse_time,
     to_plot_time,
     to_plot_times,

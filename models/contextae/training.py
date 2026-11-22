@@ -81,9 +81,6 @@ def split_indices(
     return train_end, min(valid_end, n)
 
 
-def feature_columns(df: pd.DataFrame) -> list[str]:
-    return metric_columns(df)
-
 
 def local_slot_ids(local_times: pd.Series) -> np.ndarray:
     """로컬 하루를 5분 단위 slot 번호로 바꾼다. 00:00=0, ..., 23:55=287이다."""
@@ -94,7 +91,7 @@ def local_slot_ids(local_times: pd.Series) -> np.ndarray:
 
 def prepare_unlabeled_plmn(plmn: str, tz_name: str) -> dict[str, Any]:
     df = load_plmn(plmn)
-    cols = feature_columns(df)
+    cols = metric_columns(df)
     if not cols:
         raise RuntimeError(f"{plmn}: no raw feature columns")
 

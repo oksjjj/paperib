@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
 
-from core.features import PAPER_PLMNS, feature_columns
+from core.features import PAPER_PLMNS, metric_columns
 from core.labels import human_anomaly_mask, load_labels
 
 REPO = Path(__file__).resolve().parents[1]
@@ -277,7 +277,7 @@ def prepare_plmn(
     7. 전문가 label은 평가용 mask로만 준비
     """
     df = load_plmn(plmn)
-    cols = feature_columns(df)
+    cols = metric_columns(df)
     if not cols:
         raise RuntimeError(f"{plmn}: 사용할 core feature가 없습니다.")
 

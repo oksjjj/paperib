@@ -77,13 +77,10 @@ def split_indices(
     return train_end, min(valid_end, n)
 
 
-def feature_columns(df: pd.DataFrame) -> list[str]:
-    return metric_columns(df)
-
 
 def prepare_unlabeled_plmn(plmn: str, tz_name: str) -> dict[str, Any]:
     df = load_plmn(plmn)
-    cols = feature_columns(df)
+    cols = metric_columns(df)
     if not cols:
         raise RuntimeError(f"{plmn}: no raw feature columns")
 

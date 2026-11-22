@@ -57,7 +57,6 @@ from models.hourae.training import (
     set_seed,
     device_for_run,
     split_indices,
-    feature_columns,
     prepare_unlabeled_plmn,
     fit_scaler,
     train_ae,

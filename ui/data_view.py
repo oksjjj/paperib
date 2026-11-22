@@ -4,16 +4,16 @@
 데이터 조회에 필요한 이름만 한곳에 모아 다시 export한다.
 """
 
+from core.features import PAPER_PLMNS, metric_columns
+
 from ui.tool import (
     M971_COL,
-    PAPER_PLMNS,
     chrono_split_bounds,
     display_metric,
     display_plmn,
     format_kst,
     load_or_build_ranking,
     load_plmn,
-    metric_columns,
     parse_time,
     to_plot_time,
     to_plot_times,

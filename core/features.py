@@ -40,8 +40,3 @@ def metric_columns(df: pd.DataFrame) -> list[str]:
     """DataFrame에 실제로 존재하는 11개 core feature를 고정 순서대로 반환한다."""
     present = set(df.columns)
     return [c for c in CORE_FEATURES if c in present]
-
-
-def feature_columns(df: pd.DataFrame) -> list[str]:
-    """모델 학습에 사용할 raw core counter만 반환한다."""
-    return metric_columns(df)

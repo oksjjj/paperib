@@ -32,6 +32,8 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
+from core.features import PAPER_PLMNS, metric_columns
+
 from core.data import (
     CACHE_DIR as CORE_CACHE_DIR,
     DATA_DIR as CORE_DATA_DIR,
@@ -61,37 +63,6 @@ PRED_DIR = os.path.join(IB_DATA_DIR, "predictions")
 RANK_CACHE_PATH = str(CORE_RANK_CACHE_PATH)
 CACHE_DIR = str(CORE_CACHE_DIR)
 
-# 논문 평가에 사용하는 10개 사업자 목록이다. UI 순서도 이 순서를 그대로 사용한다.
-PAPER_PLMNS: tuple[str, ...] = (
-    "P0480",
-    "P0714",
-    "P1888",
-    "P0975",
-    "P2309",
-    "P1921",
-    "P1575",
-    "P0139",
-    "P2291",
-    "P0110",
-)
-PAPER_PLMN_SET: frozenset[str] = frozenset(PAPER_PLMNS)
-
-# 전문가 라벨링과 모델 학습에 공통으로 사용하는 핵심 counter 목록이다.
-# 이 순서는 그래프와 모델 입력에서 사용하는 표준 feature 순서이므로 임의로 바꾸지 않는다.
-CORE_FEATURES: tuple[str, ...] = (
-    "M971",  # 결합 Attach 시도량 기준 counter
-    "M185",  # AUC 실패 관련 core counter
-    "M855",  # AUC timeout 관련 core counter
-    "M965",  # DNS 실패 관련 core counter
-    "M162",  # DNS timeout 관련 core counter
-    "M843",  # Gateway 실패 관련 core counter
-    "M430",  # Gateway timeout 관련 core counter
-    "M874",  # HSS 실패 관련 core counter
-    "M037",  # HSS timeout 관련 core counter
-    "M419",  # Session Management 실패 관련 core counter
-    "M618",  # Session Management timeout 관련 core counter
-)
-CORE_FEATURE_SET: frozenset[str] = frozenset(CORE_FEATURES)
 CORE_FEATURE_MODE = "core"
 
 # 그래프는 metric 패널 높이를 고정하고 anomaly score 영역을 항상 위쪽에 확보한다.
@@ -524,11 +495,6 @@ def all_metric_columns(df: pd.DataFrame) -> list[str]:
         if c not in ("time", "PLMN", ANOMALY_SCORE_KEY)
     ]
 
-
-def metric_columns(df: pd.DataFrame) -> list[str]:
-    """전문가가 사용하는 core feature만 CORE_FEATURES의 고정 순서대로 반환한다. 모델 학습과 UI가 동일한 feature 공간을 사용하도록 하는 핵심 함수다."""
-    present = set(df.columns)
-    return [c for c in CORE_FEATURES if c in present]
 
 
 def label_path(plmn: str) -> str:

@@ -72,7 +72,6 @@ from models.contextae.training import (
     set_seed,
     device_for_run,
     split_indices,
-    feature_columns,
     local_slot_ids,
     prepare_unlabeled_plmn,
     fit_scaler,
