@@ -154,11 +154,7 @@ _MAPPING_ENABLED = True
 
 
 def set_mapping_enabled(enabled: bool) -> None:
-    """Enable/disable mapping lookups (PLMN/metric original names).
-
-    When disabled, display helpers keep masked IDs only — safe for shared/git
-    notebooks even if mapping files exist locally under data/.
-    """
+    """PLMN/metric 원래 이름을 보여주는 mapping lookup 사용 여부를 설정한다. 공유용 환경에서는 비활성화하면 비식별화 ID만 표시된다."""
     global _MAPPING_ENABLED
     _MAPPING_ENABLED = bool(enabled)
 
@@ -168,7 +164,7 @@ def mapping_enabled() -> bool:
 
 
 def _load_mapping_tables() -> None:
-    """Lazy-load mapping files if present under data/."""
+    """로컬 mapping 파일이 존재하면 처음 필요할 때만 읽어 메모리에 캐시한다."""
     global _PLMN_ORIGINAL, _METRIC_ORIGINAL
     if _PLMN_ORIGINAL is not None and _METRIC_ORIGINAL is not None:
         return
@@ -192,7 +188,7 @@ def _load_mapping_tables() -> None:
 
 
 def reload_mappings() -> None:
-    """Force re-read mapping files (e.g. after replacing data/*_mapping.txt)."""
+    """mapping 파일을 교체한 뒤 다시 읽을 수 있도록 기존 캐시를 비우고 재로딩한다."""
     global _PLMN_ORIGINAL, _METRIC_ORIGINAL
     _PLMN_ORIGINAL = None
     _METRIC_ORIGINAL = None
@@ -216,7 +212,7 @@ def metric_original(metric: str) -> str | None:
 
 
 def plmn_original_short(plmn: str) -> str | None:
-    """Original PLMN without 'PLMN_' prefix, e.g. PLMN_46011 -> 46011."""
+    """원래 PLMN 문자열에서 'PLMN_' 접두어를 제거한 짧은 값을 반환한다."""
     original = plmn_original(plmn)
     if original is None:
         return None
@@ -226,7 +222,7 @@ def plmn_original_short(plmn: str) -> str | None:
 
 
 def display_plmn(plmn: str) -> str:
-    """P0480 or P0480 (46011) when mapping exists."""
+    """mapping이 있으면 비식별화 PLMN과 원래 PLMN을 함께 표시하고, 없으면 비식별화 값만 반환한다."""
     short = plmn_original_short(plmn)
     return f"{plmn} ({short})" if short else plmn
 
@@ -253,7 +249,7 @@ def rate_metrics_available(
     df: pd.DataFrame | None = None,
     metrics: list[str] | None = None,
 ) -> list[str]:
-    """S_RATE / A_RATE keys that exist in the dataset metric list."""
+    """현재 데이터에 계산 가능한 rate metric 목록을 반환한다."""
     cols: set[str] = set(metrics or [])
     if df is not None:
         cols.update(metric_columns(df))
@@ -264,7 +260,7 @@ def overlay_metrics_available(
     df: pd.DataFrame | None = None,
     metrics: list[str] | None = None,
 ) -> list[str]:
-    """Synthetic toggles in the metric filter (rate overlays)."""
+    """현재 데이터에서 UI overlay로 추가할 수 있는 파생 metric 목록을 반환한다."""
     return list(rate_metrics_available(df, metrics))
 
 
@@ -277,7 +273,7 @@ def metric_division_rate(numerator: pd.Series, denominator: pd.Series) -> pd.Ser
 
 
 def add_rate_columns(df: pd.DataFrame, *, force: bool = False) -> pd.DataFrame:
-    """Append S_RATE / A_RATE when inputs exist (skip if already present)."""
+    """필요한 원본 counter가 있으면 UI용 SUCCESS/ACCEPT rate column을 추가한다. 이미 있으면 기본적으로 다시 계산하지 않는다."""
     if force or S_RATE_KEY not in df.columns:
         if M658_COL in df.columns and M971_COL in df.columns:
             df[S_RATE_KEY] = metric_division_rate(df[M658_COL], df[M971_COL])
@@ -293,7 +289,7 @@ def load_plmn(
     *,
     use_cache: bool = True,
 ) -> pd.DataFrame:
-    """Load one PLMN's series. Caches to cache/ so repeat loads are fast."""
+    """한 사업자의 시계열을 여러 CSV에서 모아 시간순으로 정렬해 반환한다. 반복 로딩을 줄이기 위해 pickle cache를 사용한다."""
     os.makedirs(CACHE_DIR, exist_ok=True)
     cache_path = os.path.join(CACHE_DIR, f"{plmn}.pkl")
     signature = _data_signature(data_dir)
@@ -335,7 +331,7 @@ def display_training_feature(
     *,
     feature_mode: str | None = None,
 ) -> str:
-    """Label for model inputs (comb_share: counter÷M971 except M971 itself)."""
+    """모델 입력 feature를 UI에서 읽기 쉬운 이름으로 표시한다. comb_share 모드에서는 M971 대비 비율 표현을 붙인다."""
     name = display_metric(metric)
     if (
         feature_mode == "comb_share"
@@ -347,7 +343,7 @@ def display_training_feature(
 
 
 def display_metric(metric: str) -> str:
-    """M971 or M971 (original) when a local mapping file exists."""
+    """metric ID를 화면용 이름으로 바꾼다. 로컬 mapping이 있으면 원래 이름도 함께 표시한다."""
     if metric == S_RATE_KEY:
         return "SUCCESS rate"
     if metric == A_RATE_KEY:
@@ -363,7 +359,7 @@ def window_plot_indices(
     end: pd.Timestamp | None,
     max_points: int,
 ) -> np.ndarray:
-    """Dataset ends + high-res visible window — same sampling as plot_series_window."""
+    """전체 데이터 범위와 현재 확대 구간을 고려해 Plotly에 그릴 sample 인덱스를 계산한다."""
     n = len(df)
     if n == 0:
         return np.array([], dtype=int)
@@ -376,7 +372,7 @@ def window_plot_indices(
 
 
 def to_kst(ts) -> pd.Timestamp:
-    """Normalize any timestamp to Asia/Seoul."""
+    """입력 timestamp를 Asia/Seoul timezone으로 정규화한다."""
     t = pd.to_datetime(ts, utc=True)
     if t.tzinfo is None:
         t = t.tz_localize("UTC")
@@ -384,7 +380,7 @@ def to_kst(ts) -> pd.Timestamp:
 
 
 def format_kst(ts, *, seconds: bool = False) -> str:
-    """Korean date format in KST, e.g. 2026년 04월 30일 00:00."""
+    """timestamp를 한국식 KST 날짜 문자열로 변환한다."""
     if ts is None or (isinstance(ts, float) and np.isnan(ts)):
         return ""
     t = to_kst(ts)
@@ -392,12 +388,12 @@ def format_kst(ts, *, seconds: bool = False) -> str:
 
 
 def to_plot_time(ts) -> pd.Timestamp:
-    """KST wall-clock as naive Timestamp for Plotly axis display."""
+    """Plotly 축 표시용으로 KST wall-clock 값을 timezone 없는 Timestamp로 바꾼다."""
     return to_kst(ts).tz_localize(None)
 
 
 def to_plot_times(values) -> np.ndarray:
-    """Vectorized KST-naive datetimes for Plotly x values."""
+    """여러 timestamp를 한 번에 Plotly 표시용 KST-naive datetime 배열로 변환한다."""
     s = pd.to_datetime(pd.Series(values), utc=True)
     return s.dt.tz_convert(KST).dt.tz_localize(None).to_numpy()
 
@@ -409,11 +405,7 @@ def chrono_split_bounds(
     train_ratio: float = DEFAULT_TRAIN_RATIO,
     valid_ratio: float = DEFAULT_VALID_RATIO,
 ) -> dict[str, pd.Timestamp] | None:
-    """Resolve train / valid / test UTC bounds for the IB chronological split.
-
-    Prefer ``predictions['split']`` from ``run_plmn`` export; otherwise use the
-    default ratios 0.6 / 0.2 / 0.2.
-    """
+    """시간순 TRAIN/VALID/TEST 경계를 계산한다. prediction export에 저장된 split 정보가 있으면 이를 우선 사용한다."""
     if df is None or not len(df):
         return None
     times = pd.to_datetime(df["time"], utc=True)
@@ -459,7 +451,7 @@ def add_split_region_overlays(
     fig: go.Figure,
     bounds: dict[str, pd.Timestamp] | None,
 ) -> None:
-    """Draw TRAIN / VALID / TEST bands + dashed boundaries (behind series)."""
+    """그래프 뒤쪽에 TRAIN/VALID/TEST 배경 band와 경계선을 추가한다."""
     if not bounds:
         return
     t_min = bounds["t_min"]
@@ -534,7 +526,7 @@ def add_split_region_overlays(
 
 
 def parse_time(value) -> pd.Timestamp:
-    """Parse user/UI time to UTC. Naive strings are treated as KST."""
+    """사용자/UI에서 들어온 시간을 UTC timestamp로 변환한다. timezone이 없으면 KST로 해석한다."""
     if value is None or (isinstance(value, str) and not str(value).strip()):
         raise ValueError("empty timestamp")
     if isinstance(value, pd.Timestamp):
@@ -564,7 +556,7 @@ def ensure_label_dir() -> str:
 
 
 def filter_paper_plmns(rank_df: pd.DataFrame) -> pd.DataFrame:
-    """Keep only ``PAPER_PLMNS``, ordered 1..N for the paper eval set."""
+    """전체 사업자 순위에서 논문 평가 대상 10개만 정해진 순서대로 추린다."""
     if rank_df is None or rank_df.empty or "PLMN" not in rank_df.columns:
         return rank_df
     order = {plmn: i for i, plmn in enumerate(PAPER_PLMNS)}
@@ -585,13 +577,7 @@ def load_or_build_ranking(
     *,
     paper_only: bool = False,
 ) -> pd.DataFrame:
-    """Load a ranking that matches the current source-data snapshot.
-
-    Adding or replacing data/*.csv invalidates the rank signature. The next app
-    start rebuilds the ranking, while label JSON files remain untouched.
-
-    When ``paper_only`` is True, restrict to ``PAPER_PLMNS`` (paper eval set).
-    """
+    """현재 raw 데이터 snapshot과 맞는 PLMN 순위 cache를 읽고, 오래되었으면 다시 계산한다."""
     ensure_label_dir()
     os.makedirs(CACHE_DIR, exist_ok=True)
     signature = _data_signature(DATA_DIR)
@@ -627,7 +613,7 @@ def load_or_build_ranking(
 
 
 def save_ranking_cache(rank_df: pd.DataFrame, signature: str | None = None) -> None:
-    """Persist ranking and the source-data signature used to create it."""
+    """PLMN 순위와 그 순위를 만들 때 사용한 raw 데이터 signature를 저장한다."""
     ensure_label_dir()
     os.makedirs(CACHE_DIR, exist_ok=True)
     rank_df.to_csv(RANK_CACHE_PATH, index=False)
@@ -653,11 +639,7 @@ def _build_ranking_from_data() -> pd.DataFrame:
 
 
 def _data_signature(data_dir: str) -> str:
-    """Fingerprint of the data dir so caches invalidate when files change.
-
-    Keep this format stable: changing it invalidates every cached pickle and
-    forces a full CSV rescan per PLMN on the next load.
-    """
+    """raw 데이터 파일 목록/크기/수정시간으로 cache 유효성을 판단할 fingerprint를 만든다."""
     csv_files = sorted(f for f in os.listdir(data_dir) if f.endswith(".csv"))
     newest = 0.0
     total = 0
@@ -669,7 +651,7 @@ def _data_signature(data_dir: str) -> str:
 
 
 def clear_plmn_cache(plmn: str | None = None) -> int:
-    """Delete cached PLMN frames. Returns number of files removed."""
+    """사업자별 pickle cache를 삭제하고 삭제된 파일 수를 반환한다."""
     if not os.path.isdir(CACHE_DIR):
         return 0
     targets = (
@@ -687,7 +669,7 @@ def clear_plmn_cache(plmn: str | None = None) -> int:
 
 
 def all_metric_columns(df: pd.DataFrame) -> list[str]:
-    """Every numeric series column (including rates / non-core counters)."""
+    """time/PLMN/anomaly score를 제외한 모든 수치형 series column을 반환한다."""
     return [
         c
         for c in df.columns
@@ -696,11 +678,7 @@ def all_metric_columns(df: pd.DataFrame) -> list[str]:
 
 
 def metric_columns(df: pd.DataFrame) -> list[str]:
-    """Core expert features only, in ``CORE_FEATURES`` order.
-
-    Used by labeling UI plots and all model training/export paths that import
-    this helper — non-core counters and rate overlays are excluded.
-    """
+    """전문가가 사용하는 core feature만 CORE_FEATURES의 고정 순서대로 반환한다. 모델 학습과 UI가 동일한 feature 공간을 사용하도록 하는 핵심 함수다."""
     present = set(df.columns)
     return [c for c in CORE_FEATURES if c in present]
 
@@ -771,7 +749,7 @@ def pred_path(plmn: str, source: str = "") -> str:
 
 
 def list_prediction_sources(plmn: str) -> list[dict[str, str]]:
-    """Dropdown options for available prediction JSON files."""
+    """현재 사업자에 대해 UI에서 선택 가능한 model prediction JSON 목록을 만든다."""
     options: list[dict[str, str]] = []
     if not os.path.isdir(PRED_DIR):
         return []
@@ -825,7 +803,7 @@ def load_predictions(
     *,
     source: str = "",
 ) -> dict[str, Any]:
-    """Load model prediction overlay (separate from human label JSON)."""
+    """선택한 model prediction JSON을 읽어 UI에서 사용할 수 있는 형태로 반환한다."""
     if not source:
         return empty_pred_doc(plmn, source="")
     path = pred_path(plmn, source=source)
@@ -856,7 +834,7 @@ def human_anomaly_mask(
     df: pd.DataFrame,
     labels: list[dict[str, Any]] | None,
 ) -> np.ndarray:
-    """True where a human range/point anomaly covers the sample time."""
+    """전문가 point/range label이 각 sample 시간을 덮는지 계산해 boolean mask로 반환한다."""
     mask = np.zeros(len(df), dtype=bool)
     if not labels or not len(df):
         return mask
@@ -874,7 +852,7 @@ def _eval_region_mask(
     *,
     metrics_split: str = "valid",
 ) -> np.ndarray:
-    """Mask for metrics eval window (``valid`` or ``test``) ∩ finite scores."""
+    """VALID 또는 TEST 평가 구간과 유효 score 구간의 교집합 mask를 만든다."""
     n = len(df)
     if n == 0:
         return np.zeros(0, dtype=bool)
@@ -904,7 +882,7 @@ def _eval_region_mask(
 
 
 def available_metrics_splits(predictions: dict[str, Any] | None) -> list[str]:
-    """Which eval windows the UI can show metrics for."""
+    """현재 prediction에서 metric을 표시할 수 있는 eval split 목록을 반환한다."""
     if not predictions:
         return ["valid"]
     out = ["valid"]
@@ -928,7 +906,7 @@ def paper_metrics_from_ib_saved(
     *,
     metrics_split: str = "valid",
 ) -> dict[str, dict[str, Any]]:
-    """Map legacy metric dictionaries to UI blocks for one split."""
+    """저장된 IB prediction 형식에서 논문용 metric 묶음을 읽어 UI 표준 형식으로 변환한다."""
     m = metrics or {}
     out: dict[str, dict[str, Any]] = {}
     split = "test" if metrics_split == "test" else "valid"
@@ -1026,7 +1004,7 @@ def _point_metrics(pred: np.ndarray, actual: np.ndarray) -> dict[str, float]:
 
 
 def adjust_predicts(pred: np.ndarray, label: np.ndarray) -> np.ndarray:
-    """Point-adjustment helper (segment hit → fill whole GT segment)."""
+    """point-adjustment 분석용 함수. 한 GT anomaly 구간에서 한 점이라도 탐지되면 GT 구간 전체를 탐지로 채운다."""
     predict = np.asarray(pred, dtype=bool).copy()
     actual = np.asarray(label, dtype=bool)
     anomaly_state = False
@@ -1049,7 +1027,7 @@ def score_higher_is_anomaly(
     *,
     source: str | None = None,
 ) -> bool:
-    """Return whether larger scores mean more anomalous."""
+    """현재 prediction score가 클수록 이상인지 작을수록 이상인지 판별한다."""
     if predictions is None and source is None:
         return True
     pol = str((predictions or {}).get("score_polarity") or "")
@@ -1066,7 +1044,7 @@ def is_anomalous_score(
     *,
     higher_is_anomaly: bool = True,
 ) -> bool | np.ndarray:
-    """Compare score to threshold with the active polarity."""
+    """현재 score polarity를 고려해 한 score가 threshold를 넘는 anomaly인지 판단한다."""
     if higher_is_anomaly:
         return score > threshold
     return score < threshold
@@ -1079,7 +1057,7 @@ def compute_detection_metrics(
     *,
     higher_is_anomaly: bool = True,
 ) -> dict[str, Any]:
-    """Point-wise and point-adjusted P/R/F1 (default: score > thr ⇒ anomaly)."""
+    """현재 threshold에서 point-wise와 point-adjusted precision/recall/F1을 계산한다."""
     score = np.asarray(score, dtype=np.float64).reshape(-1)
     y = np.asarray(y_true, dtype=bool).reshape(-1)
     n = min(len(score), len(y))
@@ -1121,12 +1099,7 @@ def best_f1_threshold(
     objective: str = "point_adjust",
     higher_is_anomaly: bool = True,
 ) -> tuple[float | None, dict[str, Any] | None]:
-    """Oracle threshold maximizing F1 on the given window.
-
-    ``objective``:
-      - ``point`` — raw point-wise F1 (no PA)
-      - ``point_adjust`` — point-adjusted F1 (analysis only; not paper primary)
-    """
+    """주어진 평가 구간에서 F1이 최대가 되는 oracle threshold를 찾는다. 논문 primary가 아니라 분석용이다."""
     score = np.asarray(score, dtype=np.float64).reshape(-1)
     y = np.asarray(y_true, dtype=bool).reshape(-1)
     n = min(len(score), len(y))
@@ -1168,7 +1141,7 @@ def is_roca_prediction(
     *,
     source: str | None = None,
 ) -> bool:
-    """True for RoCA backbone overlays."""
+    """현재 prediction 문서가 RoCA 결과인지 판별한다."""
     src = str(source or (predictions or {}).get("source") or "")
     model = str((predictions or {}).get("model") or "")
     return src.startswith("roca") or model == "roca"
@@ -1179,12 +1152,12 @@ def is_paper_backbone_prediction(
     *,
     source: str | None = None,
 ) -> bool:
-    """True for the retained contamination-robust backbone overlay."""
+    """현재 유지 중인 contamination-robust backbone 계열 prediction인지 판별한다."""
     return is_roca_prediction(predictions, source=source)
 
 
 def has_vus_paper_metrics(predictions: dict[str, Any] | None) -> bool:
-    """True when export/UI doc already carries the shared VUS metric schema."""
+    """prediction 문서에 공통 VUS metric schema가 이미 들어 있는지 확인한다."""
     if not predictions:
         return False
     paper = predictions.get("paper_metrics") or {}
@@ -1205,7 +1178,7 @@ def paper_metrics_from_flat_metrics(
     threshold: float | None = None,
     threshold_method: str | None = None,
 ) -> dict[str, Any] | None:
-    """Hydrate UI ``paper_metrics`` from flat export ``metrics`` (VUS schema)."""
+    """과거 flat metric 형식을 현재 UI용 paper_metrics 구조로 변환한다."""
     m = metrics or {}
     if m.get("vus_pr") is None and m.get("primary_metric") != "vus_pr":
         return None
@@ -1249,7 +1222,7 @@ def paper_metrics_from_flat_metrics(
 
 
 def _load_evaluate_valid():
-    """Lazy-load shared paper metrics."""
+    """common/metrics.py의 evaluate_valid()를 지연 로딩한다."""
     import importlib.util
     from pathlib import Path
 
@@ -1269,7 +1242,7 @@ def paper_metrics_from_vus_bundle(
     threshold: float | None = None,
     threshold_method: str | None = None,
 ) -> dict[str, Any]:
-    """Map shared evaluation output to the UI metric block."""
+    """공통 evaluate_valid() 반환값을 UI가 사용하는 paper_metrics 구조로 바꾼다."""
     point = bundle.get("point") or {}
     event = bundle.get("event") or {}
     op = bundle.get("operational") or {}
@@ -1324,7 +1297,7 @@ def compute_vus_paper_metrics(
     threshold_method: str | None = None,
     window: int | None = None,
 ) -> dict[str, Any] | None:
-    """Live VUS / Event / operational block for any score model."""
+    """현재 score와 label로 VUS/Event/운영 metric을 실시간 계산한다."""
     y = np.asarray(y_true, dtype=bool).reshape(-1)
     s = np.asarray(scores, dtype=np.float64).reshape(-1)
     n = min(len(y), len(s))
@@ -1359,7 +1332,7 @@ def is_anomalytransformer_prediction(
     *,
     source: str | None = None,
 ) -> bool:
-    """True for Anomaly Transformer overlays (percentile threshold, not POT)."""
+    """현재 prediction이 Anomaly Transformer 계열인지 판별한다."""
     src = str(source or (predictions or {}).get("source") or "")
     model = str((predictions or {}).get("model") or "")
     method = str((predictions or {}).get("threshold_method") or "")
@@ -1374,7 +1347,7 @@ def is_baseline_percentile_prediction(
     *,
     source: str | None = None,
 ) -> bool:
-    """Models using a train-derived percentile threshold."""
+    """TRAIN percentile threshold를 사용하는 baseline prediction인지 판별한다."""
     src = str(source or (predictions or {}).get("source") or "")
     model = str((predictions or {}).get("model") or "")
     return (
@@ -1390,7 +1363,7 @@ def primary_threshold_label(
     *,
     source: str | None = None,
 ) -> dict[str, str]:
-    """UI copy for the primary (``pot``-slot) threshold mode."""
+    """현재 모델의 primary threshold 방식을 UI에 표시할 짧은 이름으로 만든다."""
     src = source or (predictions or {}).get("source")
     if is_baseline_percentile_prediction(predictions, source=src):
         model = str((predictions or {}).get("model") or "")
@@ -1467,16 +1440,7 @@ def primary_threshold_label(
 
 
 def thresholds_from_pred_doc(predictions: dict[str, Any]) -> dict[str, float | None]:
-    """Resolve primary / oracle thresholds from a prediction JSON.
-
-    Keys (UI order): ``pot`` (primary), ``best_f1_point``, ``best_f1`` (PA).
-    Primary is under ``pot`` for both OA (POT) and AT/baselines (percentile).
-    Saved ``valid-bf-*`` is PA; point oracle is live-only.
-
-    Important: do **not** treat ``predictions["threshold"]`` / ``score_series.threshold``
-    as the primary thr after a UI mode switch — those track the *active* overlay thr.
-    Prefer metrics / cached ``thresholds["pot"]``.
-    """
+    """prediction JSON에서 primary threshold와 분석용 oracle threshold들을 안전하게 추출한다."""
     m = predictions.get("metrics") or {}
     ss = predictions.get("score_series") or {}
     method = str(predictions.get("threshold_method") or "pot")
@@ -1519,7 +1483,7 @@ def mask_to_pred_labels(
     id_prefix: str = "pred",
     source: str = "model",
 ) -> list[dict[str, Any]]:
-    """Boolean mask → UI prediction segments (no attribution)."""
+    """boolean anomaly mask를 UI에서 그릴 연속 prediction segment 목록으로 변환한다."""
     mask = np.asarray(mask, dtype=bool).reshape(-1)
     times = pd.to_datetime(pd.Series(times), utc=True)
     n = min(len(mask), len(times))
@@ -1561,7 +1525,7 @@ def rebuild_pred_labels_for_threshold(
     *,
     id_prefix: str = "pred",
 ) -> list[dict[str, Any]]:
-    """Rebuild prediction segments from aligned anomaly scores at ``threshold``."""
+    """정렬된 anomaly score에 새 threshold를 적용해 prediction segment를 다시 만든다."""
     if ANOMALY_SCORE_KEY not in df.columns or not len(df):
         return []
     score = df[ANOMALY_SCORE_KEY].to_numpy(dtype=np.float64)
@@ -1588,13 +1552,7 @@ def enrich_predictions_for_ui(
     threshold_mode: str = "pot",
     metrics_split: str = "valid",
 ) -> dict[str, Any]:
-    """Attach dual-threshold metrics + mode-specific labels for the labeling UI.
-
-    Keeps original file labels (with attribution) for POT when the export used POT.
-    Rebuilds oracle segments from the score series; searches thr if missing.
-    Modes (score models): ``pot`` → ``best_f1_point`` → ``best_f1`` (PA).
-    ``metrics_split`` selects valid vs test for live P/R/F1 (thr still train/valid-oracle).
-    """
+    """prediction 문서를 UI 표시용으로 보강한다. threshold mode, split별 metric, overlay label을 한 번에 정리한다."""
     doc = dict(predictions)
     split_choice = "test" if metrics_split == "test" else "valid"
     if split_choice == "test" and "test" not in available_metrics_splits(doc):
@@ -1843,7 +1801,7 @@ def apply_threshold_mode(
     *,
     threshold_mode: str,
 ) -> dict[str, Any]:
-    """Switch active overlay labels / threshold without re-searching best-F1."""
+    """이미 보강된 prediction에서 threshold mode만 바꿔 overlay와 metric을 갱신한다."""
     doc = dict(predictions)
     mode = (
         threshold_mode
@@ -1888,7 +1846,7 @@ def apply_threshold_mode(
 
 
 def _migrate_anomalytransformer_score_scale(doc: dict[str, Any]) -> None:
-    """Rescale legacy AT scores (``-energy`` ≈ 1e-4) to log10(thr/energy)."""
+    """과거 Anomaly Transformer score 형식을 현재 UI score scale로 변환한다."""
     source = str(doc.get("source") or "")
     is_at = doc.get("model") == "anomalytransformer" or source.startswith(
         "anomalytransformer"
@@ -1962,7 +1920,7 @@ def _migrate_anomalytransformer_score_scale(doc: dict[str, Any]) -> None:
 
 
 def _ensure_score_index(predictions: dict[str, Any] | None) -> dict[str, Any] | None:
-    """Cache sorted ns timestamps + scores on the predictions dict."""
+    """prediction의 시간과 score를 빠르게 찾을 수 있도록 정렬된 timestamp index를 캐시한다."""
     if not predictions:
         return None
     cached = predictions.get("_score_index")
@@ -1996,10 +1954,7 @@ def _ensure_score_index(predictions: dict[str, Any] | None) -> dict[str, Any] | 
 def prediction_score_lookup(
     predictions: dict[str, Any] | None,
 ) -> dict[pd.Timestamp, float]:
-    """Map UTC sample time → anomaly score (compatibility helper).
-
-    Prefer ``align_scores_to_df`` / ``anomaly_score_at_time`` for hot paths.
-    """
+    """특정 UTC sample time의 anomaly score를 찾는 호환용 helper다."""
     index = _ensure_score_index(predictions)
     if not index or len(index["ns"]) == 0:
         return {}
@@ -2014,7 +1969,7 @@ def align_scores_to_df(
     df: pd.DataFrame,
     predictions: dict[str, Any] | None,
 ) -> np.ndarray:
-    """Float64 score per df row (NaN where unscored). Vectorized, O(n log m)."""
+    """prediction score를 DataFrame 각 row 시간에 맞춰 1:1 배열로 정렬한다."""
     n = len(df)
     out = np.full(n, np.nan, dtype=np.float64)
     index = _ensure_score_index(predictions)
@@ -2048,7 +2003,7 @@ def anomaly_score_at_time(
     *,
     lookup: dict[pd.Timestamp, float] | None = None,
 ) -> float | None:
-    """Score for a sample time (exact / nearest within 5 min)."""
+    """주어진 sample 시간의 score를 정확히 또는 5분 이내 최근접 값으로 찾는다."""
     index = _ensure_score_index(predictions)
     if not index or len(index["ns"]) == 0:
         return None
@@ -2083,7 +2038,7 @@ def anomaly_score_at_time(
 def score_hover_arrays(
     predictions: dict[str, Any] | None,
 ) -> tuple[list[int], list[float]] | None:
-    """Plot-axis ms + scores for browser hover (same clock as ``sample_ms``)."""
+    """브라우저 hover가 사용할 Plotly 시간축 millisecond 배열과 score 배열을 만든다."""
     index = _ensure_score_index(predictions)
     if not index or len(index["ns"]) == 0:
         return None
@@ -2120,7 +2075,7 @@ def write_score_cache(
     pred_mtime: float | None = None,
     score_scale: str | None = None,
 ) -> str:
-    """Persist df-aligned anomaly scores next to the PLMN frame cache."""
+    """DataFrame row에 맞춰 정렬된 anomaly score를 별도 cache 파일로 저장한다."""
     os.makedirs(CACHE_DIR, exist_ok=True)
     path = score_cache_path(plmn, source)
     payload = {
@@ -2144,7 +2099,7 @@ def ensure_score_column(
     source: str | None = None,
     plmn: str | None = None,
 ) -> pd.DataFrame:
-    """Attach ``ANOMALY_SCORE_KEY`` aligned 1:1 with ``df`` (file-cached)."""
+    """prediction score를 현재 DataFrame 행에 맞춰 ANOMALY_SCORE_KEY column으로 붙인다."""
     out = df
     if ANOMALY_SCORE_KEY in out.columns:
         out = out.drop(columns=[ANOMALY_SCORE_KEY])
@@ -2206,7 +2161,7 @@ def ensure_score_column(
 
 
 def score_at_row(row: pd.Series) -> float | None:
-    """Score from a df row column when present."""
+    """DataFrame 한 row에 이미 붙어 있는 anomaly score를 읽는다."""
     if ANOMALY_SCORE_KEY not in row.index:
         return None
     try:
@@ -2224,11 +2179,7 @@ def add_model_indicator(
     draw_edges: bool = True,
     row: int | None = None,
 ) -> bool:
-    """Draw a model-prediction overlay (purple) — read-only.
-
-    ``draw_edges=False`` skips start/end lines (cheaper when many segments).
-    When ``row`` is set, draw inside that subplot (label track); else paper.
-    """
+    """읽기 전용 모델 prediction overlay를 Plotly figure에 추가한다."""
     s_utc = pd.to_datetime(item["start"], utc=True)
     e_utc = pd.to_datetime(item["end"], utc=True)
     s = to_plot_time(s_utc)
@@ -2300,7 +2251,7 @@ def model_overlays_for_plot(
     highlight_id: str | None = None,
     max_items: int = MAX_MODEL_OVERLAYS,
 ) -> list[dict[str, Any]]:
-    """Pick overlays to draw: in-window, prefer longer/worse, always keep selection."""
+    """현재 보이는 구간에서 그릴 model prediction overlay를 선택하고 너무 많으면 제한한다."""
     if not items:
         return []
     t0 = pd.to_datetime(start, utc=True) if start is not None else None
@@ -2392,7 +2343,7 @@ def normalize_label_reason_fields(
     fail_metrics: list[str] | None = None,
     note: str | None = None,
 ) -> dict[str, Any]:
-    """Sanitize reason / fail_metrics / note for a human label item."""
+    """전문가 label의 reason/fail_metrics/note 필드를 일관된 형식으로 정리한다."""
     codes = []
     for raw in reasons or []:
         code = str(raw).strip()
@@ -2415,7 +2366,7 @@ def normalize_label_reason_fields(
 
 
 def label_reason_summary(item: dict[str, Any]) -> str:
-    """Short Korean summary of stored reasons for list UI."""
+    """저장된 anomaly 원인 정보를 label 목록에 표시할 짧은 한국어 문장으로 만든다."""
     codes = [c for c in (item.get("reasons") or []) if c in LABEL_REASON_CODES]
     if not codes:
         return "기준 미입력"
@@ -2440,7 +2391,7 @@ def label_reason_summary(item: dict[str, Any]) -> str:
 
 
 def labels_missing_reasons(doc: dict[str, Any] | None) -> list[str]:
-    """Label ids that have no reason codes (should set before save)."""
+    """원인 코드가 비어 있는 전문가 label ID 목록을 반환한다."""
     missing = []
     for item in (doc or {}).get("labels") or []:
         codes = [c for c in (item.get("reasons") or []) if c in LABEL_REASON_CODES]
@@ -2558,7 +2509,7 @@ def format_metric_value(
     metric: str | None = None,
     attempt: float | None = None,
 ) -> str:
-    """Format a metric; append (share of M971 %) when possible."""
+    """metric 값을 보기 좋게 포맷하고 가능한 경우 M971 대비 비율도 함께 표시한다."""
     if metric and is_rate_metric(metric):
         return f"{float(value) * 100.0:.1f}%"
     base = f"{round(float(value)):,}"
@@ -2647,7 +2598,7 @@ def _ranked_hover_texts_matrix(
     extra_cols: list[str] | None = None,
     extra_mat: np.ndarray | None = None,
 ) -> list[str]:
-    """Vectorized ranked hover strings for many samples (avoids per-row Series work)."""
+    """여러 sample의 feature 순위 hover 문자열을 벡터화해 생성한다."""
     use_cols = [c for c in cols if c in view.columns]
     n = len(idx)
     if n == 0:
@@ -2726,7 +2677,7 @@ def _hover_sample_indices(
     max_points: int,
     filter_data: bool,
 ) -> np.ndarray:
-    """Downsample indices for an invisible hover hit-target along y_cols max."""
+    """보이지 않는 hover hit-target용 sample 인덱스를 다운샘플링한다."""
     top = view[y_cols].max(axis=1)
     if filter_data:
         return minmax_indices(top.to_numpy(), max_points)
@@ -2752,7 +2703,7 @@ def _add_ranked_hover_anchor(
     extra_series: dict[str, pd.Series] | None = None,
     top_n: int | None = None,
 ) -> None:
-    """Invisible markers whose tooltip lists ``cols`` values largest-first."""
+    """feature 순위 tooltip을 띄우기 위한 보이지 않는 marker trace를 추가한다."""
     if not len(view) or not cols:
         return
     y_cols = [c for c in cols if c in view.columns]
@@ -2816,7 +2767,7 @@ def ranked_hover_html(
     max_rows: int = 2,
     extra_pairs: list[tuple[str, float]] | None = None,
 ) -> str:
-    """Grid of metric values, largest first; at most ``max_rows`` lines."""
+    """한 시점의 metric 값을 큰 순서대로 HTML grid로 만든다."""
     pairs = ranked_metric_pairs(row, cols, nonzero_only=True)
     if extra_pairs:
         pairs = pairs + list(extra_pairs)
@@ -2869,7 +2820,7 @@ def ranked_hover_html(
 
 
 def data_time_bounds(df: pd.DataFrame) -> tuple[pd.Timestamp, pd.Timestamp]:
-    """Return (start, end) of the loaded time series (data only, not wall-clock now)."""
+    """현재 로드된 시계열의 실제 시작/끝 시간을 반환한다."""
     tmin = pd.to_datetime(df["time"].min(), utc=True)
     tmax = pd.to_datetime(df["time"].max(), utc=True)
     return tmin, tmax
@@ -2881,7 +2832,7 @@ def clamp_time_range(
     tmin: pd.Timestamp,
     tmax: pd.Timestamp,
 ) -> tuple[pd.Timestamp, pd.Timestamp]:
-    """Keep [start, end] inside [tmin, tmax], preserving window width when possible."""
+    """요청된 x축 구간이 데이터 범위를 벗어나지 않도록 폭을 최대한 유지하며 보정한다."""
     start_ts = pd.to_datetime(start, utc=True)
     end_ts = pd.to_datetime(end, utc=True)
     if end_ts < start_ts:
@@ -2913,7 +2864,7 @@ def _filter_df(
 
 
 def minmax_indices(values: np.ndarray, max_points: int) -> np.ndarray:
-    """Bucketed min/max envelope indices: keeps spikes while cutting point count."""
+    """긴 시계열을 bucket별 min/max envelope로 줄여 spike를 보존하면서 point 수를 줄인다."""
     n = int(values.shape[0])
     if max_points <= 0 or n <= max_points:
         return np.arange(n)
@@ -2942,7 +2893,7 @@ def plot_series(
     cols: list[str],
     max_points: int = 0,
 ) -> dict[str, tuple[Any, Any]]:
-    """Per-metric (x, y) arrays reduced to at most `max_points` samples each."""
+    """각 metric을 최대 point 수에 맞춰 downsample한 x/y 배열로 만든다."""
     times = to_plot_times(view["time"])
     out: dict[str, tuple[Any, Any]] = {}
     for col in cols:
@@ -2957,7 +2908,7 @@ def window_positions(
     start: pd.Timestamp | None,
     end: pd.Timestamp | None,
 ) -> np.ndarray | None:
-    """Row positions inside [start, end], or None when the window is everything."""
+    """현재 확대 구간의 DataFrame row 위치 범위를 구한다."""
     n = len(df)
     if n == 0:
         return None
@@ -2977,7 +2928,7 @@ def detail_window(
     *,
     pad_ratio: float = 0.35,
 ) -> tuple[pd.Timestamp | None, pd.Timestamp | None]:
-    """Widen the high-res window so pan/zoom edges stay detailed if ranges drift."""
+    """확대 구간 주변에 여유 폭을 둔 고해상도 렌더링 범위를 계산한다."""
     if start is None or end is None or not len(df):
         return start, end
     start_ts = pd.to_datetime(start, utc=True)
@@ -2996,11 +2947,7 @@ def window_indices(
     max_points: int,
     context_ratio: float = 0.3,
 ) -> np.ndarray:
-    """Detail inside `pos`, optionally with a coarse envelope outside.
-
-    Keeping coarse context means the trace still spans the whole dataset, so
-    plotly's double-click autorange resets to the full time span.
-    """
+    """확대 구간은 고해상도로 유지하고 필요하면 바깥쪽은 거칠게 줄인 인덱스를 만든다."""
     if pos is None:
         return minmax_indices(values, max_points)
     ctx_points = max(200, int(max_points * context_ratio))
@@ -3020,12 +2967,7 @@ def plot_series_window(
     include_context: bool = False,
     pad_ratio: float = 0.35,
 ) -> dict[str, tuple[Any, Any]]:
-    """Per-metric (x, y) arrays at high resolution around the visible window.
-
-    By default only the (padded) window is drawn at high res. The first/last
-    samples are always kept so the trace still spans the dataset (helps Plotly
-    keep a stable full time domain without coarse mid-context).
-    """
+    """현재 보이는 구간 주변을 고해상도로 유지한 metric별 x/y 배열을 만든다."""
     if not len(df):
         return {col: ([], []) for col in cols}
     times = to_plot_times(df["time"])
@@ -3049,11 +2991,7 @@ def add_label_indicator(
     highlight: bool = False,
     row: int | None = None,
 ) -> bool:
-    """Draw a label overlay; return True for a range label.
-
-    Unselected = yellow fill + edge lines; selected = crimson.
-    When ``row`` is set, draw inside that subplot (bottom label track).
-    """
+    """전문가 anomaly label overlay를 그래프에 추가하고 range 여부를 반환한다."""
     s_utc = pd.to_datetime(item["start"], utc=True)
     e_utc = pd.to_datetime(item["end"], utc=True)
     s = to_plot_time(s_utc)
@@ -3121,7 +3059,7 @@ def add_label_indicator(
 
 
 def freeze_shape_editing(fig: go.Figure) -> go.Figure:
-    """Mark every existing shape non-editable so fills cannot be dragged whole."""
+    """기존 Plotly shape가 통째로 드래그되지 않도록 모두 non-editable로 고정한다."""
     shapes = fig.layout.shapes
     if not shapes:
         return fig
@@ -3135,7 +3073,7 @@ def freeze_shape_editing(fig: go.Figure) -> go.Figure:
 
 
 def label_line(item: dict[str, Any]) -> str:
-    """One-line description of a label for the saved-label list."""
+    """저장된 전문가 label 하나를 목록에 표시할 한 줄 설명으로 만든다."""
     kind = (item.get("kind") or "point").lower()
     start = format_kst(item.get("start"))
     end = format_kst(item.get("end"))
@@ -3151,7 +3089,7 @@ def pred_chrono_split_tag(
     item: dict[str, Any],
     predictions: dict[str, Any] | None,
 ) -> str:
-    """``VALID`` / ``TEST`` / ``TRAIN`` for a pred segment (by start time)."""
+    """model prediction segment 시작시간 기준으로 TRAIN/VALID/TEST 태그를 붙인다."""
     if not item:
         return ""
     split = (predictions or {}).get("split") or {}
@@ -3179,7 +3117,7 @@ def pred_line(
     with_contrib: bool = True,
     predictions: dict[str, Any] | None = None,
 ) -> str:
-    """One-line description of a model prediction (with top contributing metrics)."""
+    """model prediction 하나를 목록에 표시할 한 줄 설명으로 만든다."""
     kind = (item.get("kind") or "point").lower()
     start = format_kst(item.get("start"))
     end = format_kst(item.get("end"))
@@ -3204,7 +3142,7 @@ def pred_line(
 
 
 def predictions_to_frame(doc: dict[str, Any] | None) -> pd.DataFrame:
-    """Table of model prediction segments for the labeling UI."""
+    """model prediction segment 목록을 표 형태 DataFrame으로 변환한다."""
     rows = []
     for item in (doc or {}).get("labels") or []:
         tops = item.get("top_metrics") or []
@@ -3247,12 +3185,7 @@ def label_highlight_overlays(
     line_width: int = 1,
     row: int | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Thin red edges for the selected label.
-
-    Keep editable=False; the app installs a custom horizontal drag on these edges
-    in 구간 편집 mode (Plotly native shape edit shows handles everywhere).
-    When ``row`` is set, shapes target that subplot's axes (label track).
-    """
+    """선택된 전문가 label의 시작/끝을 강조하는 얇은 빨간 edge overlay를 만든다."""
     s = to_plot_time(pd.to_datetime(item["start"], utc=True))
     e = to_plot_time(pd.to_datetime(item["end"], utc=True))
     is_range = item.get("kind") == "range" or s != e
@@ -3284,7 +3217,7 @@ def label_highlight_overlays(
 
 
 def value_cursor_overlays(ts) -> dict[str, Any]:
-    """Vertical cursor for keyboard/click value inspection (no label — bottom panel)."""
+    """값 탐색 모드에서 선택된 시점을 보여주는 세로 cursor overlay를 만든다."""
     x = to_plot_time(ts)
     return dict(
         type="line",
@@ -3301,7 +3234,7 @@ def value_cursor_overlays(ts) -> dict[str, Any]:
 
 
 def pending_anchor_shape(ts, *, row: int | None = None) -> dict[str, Any]:
-    """Dotted guide marking a range label's first click (start / left)."""
+    """range label 첫 클릭 위치를 보여주는 점선 안내선을 만든다."""
     x = to_plot_time(ts)
     if row is None:
         xref, yref = "x", "paper"
@@ -3343,7 +3276,7 @@ def pending_anchor_annotation(ts) -> dict[str, Any]:
 def pending_range_fill_shape(
     start_ts, end_ts=None, *, row: int | None = None
 ) -> dict[str, Any]:
-    """Crimson band preview from start → end (transparent until end > start)."""
+    """range label 시작점과 현재 마우스 위치 사이의 임시 preview band를 만든다."""
     x0 = to_plot_time(start_ts)
     x1 = to_plot_time(end_ts) if end_ts is not None else x0
     show = end_ts is not None and end_ts > start_ts
@@ -3389,7 +3322,7 @@ def build_figure(
     predictions: dict[str, Any] | None = None,
     show_predictions: bool = False,
 ) -> go.Figure:
-    """Trend chart: optional anomaly-score row, rates, then count metrics."""
+    """현재 데이터, label, prediction, zoom 상태를 이용해 전체 시계열 Plotly figure를 구성한다."""
     view = _filter_df(df, start, end) if filter_data else df
     # metrics=[]는 '아무 것도 표시하지 않음'이라는 의미이므로 falsy라고 해서 전체 feature로 대체하면 안 된다.
     cols = metric_columns(df) if metrics is None else list(metrics)
@@ -3924,7 +3857,7 @@ def _style_panel_separation(
     show_rate: bool = True,
     show_labels: bool = False,
 ) -> None:
-    """Distinct fills / frames / subtitle chips for subplot rows."""
+    """subplot별 배경색, 테두리, subtitle 스타일을 적용해 패널을 시각적으로 구분한다."""
     domains = []
     for i in range(1, n_rows + 1):
         key = "yaxis" if i == 1 else f"yaxis{i}"
@@ -4189,7 +4122,7 @@ def suggest_zscore_points(
     df: pd.DataFrame,
     threshold: float = 3.0,
 ) -> pd.DataFrame:
-    """Optional reference: timestamps where any metric has |z| > threshold."""
+    """참고용으로 각 metric의 절대 z-score가 threshold를 넘는 시점을 제안한다."""
     cols = metric_columns(df)
     mask = pd.Series(False, index=df.index)
     hit_metrics = [[] for _ in range(len(df))]
