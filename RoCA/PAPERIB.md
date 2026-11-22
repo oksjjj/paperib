@@ -62,7 +62,58 @@ TRAIN score quantile threshold
 VALID label과 평가
 ```
 
-## 3. 입력 window
+## 3. 입력 전처리와 MinMax 정규화
+
+RoCA는 `common/data.py::prepare_plmn()`을 통해 데이터를 준비한다.
+
+먼저 11개 core feature를 가져오고 다음 처리를 수행한다.
+
+```text
+NaN  → 0
++inf → 0
+-inf → 0
+```
+
+그 다음 시간순으로:
+
+```text
+TRAIN 60%
+VALID 20%
+TEST  20%
+```
+
+로 분할한다.
+
+이후 **TRAIN 데이터에만** `MinMaxScaler`를 fit한다.
+
+feature별 변환은 개념적으로 다음과 같다.
+
+$
+x_f'
+=
+\frac{x_f-x_{f,\min}^{train}}
+{x_{f,\max}^{train}-x_{f,\min}^{train}}
+$
+
+VALID와 TEST에는 TRAIN에서 이미 fit된 같은 scaler의 `transform()`만 적용한다.
+
+따라서 validation/test의 min/max 정보가 train 정규화에 사용되지 않는다.
+
+또한 기본 MinMaxScaler는 결과를 [0,1]에 강제로 clip하지 않으므로,
+VALID/TEST 값이 TRAIN 범위를 넘어가면 0보다 작거나 1보다 큰 scaled 값이 나올 수 있다.
+
+이 정규화가 끝난 뒤에 sliding window를 생성한다.
+
+```text
+raw feature
+→ TRAIN-only MinMax scaling
+→ window 생성
+→ RoCA backbone
+```
+
+---
+
+## 4. 입력 window
 
 기본 설정:
 
@@ -114,7 +165,7 @@ Conv1d 입력을 위해 축을 바꾸면:
 
 여기서 F는 현재 paperib core feature 수인 11이다.
 
-## 4. augmentation
+## 5. augmentation
 
 파일:
 
@@ -146,7 +197,7 @@ all_data = torch.cat((data, aug1, aug2), dim=0)
 
 따라서 같은 backbone이 세 종류의 view를 모두 처리한다.
 
-## 5. network 구조
+## 6. network 구조
 
 파일:
 
@@ -195,7 +246,7 @@ rec_project
 
 그리고 이들이 hypersphere center에서 얼마나 떨어져 있는지를 anomaly score 계산에 사용한다.
 
-## 6. hypersphere center
+## 7. hypersphere center
 
 파일:
 
@@ -223,7 +274,7 @@ $$
 
 이 center는 "정상 representation이 모여야 하는 중심" 역할을 한다.
 
-## 7. loss_n
+## 8. loss_n
 
 RoCA에서 가장 중요한 값이다.
 
@@ -259,7 +310,7 @@ loss_n 큼
 
 paperib에서 RoCA anomaly score로 저장하는 값이 바로 이 `loss_n`이다.
 
-## 8. warmup
+## 9. warmup
 
 기본값:
 
@@ -277,7 +328,7 @@ loss_n을 작게 만들기
 
 즉 모든 sample을 우선 center 주변으로 모은다.
 
-## 9. contaminated training
+## 10. contaminated training
 
 warmup 이후 `train_method == "contaminated"`이면 한 batch의 sample을 현재 score에 따라 나눈다.
 
@@ -347,7 +398,7 @@ mu = 0.85
 
 이 부분이 RoCA가 contaminated train을 직접 다루는 핵심이다.
 
-## 10. variance regularizer
+## 11. variance regularizer
 
 `loss_sigam`은 representation의 각 차원 분산이 지나치게 작아지는 것을 막는다.
 
@@ -365,7 +416,7 @@ $$
 omega = 0.02
 ```
 
-## 11. 학습과 평가의 stride 차이
+## 12. 학습과 평가의 stride 차이
 
 학습 시 기본:
 
@@ -393,7 +444,7 @@ time_step = 1
 
 다.
 
-## 12. window score를 point score로 바꾸는 방법
+## 13. window score를 point score로 바꾸는 방법
 
 한 window에서 `loss_n` 하나가 나온다.
 
@@ -415,7 +466,7 @@ score_block()
 
 초기 `window_size-1` point는 완전한 window가 없기 때문에 NaN이 된다.
 
-## 13. threshold
+## 14. threshold
 
 현재 paperib wrapper의 기본 RoCA threshold는 TRAIN score quantile이다.
 
@@ -439,7 +490,7 @@ validation label을 이용해 threshold를 고르는 것이 아니다.
 train_quantile_threshold()
 ```
 
-## 14. run_plmn.py 읽는 순서
+## 15. run_plmn.py 읽는 순서
 
 ```text
 _load_prepare_plmn()
@@ -466,7 +517,7 @@ main()
 11. UI JSON 저장
 ```
 
-## 15. ContextAE와 비교
+## 16. ContextAE와 비교
 
 RoCA:
 
@@ -492,7 +543,7 @@ ContextAE:
 RoCA는 학습 loss 안에서 잠재 anomaly를 구분하고,
 ContextAE는 Stage-1 reconstruction error로 sample을 실제 train set에서 제거한 뒤 재학습한다.
 
-## 16. 공부하면서 반드시 답할 수 있어야 하는 질문
+## 17. 공부하면서 반드시 답할 수 있어야 하는 질문
 
 - RoCA 입력 shape가 왜 (B, C, T)인가?
 - window_size와 time_step의 차이는 무엇인가?
@@ -512,7 +563,7 @@ ContextAE는 Stage-1 reconstruction error로 sample을 실제 train set에서 �
 - threshold는 validation label을 이용해서 계산하는가?
 - ContextAE의 decontamination과 RoCA의 contaminated loss는 무엇이 다른가?
 
-## 17. 실행
+## 18. 실행
 
 한 사업자:
 
@@ -533,7 +584,7 @@ RoCA/model/P0480/paperib/roca.pt
 
 UI에서는 prediction source를 RoCA로 선택하여 score와 예측 구간을 확인할 수 있다.
 
-## 18. 기본 설정 요약
+## 19. 기본 설정 요약
 
 ```text
 window_size = 32
