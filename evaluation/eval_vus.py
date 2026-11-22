@@ -3,7 +3,7 @@
 
 모델 재학습은 하지 않는다.
 저장된 validation score series와 같은 시간축의 전문가 label mask를 만든 뒤
-common.metrics.vus_pr()로 VUS를 계산하고, prediction JSON에 다시 기록한다.
+core.metrics.vus_pr()로 VUS를 계산하고, prediction JSON에 다시 기록한다.
 마지막으로 모델/사업자별 결과를 summary CSV/JSON으로 저장한다.
 
 사용 예:
