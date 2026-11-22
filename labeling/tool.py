@@ -65,17 +65,17 @@ PAPER_PLMN_SET: frozenset[str] = frozenset(PAPER_PLMNS)
 # 전문가 라벨링과 모델 학습에 공통으로 사용하는 핵심 counter 목록이다.
 # 이 순서는 그래프와 모델 입력에서 사용하는 표준 feature 순서이므로 임의로 바꾸지 않는다.
 CORE_FEATURES: tuple[str, ...] = (
-    "M971",  # COMB_ATTEMPT
-    "M185",  # COMB_AUC_FAIL
-    "M855",  # COMB_AUC_TO
-    "M965",  # COMB_DNS_FAIL
-    "M162",  # COMB_DNS_TO
-    "M843",  # COMB_GW_FAIL
-    "M430",  # COMB_GW_TO
-    "M874",  # COMB_HSS_FAIL
-    "M037",  # COMB_HSS_TO
-    "M419",  # COMB_SM_FAIL
-    "M618",  # COMB_SM_TO
+    "M971",  # 결합 Attach 시도량 기준 counter
+    "M185",  # AUC 실패 관련 core counter
+    "M855",  # AUC timeout 관련 core counter
+    "M965",  # DNS 실패 관련 core counter
+    "M162",  # DNS timeout 관련 core counter
+    "M843",  # Gateway 실패 관련 core counter
+    "M430",  # Gateway timeout 관련 core counter
+    "M874",  # HSS 실패 관련 core counter
+    "M037",  # HSS timeout 관련 core counter
+    "M419",  # Session Management 실패 관련 core counter
+    "M618",  # Session Management timeout 관련 core counter
 )
 CORE_FEATURE_SET: frozenset[str] = frozenset(CORE_FEATURES)
 CORE_FEATURE_MODE = "core"
@@ -85,7 +85,7 @@ CORE_FEATURE_MODE = "core"
 # 이렇게 분리해야 metric/score 선과 label overlay가 서로 가리지 않는다.
 FIGURE_METRICS_HEIGHT = 320
 FIGURE_SCORE_HEIGHT = 100
-FIGURE_LABEL_HEIGHT = 48  # per track (human + model)
+FIGURE_LABEL_HEIGHT = 48  # 전문가 label track과 모델 prediction track 각각의 높이
 FIGURE_HEIGHT = (
     FIGURE_METRICS_HEIGHT
     + FIGURE_SCORE_HEIGHT
@@ -105,35 +105,35 @@ ANOMALY_SCORE_THRESHOLD_COLOR = "#c026d3"
 # 시간순 TRAIN / VALID / TEST 구간 배경색 정의.
 # 패널 배경 위에서도 split 구간이 보이도록 적당한 투명도를 사용한다.
 # split 배경색은 전문가 anomaly(금색)와 모델 prediction(보라색)과 구분되게 한다.
-SPLIT_TRAIN_BAND = "rgba(14, 165, 233, 0.14)"   # sky blue
-SPLIT_VALID_BAND = "rgba(16, 185, 129, 0.14)"   # emerald
-SPLIT_TEST_BAND = "rgba(244, 114, 182, 0.12)"   # pink
+SPLIT_TRAIN_BAND = "rgba(14, 165, 233, 0.14)"   # 하늘색
+SPLIT_VALID_BAND = "rgba(16, 185, 129, 0.14)"   # 에메랄드색
+SPLIT_TEST_BAND = "rgba(244, 114, 182, 0.12)"   # 분홍색
 SPLIT_BOUNDARY = "#0e7490"
 DEFAULT_TRAIN_RATIO = 0.6
 DEFAULT_VALID_RATIO = 0.2
 
 # 흰 배경에서 여러 시계열을 구분하기 쉽도록 중간 밝기의 색상들을 사용한다.
 SERIES_COLORWAY = (
-    "#3d7ab5",  # blue
-    "#d9655a",  # coral red
-    "#3da86a",  # green
-    "#9b6bb8",  # purple
-    "#d4a017",  # gold
-    "#4a90a4",  # steel
-    "#c06a5a",  # brick
-    "#2e9a85",  # teal
-    "#8e6ba8",  # soft purple
-    "#d4833a",  # orange
-    "#5b8fbf",  # sky
-    "#c97b72",  # rose
-    "#4caf77",  # mint green
-    "#a07cbc",  # lilac
-    "#b8a03a",  # olive gold
-    "#5b9bd5",  # light steel
-    "#b8875a",  # tan
-    "#3cb09a",  # sea green
-    "#9a7aab",  # plum
-    "#c97a55",  # rust
+    "#3d7ab5",  # 파란색
+    "#d9655a",  # 산호색 계열 빨강
+    "#3da86a",  # 초록색
+    "#9b6bb8",  # 보라색
+    "#d4a017",  # 금색
+    "#4a90a4",  # 청회색
+    "#c06a5a",  # 벽돌색
+    "#2e9a85",  # 청록색
+    "#8e6ba8",  # 연보라색
+    "#d4833a",  # 주황색
+    "#5b8fbf",  # 하늘색
+    "#c97b72",  # 장미색
+    "#4caf77",  # 민트색
+    "#a07cbc",  # 라일락색
+    "#b8a03a",  # 올리브 금색
+    "#5b9bd5",  # 밝은 청회색
+    "#b8875a",  # 황갈색
+    "#3cb09a",  # 바다색 계열 초록
+    "#9a7aab",  # 자두색
+    "#c97a55",  # 녹슨 주황색
 )
 
 # 아래 이름이 붙은 shape/annotation은 실제 label이 아니라 라벨링 작업 중 잠깐 표시하는 안내선이다.
@@ -827,7 +827,7 @@ def _as_float(v: Any) -> float | None:
         x = float(v)
     except (TypeError, ValueError):
         return None
-    return x if x == x else None  # NaN → None
+    return x if x == x else None  # NaN이면 None으로 변환
 
 
 def human_anomaly_mask(
@@ -2519,7 +2519,7 @@ def format_metric_value(
         att = float(attempt)
     except (TypeError, ValueError):
         return base
-    if not (att == att) or att == 0:  # NaN or zero
+    if not (att == att) or att == 0:  # NaN 또는 0이면 제외
         return base
     return f"{base} ({float(value) / att * 100.0:.1f}%)"
 
@@ -2640,7 +2640,7 @@ def _ranked_hover_texts_matrix(
         if row is not None:
             for j, lab in enumerate(labels):
                 v = float(row[j])
-                if v == v and v != 0:  # finite & nonzero
+                if v == v and v != 0:  # 유효한 수치이면서 0이 아닌 값만 사용
                     pairs.append((lab, v, is_rate[j], metric_ids[j]))
         if extra_labels:
             erow = extra_mat[i]
