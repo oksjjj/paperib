@@ -22,13 +22,13 @@ Repo 루트 공용 데이터 전처리·평가·시각화 스크립트.
 저장된 validation score JSON을 사용해 모델 재학습 없이 VUS 지표를 계산합니다.
 
 ```bash
-.venv/bin/python scripts/eval_vus.py --all
+.venv/bin/python -m evaluation.eval_vus --all
 ```
 
 모델을 제한하려면:
 
 ```bash
-.venv/bin/python scripts/eval_vus.py --all --models context_ae hour_ae roca
+.venv/bin/python -m evaluation.eval_vus --all --models context_ae hour_ae roca
 ```
 
 결과는 각 prediction JSON의 `paper_metrics` / `metrics`에 기록되고,
@@ -48,19 +48,19 @@ Repo 루트 공용 데이터 전처리·평가·시각화 스크립트.
 10개 사업자 전체:
 
 ```bash
-.venv/bin/python scripts/eval_contextae_thresholds.py --all
+.venv/bin/python -m evaluation.eval_thresholds --all
 ```
 
 한 사업자만:
 
 ```bash
-.venv/bin/python scripts/eval_contextae_thresholds.py --plmn P0480
+.venv/bin/python -m evaluation.eval_thresholds --plmn P0480
 ```
 
 기본 후보를 직접 지정하려면:
 
 ```bash
-.venv/bin/python scripts/eval_contextae_thresholds.py \
+.venv/bin/python -m evaluation.eval_thresholds \
   --all \
   --quantiles 0.99 0.995 0.999 \
   --mad_k 3 4 5 \
