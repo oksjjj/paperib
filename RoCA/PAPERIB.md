@@ -1,5 +1,8 @@
 # RoCA × paperib 학습 가이드
 
+> 실제 구현 위치: `models/roca/`  
+> `RoCA/` 아래 Python 파일은 이전 import/실행 경로를 위한 호환 wrapper입니다.
+
 이 디렉터리는 공개된 RoCA 구현을 paperib의 인바운드 로밍 데이터에 적용하기 위한 코드다.
 
 원본 구현은 `ruiking04/RoCA`이며 MIT License를 따른다. 원본 출처는 `official/ORIGIN.txt`, 라이선스는 `official/LICENSE`에서 확인할 수 있다.
@@ -11,22 +14,22 @@
 추천 순서는 다음과 같다.
 
 ```text
-config.py
+models/roca/config.py
   ↓
-dataset.py
+models/roca/dataset.py
   ↓
-official/augmentations.py
+models/roca/official/augmentations.py
   ↓
-official/network.py
+models/roca/official/network.py
   ↓
-official/loss.py
+models/roca/official/loss.py
   ↓
-run_plmn.py
+models/roca/run_plmn.py
   ↓
 export_predictions.py
 ```
 
-처음부터 `run_plmn.py`만 읽기보다 입력 window가 어떤 shape으로 바뀌고, backbone과 loss가 어떤 값을 만드는지 먼저 이해하는 편이 쉽다.
+처음부터 `models/roca/run_plmn.py`만 읽기보다 입력 window가 어떤 shape으로 바뀌고, backbone과 loss가 어떤 값을 만드는지 먼저 이해하는 편이 쉽다.
 
 ## 2. 전체 흐름
 
@@ -136,7 +139,7 @@ Window 2: 32 ~ 63
 관련 코드:
 
 ```python
-dataset.py
+models/roca/dataset.py
 subsequences()
 block_to_nct()
 ```
@@ -170,7 +173,7 @@ Conv1d 입력을 위해 축을 바꾸면:
 파일:
 
 ```text
-official/augmentations.py
+models/roca/official/augmentations.py
 ```
 
 현재 실제 실행에서 사용하는 증강은 두 가지다.
@@ -202,7 +205,7 @@ all_data = torch.cat((data, aug1, aug2), dim=0)
 파일:
 
 ```text
-official/network.py
+models/roca/official/network.py
 ```
 
 큰 흐름은 다음과 같다.
@@ -251,7 +254,7 @@ rec_project
 파일:
 
 ```text
-official/loss.py
+models/roca/official/loss.py
 ```
 
 함수:
@@ -490,7 +493,7 @@ validation label을 이용해 threshold를 고르는 것이 아니다.
 train_quantile_threshold()
 ```
 
-## 15. run_plmn.py 읽는 순서
+## 15. models/roca/run_plmn.py 읽는 순서
 
 ```text
 _load_prepare_plmn()
@@ -568,8 +571,7 @@ ContextAE는 Stage-1 reconstruction error로 sample을 실제 train set에서 �
 한 사업자:
 
 ```bash
-cd RoCA
-../.venv/bin/python run_plmn.py --plmn P0480 --epochs 20
+.venv/bin/python -m models.roca.run_plmn --plmn P0480 --epochs 20
 ```
 
 결과:
