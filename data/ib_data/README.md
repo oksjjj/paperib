@@ -5,6 +5,7 @@ data/ib_data/
 ├── raw/masked_*.csv          # paper 10 PLMN only · de-identified · git 추적
 ├── raw/*_mapping.txt         # 로컬 전용 · git 금지 (역매핑)
 ├── _local_raw_full/          # 전체 PLMN raw (로컬 전용 · git 금지)
+├── cache/{PLMN}.pkl          # 공통 PLMN 로딩 캐시 · 로컬 전용
 ├── labels/{PLMN}_labels.json
 └── predictions/{PLMN}_*.json
 ```
@@ -23,6 +24,6 @@ git·문서·이슈·주석에 대응표를 올리지 않는다.
 라벨링 캐시:
 
 ```bash
-python ui/preprocess.py --paper-only   # 지원 시
-# 또는 기존 preprocess 후 paper PLMN pickle만 사용
+python scripts/build_ui_cache.py
+# 기본값은 top100.txt 대상이며 --plmn / --top / --all 옵션도 사용할 수 있음
 ```
