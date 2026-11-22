@@ -56,6 +56,7 @@ def _load_hourae():
     return mod
 
 
+from models.contextae.model import PointAutoEncoder
 from models.contextae.context import (
     robust_mad,
     build_train_slot_profiles,
