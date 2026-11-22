@@ -24,8 +24,8 @@ data/
 
 ```bash
 # CSV는 data/ib_data/raw/ 에 둠
-python labeling/preprocess.py
-python labeling/app.py
+python ui/preprocess.py
+python ui/app.py
 ```
 
 ## 공개 벤치마크
