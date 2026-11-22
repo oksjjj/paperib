@@ -158,7 +158,7 @@ state: dict = {
 
 
 def _sample_plot_ms(df: pd.DataFrame) -> list[int]:
-    """KST wall-clock times as UTC-ms for Plotly naive date-axis snapping."""
+    """DataFrame의 KST wall-clock 시간을 Plotly x축 snapping에 사용할 epoch millisecond 배열로 변환한다."""
     vals = to_plot_times(df["time"])
     return vals.astype("datetime64[ms]").astype("int64").tolist()
 
@@ -189,7 +189,7 @@ def _empty_figure():
 
 
 def _label_split_tag(item: dict) -> str:
-    """Classify a human label into Train / Valid / Test by its start time."""
+    """전문가 label의 시작시간을 기준으로 TRAIN / VALID / TEST 태그를 붙인다."""
     df = state.get("df")
     if df is None or not len(df):
         return ""
@@ -218,7 +218,7 @@ def _label_options():
 
 
 def _fail_metric_options() -> list[dict[str, str]]:
-    """Multi-select options for fail_surge (counter metrics, rates excluded)."""
+    """fail_surge 원인에 연결할 수 있는 counter metric 다중선택 옵션을 만든다. rate 계열은 제외한다."""
     cols = list(state.get("metrics") or [])
     if not cols and state.get("df") is not None:
         cols = metric_columns(state["df"])
@@ -259,7 +259,7 @@ def _flush_reasons_to_label(
     fail_metrics: list[str] | None,
     note: str | None,
 ) -> bool:
-    """Persist current reason UI fields onto a label. Returns True if updated."""
+    """현재 원인 입력 UI의 값을 선택된 label에 저장한다. 실제로 변경되었으면 True를 반환한다."""
     if not label_id or state.get("doc") is None:
         return False
     if _label_by_id(label_id) is None:
@@ -281,7 +281,7 @@ def _flush_reasons_to_label(
 
 
 def _ui_feature_mode_for_display(preds: dict | None = None) -> str | None:
-    """Attribution/list labels: comb_share uses the same names as comb (no ÷M971)."""
+    """기여도/목록 표시용 feature 이름 규칙을 결정한다. comb_share도 UI에서는 comb와 같은 이름을 사용한다."""
     preds = preds if preds is not None else (state.get("predictions") or {})
     mode = preds.get("feature_mode")
     if mode == "comb_share":
@@ -290,7 +290,7 @@ def _ui_feature_mode_for_display(preds: dict | None = None) -> str | None:
 
 
 def _metrics_split_wanted() -> str:
-    """Current Metrics radio: ``valid`` or ``test``."""
+    """현재 Metrics radio에서 선택된 평가 split(valid 또는 test)을 반환한다."""
     return (
         state.get("metrics_eval_split")
         or (state.get("predictions") or {}).get("metrics_eval_split")
@@ -304,7 +304,7 @@ def _pred_matches_metrics_split(
     *,
     metrics_split: str | None = None,
 ) -> bool:
-    """True if pred segment belongs to the Metrics valid/test window."""
+    """한 model prediction segment가 현재 선택된 VALID/TEST 평가 구간에 속하는지 확인한다."""
     wanted = (metrics_split or _metrics_split_wanted()).lower()
     tag = pred_chrono_split_tag(item, pred_doc or state.get("predictions"))
     if not tag:
@@ -326,7 +326,7 @@ def _model_pred_items(*, metrics_split: str | None = None) -> list[dict]:
 
 
 def _predictions_for_display() -> dict | None:
-    """Predictions doc with labels filtered to Metrics valid/test selection."""
+    """현재 Metrics split에 맞는 prediction label만 남긴 표시용 prediction 문서를 반환한다."""
     pred = state.get("predictions")
     if not pred:
         return None
@@ -511,7 +511,7 @@ def _fmt_opt(v: Any, *, digits: int = 4) -> str:
 
 
 def _model_metrics_tag(pred: dict) -> tuple[str, str]:
-    """Display name + accent color for the detection metrics panel."""
+    """모델별 detection metric 패널에 표시할 이름과 강조 색상을 결정한다."""
     model = str(pred.get("model") or pred.get("source") or "model").lower()
     src = str(pred.get("source") or "").lower()
     key = model if model not in ("", "none") else src
@@ -588,7 +588,7 @@ def _threshold_evaluation_table(pred: dict) -> Any | None:
 
 
 def _detection_metrics_panel(pred: dict) -> list[Any]:
-    """Detection metrics panel for validation-result inspection."""
+    """현재 선택된 모델의 validation/test detection metric을 사람이 읽기 쉬운 패널로 구성한다."""
     paper = pred.get("paper_metrics") or {}
     m = pred.get("metrics") or {}
     split = (
@@ -715,7 +715,7 @@ def _detection_metrics_panel(pred: dict) -> list[Any]:
 
 
 def _threshold_mode_options(pred: dict | None = None, source: str | None = None) -> list[dict]:
-    """Radio: primary thr → best-F1 point (analysis). PA는 주요 UI에서 제외."""
+    """primary threshold와 분석용 best-F1 point threshold를 선택하는 radio 옵션을 만든다. PA-F1은 주요 UI에서 제외한다."""
     pred = pred if pred is not None else (state.get("predictions") or {})
     src = source if source is not None else state.get("pred_source")
     primary = primary_threshold_label(pred, source=src)
@@ -728,7 +728,7 @@ def _threshold_mode_options(pred: dict | None = None, source: str | None = None)
 def _threshold_mode_value_for_pred(
     pred: dict | None = None, source: str | None = None
 ) -> str:
-    """Selected radio value for the current model (percentile/POT slot)."""
+    """현재 모델에서 선택되어야 할 threshold mode 값을 결정한다."""
     pred = pred if pred is not None else (state.get("predictions") or {})
     mode = state.get("threshold_mode") or pred.get("threshold_mode") or "pot"
     if mode in ("rule", "argos_rule", "best_f1"):
@@ -751,7 +751,7 @@ def _detection_metrics_children() -> list[Any]:
 
 
 def _enrich_current_predictions(*, threshold_mode: str | None = None) -> None:
-    """Recompute dual-threshold view for the loaded PLMN + prediction source."""
+    """현재 로드된 PLMN과 prediction source에 대해 threshold/metric/overlay 정보를 다시 계산해 UI 상태를 갱신한다."""
     df = state.get("df")
     preds = state.get("predictions")
     if df is None or not preds:
@@ -860,7 +860,7 @@ def _model_attr_children(item: dict | None):
 
 
 def _plot_metrics() -> list[str]:
-    """Metrics currently drawn on the graph (within the active universe)."""
+    """현재 metric universe 중 실제 그래프에 그려지고 있는 metric 목록을 반환한다."""
     universe = _metric_universe()
     visible = state.get("visible_metrics")
     if visible is None:
@@ -870,7 +870,7 @@ def _plot_metrics() -> list[str]:
 
 
 def _metrics_by_view_sum() -> list[str]:
-    """Filter checklist candidates: active universe, ranked by on-screen sum."""
+    """현재 화면 구간의 합계를 기준으로 metric filter 후보를 정렬한다."""
     df = state.get("df")
     universe = _metric_universe()
     if df is None or not len(df) or not universe:
@@ -917,12 +917,7 @@ def _metrics_by_view_sum() -> list[str]:
 
 
 def _metric_filter_ui() -> tuple[list[dict], list[str]]:
-    """Checklist options (= metric universe) + checked values.
-
-    Currently visible metrics are always kept in ``options`` even if they are
-    zero in the zoomed window. Otherwise rewriting options after zoom drops
-    them from the checklist value and the plot goes blank.
-    """
+    """metric universe 전체를 checklist options로 만들고 현재 선택값을 함께 반환한다. 확대 구간에서 값이 0이어도 options에서 제거하지 않는다."""
     ranked = _metrics_by_view_sum()
     selected = [m for m in (state.get("visible_metrics") or []) if m]
     keep = [m for m in selected if m not in ranked]
@@ -953,7 +948,7 @@ def _pred_uses_feature_subset(preds: dict | None = None) -> bool:
 
 
 def _comb_ui_metric_columns(preds: dict) -> list[str]:
-    """Checklist/plot set for comb / comb_share: raw counters only (no rates)."""
+    """comb/comb_share 계열에서 UI에 보여줄 raw counter 목록을 반환한다. rate는 제외한다."""
     raw = list(preds.get("comb_raw_counters") or [])
     if not raw:
         raw = [
@@ -972,7 +967,7 @@ def _comb_ui_metric_columns(preds: dict) -> list[str]:
 
 
 def _metric_universe_for_predictions(preds: dict | None = None) -> list[str]:
-    """Eligible metrics for filter/plot under the active model run."""
+    """현재 모델 run의 feature 설정을 바탕으로 UI에서 선택 가능한 metric universe를 결정한다."""
     preds = preds if preds is not None else (state.get("predictions") or {})
     full = _full_visible_metrics()
     if not _pred_uses_feature_subset(preds):
@@ -999,7 +994,7 @@ def _metric_universe() -> list[str]:
 
 
 def _apply_pred_metric_visibility(preds: dict | None = None) -> None:
-    """Limit filter universe to the run's features; all of them start visible."""
+    """현재 모델이 실제 사용한 feature만 metric filter에 남기고 처음에는 모두 보이도록 설정한다."""
     universe = _metric_universe_for_predictions(preds)
     state["metric_universe"] = universe
     state["visible_metrics"] = list(universe)
@@ -1007,7 +1002,7 @@ def _apply_pred_metric_visibility(preds: dict | None = None) -> None:
 
 
 def _visible_from_filter_selection(selected) -> list[str]:
-    """Map checklist values to drawn metrics (only within the active universe)."""
+    """checklist 선택값을 실제 그래프에 그릴 metric 목록으로 변환한다."""
     universe = _metric_universe()
     selected_set = set(selected or [])
     return [m for m in universe if m in selected_set]
@@ -1021,7 +1016,7 @@ def _label_by_id(label_id):
 
 
 def _label_at_time(ts, *, point_tol_seconds: float | None = None):
-    """Return the best label at `ts` (prefer divider edges, then tightest range)."""
+    """주어진 시간에서 가장 적절한 전문가 label을 찾는다. 경계선을 우선하고 겹치면 더 좁은 range를 우선한다."""
     doc = state.get("doc") or {}
     return _interval_hit_at_time(
         doc.get("labels") or [],
@@ -1031,7 +1026,7 @@ def _label_at_time(ts, *, point_tol_seconds: float | None = None):
 
 
 def _pred_at_time(ts, *, point_tol_seconds: float | None = None):
-    """Return the best model-prediction segment at `ts` (same hit rules as labels)."""
+    """주어진 시간에서 가장 적절한 model prediction segment를 찾는다. 전문가 label과 같은 hit 규칙을 사용한다."""
     return _interval_hit_at_time(
         _model_pred_items(),
         ts,
@@ -1045,7 +1040,7 @@ def _interval_hit_at_time(
     *,
     point_tol_seconds: float | None = None,
 ):
-    """Best point/range item at `ts` (prefer divider edges, then tightest range)."""
+    """주어진 시간에 걸리는 point/range 항목 중 가장 적절한 하나를 선택한다."""
     zoom_start = state.get("zoom_start")
     zoom_end = state.get("zoom_end")
     if zoom_start is not None and zoom_end is not None:
@@ -1087,11 +1082,7 @@ def _interval_hit_at_time(
 
 
 def _select_or_toggle_label_hit(hit: dict, click_mode: str):
-    """Select a graph-clicked label, or clear highlight if already selected.
-
-    Zoom is unchanged on deselection. In 구간 편집, re-clicking the same
-    label keeps the selection so edge drags are not cancelled by a toggle.
-    """
+    """그래프에서 클릭한 전문가 label을 선택하거나 같은 항목을 다시 누르면 highlight를 해제한다. 구간 편집 모드에서는 edge drag가 끊기지 않도록 재클릭해도 선택을 유지한다."""
     state["label_range_anchor"] = None
     kind = (hit.get("kind") or "point").lower()
     tag = "점" if kind == "point" else "구간"
@@ -1144,7 +1135,7 @@ def _select_or_toggle_label_hit(hit: dict, click_mode: str):
 
 
 def _zoom_to_label_item(item: dict) -> None:
-    """Zoom X around a label and highlight it."""
+    """선택한 전문가 label 주변으로 x축을 확대하고 highlight를 표시한다."""
     start_ts = parse_time(item["start"])
     end_ts = parse_time(item["end"])
     kind = (item.get("kind") or "point").lower()
@@ -1179,7 +1170,7 @@ def _zoom_to_label_item(item: dict) -> None:
 
 
 def _zoom_to_model_pred_item(item: dict) -> None:
-    """Zoom X around a model prediction (does not touch human label highlight)."""
+    """선택한 model prediction 주변으로 x축을 확대한다. 전문가 label highlight는 건드리지 않는다."""
     start_ts = parse_time(item["start"])
     end_ts = parse_time(item["end"])
     kind = (item.get("kind") or "point").lower()
@@ -1207,7 +1198,7 @@ def _zoom_to_model_pred_item(item: dict) -> None:
 
 
 def _zoom_to_chrono_split(which: str) -> bool:
-    """Zoom to train / valid / test / full chronological split. Returns False if N/A."""
+    """TRAIN / VALID / TEST / 전체 구간 중 하나로 x축을 이동한다. 적용할 수 없으면 False를 반환한다."""
     df = state.get("df")
     if df is None or not len(df):
         return False
@@ -1247,7 +1238,7 @@ def _model_pred_ids() -> list[str]:
 
 
 def _neighbor_model_pred_id(current: str | None, delta: int) -> str | None:
-    """Prev/next model segment id (clamped at ends)."""
+    """현재 model prediction 기준으로 이전/다음 segment ID를 반환하고 범위를 벗어나지 않게 제한한다."""
     ids = _model_pred_ids()
     if not ids:
         return None
@@ -1259,7 +1250,7 @@ def _neighbor_model_pred_id(current: str | None, delta: int) -> str | None:
 
 
 def _snap_inspect_to_item(item: dict):
-    """Place 값 탐색 cursor at the anomaly start time; return (row, panel) or None."""
+    """선택한 anomaly 시작시간에 값 탐색 cursor를 맞추고 해당 row와 정보 패널을 반환한다."""
     df = state.get("df")
     if df is None or not len(df):
         return None
@@ -1279,12 +1270,12 @@ def _bump_label_rev() -> None:
 
 
 def _bump_place_rev() -> None:
-    """Bump when range-placement overlays change (Plotly uirevision)."""
+    """range label 배치용 임시 overlay가 바뀔 때 Plotly revision 값을 증가시킨다."""
     state["place_rev"] = int(state.get("place_rev") or 0) + 1
 
 
 def _bump_hi_rev() -> None:
-    """Bump when label/model highlight overlays change (Plotly uirevision)."""
+    """전문가/model highlight overlay가 바뀔 때 Plotly revision 값을 증가시킨다."""
     state["hi_rev"] = int(state.get("hi_rev") or 0) + 1
 
 
@@ -1313,7 +1304,7 @@ def _shape_json(shape) -> dict:
 def _edit_label_shape_meta(
     fig, highlight_id: str, doc: dict | None = None
 ) -> dict[str, int]:
-    """Shape indices for live edge drag (fill + edges + highlight lines)."""
+    """선택된 label의 fill/edge/highlight shape 인덱스를 모아 실시간 edge drag에 사용한다."""
     hid = str(highlight_id)
     out: dict[str, int] = {}
     shapes = fig.layout.shapes or ()
@@ -1366,19 +1357,19 @@ def _edit_label_shape_meta(
 
 
 def _has_score_panel() -> bool:
-    """Predictions include an anomaly-score series (may still be empty in-window)."""
+    """현재 prediction에 anomaly score series가 있는지 확인한다."""
     preds = state.get("predictions") or {}
     ss = preds.get("score_series") or {}
     return bool(ss.get("times") and ss.get("scores"))
 
 
 def _score_subplot_active() -> bool:
-    """Score band is always reserved in the figure (may be empty)."""
+    """score subplot은 항상 예약되어 있으므로 현재 figure에서 score 행을 사용한다고 본다."""
     return True
 
 
 def _rate_subplot_active() -> bool:
-    """Match ``build_figure``: rate row only when SUCCESS/ACCEPT rates are plotted."""
+    """SUCCESS/ACCEPT rate를 실제로 그리고 있을 때만 rate subplot이 존재하는지 판별한다."""
     return _visible_rate_y_bounds() is not None
 
 
@@ -1390,12 +1381,12 @@ def _metric_axis_row() -> int:
 
 
 def _label_axis_row() -> int:
-    """Human label track row."""
+    """전문가 label track이 위치한 subplot row 번호를 반환한다."""
     return 4 if _rate_subplot_active() else 3
 
 
 def _model_label_axis_row() -> int:
-    """Model prediction track row."""
+    """model prediction track이 위치한 subplot row 번호를 반환한다."""
     return 5 if _rate_subplot_active() else 4
 
 
@@ -1745,7 +1736,7 @@ def _build_graph(click_mode: str):
 
 
 def _snap_to_data_time(ts):
-    """Snap to the nearest sample (data is 5-minute). Works for any Y click."""
+    """임의의 클릭 시간을 가장 가까운 실제 5분 sample 시간에 맞춘다."""
     df = state["df"]
     if df is None or not len(df):
         return ts
@@ -1755,7 +1746,7 @@ def _snap_to_data_time(ts):
 
 
 def _cancel_pending_range(click_mode: str):
-    """Clear in-progress range placement (Esc / 시작점 취소)."""
+    """진행 중인 range label 시작점을 취소하고 임시 overlay를 지운다."""
     state["label_range_anchor"] = None
     _bump_place_rev()
     return (
@@ -1770,7 +1761,7 @@ def _cancel_pending_range(click_mode: str):
 
 
 def _place_label_click(ts, click_mode: str):
-    """Handle point/range label placement for a plotted time click."""
+    """그래프 시간 클릭을 point/range 전문가 label 배치 동작으로 처리한다."""
     if click_mode == "label_point":
         state["label_range_anchor"] = None
         ts = _snap_to_data_time(ts)
@@ -1896,7 +1887,7 @@ def _place_label_click(ts, click_mode: str):
 
 
 def _shape_x_from_relayout(relayout, idx: int):
-    """Read the x position of shapes[idx] after an edit, if present."""
+    """Plotly shape 편집 relayout payload에서 특정 shape의 x 위치를 읽는다."""
     if relayout is None:
         return None
     for key in (f"shapes[{idx}].x0", f"shapes[{idx}].x1"):
@@ -1919,7 +1910,7 @@ def _shape_x_from_relayout(relayout, idx: int):
 
 
 def _apply_label_edge_from_relayout(relayout) -> str | None:
-    """Update the selected label when a highlight edge was dragged."""
+    """highlight edge가 drag된 relayout 이벤트를 전문가 label 시간 수정으로 반영한다."""
     label_id = state.get("highlight_id")
     idxs = state.get("highlight_shape_idxs") or {}
     if not label_id or state["doc"] is None or not idxs:
@@ -1959,7 +1950,7 @@ def _apply_label_edge_from_relayout(relayout) -> str | None:
 
 
 def _apply_label_edge_from_drag(payload) -> str | None:
-    """Update the selected label from a horizontal-only edge drag event."""
+    """가로 방향 edge drag 이벤트를 선택된 전문가 label의 시작/끝 수정으로 반영한다."""
     if not payload or state["doc"] is None:
         return None
     label_id = state.get("highlight_id") or payload.get("label_id")
@@ -2029,7 +2020,7 @@ def _visible_y_bounds() -> tuple[float, float] | None:
 
 
 def _visible_score_y_bounds() -> tuple[float, float] | None:
-    """Y range for the anomaly-score panel (visible x-window)."""
+    """현재 보이는 x 구간에서 anomaly score subplot에 적절한 y축 범위를 계산한다."""
     df = state["df"]
     preds = state.get("predictions") if state.get("show_model_preds", True) else None
     if df is None or not len(df) or not preds:
@@ -2065,7 +2056,7 @@ def _visible_score_y_bounds() -> tuple[float, float] | None:
 
 
 def _visible_rate_y_bounds() -> tuple[float, float] | None:
-    """Y range for the top SUCCESS/COMB rate panel (visible x-window)."""
+    """현재 보이는 x 구간에서 SUCCESS/COMB rate subplot의 y축 범위를 계산한다."""
     df = state["df"]
     metrics = [m for m in _plot_metrics() if is_rate_metric(m)]
     if df is None or not len(df) or not metrics:
@@ -2090,18 +2081,14 @@ def _visible_rate_y_bounds() -> tuple[float, float] | None:
 
 
 def _effective_y_bounds() -> tuple[float, float] | None:
-    """Range to draw: the visible-window fit while auto, else the pinned range."""
+    """Y 자동이면 현재 화면에 맞춘 범위를, 수동 고정이면 사용자가 고정한 y축 범위를 반환한다."""
     if state.get("y_auto") or state.get("y_min") is None or state.get("y_max") is None:
         return _visible_y_bounds()
     return float(state["y_min"]), float(state["y_max"])
 
 
 def _scale_y(factor: float) -> bool:
-    """Keep the Y floor fixed; only the top moves (Y+ = shrink, Y- = expand).
-
-    X-axis stays at the bottom of the plot. Do not move ``y_min`` — moving the
-    floor makes the series look like it jumps up and the plot gets shorter.
-    """
+    """y축 하단은 고정하고 상단만 조절한다. Y+는 범위를 줄이고 Y-는 넓힌다."""
     if state["df"] is None:
         return False
     bounds = _effective_y_bounds()
@@ -2146,7 +2133,7 @@ def _select_value_pos(pos: int):
 
 
 def _hover_panel_at_row(row: pd.Series):
-    """Bottom '이 시점 특성값' panel — visible metrics with non-zero values only."""
+    """현재 row의 보이는 metric 중 값이 0이 아닌 항목을 정렬해 '이 시점 특성값' 패널을 만든다."""
     visible = _plot_metrics()
     cols = list(visible)
     if not cols:
@@ -2200,7 +2187,7 @@ def _hover_panel_at_row(row: pd.Series):
 
 
 def _refresh_hover_panel():
-    """Rebuild hover panel for the last hovered / inspected sample, if any."""
+    """마지막 hover/inspect sample을 기준으로 아래쪽 값 패널을 다시 만든다."""
     df = state.get("df")
     if df is None or not len(df):
         return no_update
@@ -2214,7 +2201,7 @@ def _refresh_hover_panel():
 
 
 def _pin_y_before_x_change() -> None:
-    """Freeze the currently drawn y range so the next rebuild won't refit."""
+    """x축 변경 전에 현재 y축을 고정해 다음 figure 재생성에서 자동 fitting이 덮어쓰지 않게 한다."""
     pinned = state.get("y_rendered")
     if pinned is None:
         pinned = _effective_y_bounds()
@@ -2227,7 +2214,7 @@ def _pin_y_before_x_change() -> None:
 def _shift_zoom(
     direction: int, fraction: float = 0.5, *, y_auto: bool = True
 ) -> bool:
-    """Pan the time window; never past the dataset start/end. True if it moved."""
+    """현재 시간창을 좌우로 이동하되 데이터 시작/끝을 넘지 않게 한다."""
     if state["df"] is None:
         return False
     start_ts = state["zoom_start"]
@@ -2253,7 +2240,7 @@ def _shift_zoom(
 
 
 def _scale_x(factor: float, *, y_auto: bool = True) -> bool:
-    """Shrink (factor < 1) or expand (factor > 1) the time window around its center."""
+    """현재 x축 중심을 기준으로 시간창을 확대 또는 축소한다."""
     if state["df"] is None:
         return False
     start_ts = state["zoom_start"]
@@ -2303,7 +2290,7 @@ def _scale_x(factor: float, *, y_auto: bool = True) -> bool:
 
 
 def _scale_x_from_left(factor: float, *, y_auto: bool = True) -> bool:
-    """Shrink the time window while keeping the left edge fixed."""
+    """왼쪽 경계는 고정한 채 시간창 폭만 줄인다."""
     if state["df"] is None:
         return False
     start_ts = state["zoom_start"]
@@ -2346,7 +2333,7 @@ def _relayout_has_shape_edit(relayout) -> bool:
 
 
 def _relayout_moved_non_edge(relayout) -> bool:
-    """True when a shape other than the highlight edges was repositioned."""
+    """highlight edge 이외의 Plotly shape가 이동한 relayout인지 확인한다."""
     if not _relayout_has_shape_edit(relayout):
         return False
     idxs = state.get("highlight_shape_idxs") or {}
@@ -2387,7 +2374,7 @@ def _same_time_window(
 
 
 def _label_overlaps_x_window(item: dict, z0, z1) -> bool:
-    """True if the label's time span intersects [z0, z1]."""
+    """전문가 label 시간 구간이 현재 x축 [z0,z1]과 겹치는지 확인한다."""
     try:
         a = parse_time(item["start"])
         b = parse_time(item.get("end") or item["start"])
@@ -2398,10 +2385,7 @@ def _label_overlaps_x_window(item: dict, z0, z1) -> bool:
 
 
 def _clear_highlight_if_offscreen() -> bool:
-    """Deselect the highlighted label when it lies outside the current X window.
-
-    Returns True if a selection was cleared.
-    """
+    """현재 선택 label이 화면 밖으로 나가면 highlight 선택을 해제한다."""
     hid = state.get("highlight_id")
     if hid is None or state.get("df") is None:
         return False
@@ -2421,13 +2405,7 @@ def _clear_highlight_if_offscreen() -> bool:
 
 
 def _is_full_x_view() -> bool:
-    """True when the time window is the full dataset (「전체」).
-
-    Prefer the explicit flag, but also treat a near-full zoom window as full so
-    a stale ``x_full_view=False`` (e.g. after Plotly double-click autorange left
-    the browser at full while the server stayed zoomed) does not auto-zoom on
-    list select.
-    """
+    """현재 시간창이 사실상 전체 데이터 범위인지 판별한다. 명시적 flag와 실제 범위를 함께 본다."""
     if bool(state.get("x_full_view", True)):
         return True
     if state.get("df") is None:
@@ -2439,7 +2417,7 @@ def _is_full_x_view() -> bool:
 
 
 def _note_x_window_changed() -> None:
-    """Refresh x_full_view after zoom_start/end change."""
+    """zoom_start/end 변경 뒤 x_full_view 상태를 다시 계산한다."""
     if state.get("df") is None:
         state["x_full_view"] = True
         return
@@ -2451,19 +2429,19 @@ def _note_x_window_changed() -> None:
 
 
 def _arm_zoom_guard(seconds: float = 2.0) -> None:
-    """Ignore browser axis echoes after a server-driven zoom/pan (prevents freeze loops)."""
+    """서버가 만든 zoom/pan 직후 지연된 브라우저 relayout echo를 잠깐 무시하도록 guard를 설정한다."""
     state["zoom_guard_until"] = time.monotonic() + seconds
 
 
 def _arm_select_guard(seconds: float = 2.0) -> None:
-    """After select/zoom-to-label: block stale relayout from clearing highlight."""
+    """label 선택/자동 zoom 직후 늦게 도착한 relayout이 highlight를 지우지 못하도록 guard를 설정한다."""
     until = time.monotonic() + seconds
     state["select_guard_until"] = until
     state["zoom_guard_until"] = until
 
 
 def _arm_place_click_guard(seconds: float = 0.3) -> None:
-    """Drop the trailing clickData echo after placement completes."""
+    """label 배치 직후 뒤따라오는 중복 clickData echo를 잠깐 무시한다."""
     state["place_click_guard_until"] = time.monotonic() + seconds
 
 
@@ -2481,14 +2459,7 @@ def _make_axis_cmd(
     guard_seconds: float = 4.0,
     rebuild_ms: int = 300,
 ) -> dict:
-    """Payload for instant client relayout + deferred high-res rebuild.
-
-    ``live_axes=False`` updates server Y state but skips browser ``Plotly.relayout``
-    so a just-finished pan/zoom is not yanked by a Y patch before rebuild.
-
-    ``bump_x_gen=False`` keeps ``layout.uirevision`` stable so Plotly.react can
-    refresh traces after pan without resetting the live camera.
-    """
+    """브라우저 축을 즉시 움직이고 이후 고해상도 데이터를 재생성하기 위한 axis command payload를 만든다."""
     if state["df"] is None:
         return {}
     tmin, tmax = data_time_bounds(state["df"])
@@ -2546,12 +2517,7 @@ def _make_axis_cmd(
 
 
 def _relayout_x_window(relayout) -> tuple[Any, Any] | str | None:
-    """Extract shared-x window from a Plotly relayout payload.
-
-    Dual-panel figures emit ``xaxis`` and/or ``xaxis2`` keys depending on which
-    subplot was dragged. Either is authoritative for the shared time window.
-    Returns ``(start, end)``, the string ``\"autorange\"``, or ``None``.
-    """
+    """Plotly relayout payload에서 shared x축 범위를 추출한다. 여러 subplot 중 어느 xaxis key가 와도 같은 시간창으로 해석한다."""
     if not relayout:
         return None
     if (
@@ -2652,7 +2618,7 @@ def _apply_axes_from_relayout(
 
 
 def _pin_y(y_range) -> bool:
-    """Store an explicit y window from Y+/Y- (not from graph relayout echoes)."""
+    """Y+/Y- 버튼으로 정한 명시적 y축 범위를 서버 상태에 저장한다."""
     try:
         ymin = float(y_range[0])
         ymax = float(y_range[1])
@@ -2670,14 +2636,7 @@ def _pin_y(y_range) -> bool:
 
 
 def _sync_zoom_from_view(view_range) -> None:
-    """Adopt the x range the browser is actually showing.
-
-    Y is not synced from the browser: zoom/pan echo the previous y and would
-    undo Y 자동. Vertical scale stays server-driven (Y+/Y-/Y 자동).
-
-    Disabled from `_main_body` (stale Store races). Kept for emergency/debug.
-    Never overwrite an intentional zoom with a full-window echo.
-    """
+    """브라우저가 실제로 보여주는 x축 범위를 서버 상태에 반영하는 비상/디버그용 동기화 함수다."""
     if state["df"] is None or not view_range:
         return
     if time.monotonic() < float(state.get("zoom_guard_until") or 0):
@@ -2711,12 +2670,7 @@ def _sync_zoom_from_view(view_range) -> None:
 
 
 def _force_adopt_browser_x(view_range) -> bool:
-    """Always adopt browser X when it is a valid window (drag-zoom sync).
-
-    Unlike ``_adopt_browser_x_if_tighter``, this does not require the browser to
-    be tighter — after a drag-zoom the Store view-range is often stale, so the
-    live snap from ``zoom-gesture`` must overwrite server state unconditionally.
-    """
+    """유효한 브라우저 x축 범위를 조건 없이 서버 상태로 채택한다. drag-zoom 직후 stale 서버 상태를 덮어쓸 때 사용한다."""
     if state["df"] is None or not view_range:
         return False
     if isinstance(view_range, dict):
@@ -2744,12 +2698,7 @@ def _force_adopt_browser_x(view_range) -> bool:
 
 
 def _adopt_browser_x_if_tighter(view_range) -> bool:
-    """If the plot is zoomed in more than server state, adopt the browser X.
-
-    Drag-zoom can update the Plotly view while a zoom_guard blocks
-    ``_apply_axes_from_relayout``, leaving server state at full range. Zoom-out
-    then no-ops. Call this before toolbar zoom-in/out.
-    """
+    """브라우저가 서버보다 더 좁은 구간을 보고 있으면 실제 zoom으로 판단해 브라우저 x축을 채택한다."""
     if state["df"] is None or not view_range:
         return False
     if isinstance(view_range, dict):
@@ -3736,7 +3685,7 @@ def _nav_model_pred(_n_prev, _n_next, current):
     prevent_initial_call=True,
 )
 def _on_model_pred_selected(pred_id, click_mode):
-    """Select model segment → zoom to it and show attribution (via list value)."""
+    """model prediction 목록 선택을 해당 segment zoom과 기여정보 표시로 연결한다."""
     prev = state.get("selected_pred_id")
     state["selected_pred_id"] = pred_id
     if prev != pred_id:
@@ -3776,11 +3725,7 @@ def _on_model_pred_selected(pred_id, click_mode):
     prevent_initial_call=True,
 )
 def _pick_model_pred_on_graph(shape_click, click_data, click_mode):
-    """Click a purple model band/point → select it (shows attribution above).
-
-    Prefer human labels when both overlap the click — otherwise model zoom
-    steals the graph click and human selection never sticks.
-    """
+    """그래프의 보라색 model prediction을 클릭해 선택한다. 같은 위치에 전문가 label이 있으면 전문가 선택을 우선한다."""
     click_mode = click_mode or "zoom"
     if click_mode in ("label_range", "label_point", "edit_range"):
         return no_update
@@ -4173,7 +4118,7 @@ def _sync_label_reasons(
     _plmn,
     note,
 ):
-    """Keep reason UI ↔ selected/new label draft in sync."""
+    """원인 입력 UI와 선택된 label 또는 새 label 초안 상태를 서로 동기화한다."""
     tid = getattr(callback_context, "triggered_id", None)
     fail_opts = _fail_metric_options()
     list_opts = no_update
@@ -4765,7 +4710,7 @@ def _main_body(
     prevent_initial_call=True,
 )
 def _metric_filter_changed(selected, _n_all, _n_none, click_mode):
-    """Toggle drawn metrics within the active universe. 전체 선택 → Y 자동; 전체 해제 → Y 유지."""
+    """현재 metric universe 안에서 실제로 그릴 metric을 변경한다. 전체 선택은 Y 자동, 전체 해제는 기존 Y를 유지한다."""
     if state.get("df") is None:
         return no_update, no_update, no_update, no_update, no_update
     universe = _metric_universe()
@@ -4849,12 +4794,7 @@ def _axis_nav(
     click_mode,
     view_range,
 ):
-    """Instant axis moves: update state only; browser relayouts, then rebuilds.
-
-    Zoom-in / zoom-out / 「전체」 / Train·Valid·Test replace the figure directly
-    (see ``_zoom_x_hard`` / ``_reset_zoom_hard`` / ``_zoom_chrono_hard``) so
-    Plotly uirevision cannot swallow the new time window.
-    """
+    """축 이동 명령의 공통 helper다. 상태를 갱신한 뒤 브라우저 relayout/figure 재생성 흐름을 제어한다."""
     if state["df"] is None:
         return no_update
     prop = callback_context.triggered[0]["prop_id"] if callback_context.triggered else ""
@@ -4900,7 +4840,7 @@ def _axis_nav(
     prevent_initial_call=True,
 )
 def _zoom_chrono_hard(_n_train, _n_valid, _n_test, _n_full, click_mode):
-    """Train / Valid / Test / 전체(split): hard figure replace like 「전체」."""
+    """TRAIN / VALID / TEST / 전체 split으로 이동할 때 figure를 직접 교체해 Plotly uirevision race를 피한다."""
     if state.get("df") is None:
         return no_update, no_update
     prop = callback_context.triggered[0]["prop_id"] if callback_context.triggered else ""
@@ -4932,12 +4872,7 @@ def _zoom_chrono_hard(_n_train, _n_valid, _n_test, _n_full, click_mode):
     prevent_initial_call=True,
 )
 def _zoom_x_hard(gesture, click_mode):
-    """줌인 / 줌인(왼쪽) / 줌아웃: live browser X → scale → replace figure.
-
-    ``zoom-gesture`` is filled clientside with ``__readGraphView()`` on the same
-    click, so drag-zoom windows are visible even when server state / view-range
-    Store are still at full.
-    """
+    """현재 브라우저 x축을 기준으로 줌인/왼쪽 줌인/줌아웃한 뒤 figure를 직접 교체한다."""
     if state.get("df") is None or not gesture:
         return no_update, no_update
     action = gesture.get("action")
@@ -4977,7 +4912,7 @@ def _zoom_x_hard(gesture, click_mode):
     prevent_initial_call=True,
 )
 def _reset_zoom_hard(n_clicks, click_mode):
-    """「전체」: replace the figure directly (bypass axis-cmd / uirevision races)."""
+    """'전체' 동작에서 axis-cmd race를 피하기 위해 figure를 직접 전체 범위로 교체한다."""
     if not n_clicks or state.get("df") is None:
         return no_update, no_update
     state["label_range_anchor"] = None
@@ -5001,7 +4936,7 @@ def _reset_zoom_hard(n_clicks, click_mode):
     prevent_initial_call=True,
 )
 def _drag_axis_nav(relayout, click_mode):
-    """On drag-zoom / drag-pan: optional Y 자동, then deferred high-res rebuild."""
+    """drag-zoom 또는 drag-pan이 끝난 뒤 필요하면 Y 자동 fitting을 수행하고 고해상도 trace를 지연 재생성한다."""
     if not relayout or state["df"] is None:
         return no_update
     has_x = _relayout_x_window(relayout) is not None
