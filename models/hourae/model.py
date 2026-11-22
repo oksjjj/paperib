@@ -1,5 +1,6 @@
 """HourAE가 사용하는 point-wise AutoEncoder 구조."""
 
+import torch
 from torch import nn
 
 class PointAutoEncoder(nn.Module):
