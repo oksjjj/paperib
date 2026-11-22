@@ -70,7 +70,7 @@ events.out.tfevents.*
 /RoCA/model/
 
 # --- Local caches / analysis ---
-/ui/cache/
+/data/ib_data/cache/
 /graph/
 /analysis/
 /cache/
