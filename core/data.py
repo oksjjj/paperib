@@ -6,6 +6,7 @@ raw CSV를 PLMN별로 모으고 시간순으로 정렬한 뒤, 모델이 필요�
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import Any
@@ -18,8 +19,12 @@ from core.features import PAPER_PLMNS, feature_columns
 from core.labels import human_anomaly_mask, load_labels
 
 REPO = Path(__file__).resolve().parents[1]
-DATA_DIR = REPO / "data" / "ib_data" / "raw"
-CACHE_DIR = REPO / "data" / "ib_data" / "cache"
+IB_DATA_DIR = REPO / "data" / "ib_data"
+DATA_DIR = IB_DATA_DIR / "raw"
+CACHE_DIR = IB_DATA_DIR / "cache"
+LABEL_DIR = IB_DATA_DIR / "labels"
+RANK_CACHE_PATH = LABEL_DIR / "plmn_rank.csv"
+RANK_SIGNATURE_PATH = CACHE_DIR / "plmn_rank.signature"
 
 DEFAULT_WINDOW = 100
 DEFAULT_TRAIN_RATIO = 0.6
@@ -88,6 +93,87 @@ def load_plmn(
             pass
 
     return df
+
+
+def data_signature_text(data_dir: Path = DATA_DIR) -> str:
+    """raw CSV signature를 파일 저장/비교에 사용할 안정적인 문자열로 반환한다."""
+    return json.dumps(_data_signature(data_dir), ensure_ascii=False, separators=(",", ":"))
+
+
+def clear_plmn_cache(plmn: str | None = None) -> int:
+    """공통 PLMN pickle cache를 삭제하고 삭제된 파일 수를 반환한다."""
+    if not CACHE_DIR.exists():
+        return 0
+    targets = [CACHE_DIR / f"{plmn}.pkl"] if plmn else list(CACHE_DIR.glob("*.pkl"))
+    removed = 0
+    for path in targets:
+        # UI score cache는 별도 이름 규칙이므로 전체 삭제 시에도 건드리지 않는다.
+        if "_score_" in path.name:
+            continue
+        if path.exists():
+            path.unlink()
+            removed += 1
+    return removed
+
+
+def build_plmn_ranking(data_dir: Path = DATA_DIR) -> pd.DataFrame:
+    """raw CSV 전체에서 PLMN별 M971 합계를 계산해 내림차순 순위를 만든다."""
+    sums: dict[str, int] = {}
+    for path in sorted(data_dir.glob("*.csv")):
+        try:
+            chunk = pd.read_csv(path, usecols=["PLMN", "M971"])
+        except ValueError:
+            continue
+        part = chunk.groupby("PLMN")["M971"].sum()
+        for plmn, value in part.items():
+            key = str(plmn)
+            sums[key] = sums.get(key, 0) + int(value)
+
+    rank_df = (
+        pd.DataFrame({"PLMN": list(sums.keys()), "M971_sum": list(sums.values())})
+        .sort_values("M971_sum", ascending=False)
+        .reset_index(drop=True)
+    )
+    rank_df.insert(0, "rank", rank_df.index + 1)
+    return rank_df
+
+
+def save_ranking_cache(rank_df: pd.DataFrame, signature: str | None = None) -> None:
+    """PLMN 순위와 raw 데이터 signature를 공통 data 영역에 저장한다."""
+    LABEL_DIR.mkdir(parents=True, exist_ok=True)
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    rank_df.to_csv(RANK_CACHE_PATH, index=False)
+    RANK_SIGNATURE_PATH.write_text(
+        signature or data_signature_text(DATA_DIR),
+        encoding="utf-8",
+    )
+
+
+def load_or_build_ranking(top_n: int | None = None) -> pd.DataFrame:
+    """현재 raw snapshot과 일치하는 순위 cache를 읽고 필요하면 다시 계산한다."""
+    LABEL_DIR.mkdir(parents=True, exist_ok=True)
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    signature = data_signature_text(DATA_DIR)
+    cached_signature = None
+    if RANK_SIGNATURE_PATH.exists():
+        try:
+            cached_signature = RANK_SIGNATURE_PATH.read_text(encoding="utf-8").strip()
+        except OSError:
+            pass
+
+    if RANK_CACHE_PATH.exists() and cached_signature == signature:
+        rank_df = pd.read_csv(RANK_CACHE_PATH)
+    elif any(DATA_DIR.glob("*.csv")):
+        rank_df = build_plmn_ranking(DATA_DIR)
+        save_ranking_cache(rank_df, signature)
+    elif RANK_CACHE_PATH.exists():
+        rank_df = pd.read_csv(RANK_CACHE_PATH)
+    else:
+        raise FileNotFoundError(f"No source CSV or ranking cache found under {DATA_DIR}")
+
+    if top_n is not None:
+        rank_df = rank_df.head(top_n).copy()
+    return rank_df.reset_index(drop=True)
 
 
 def split_indices(
