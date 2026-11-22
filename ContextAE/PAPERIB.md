@@ -77,6 +77,65 @@ K를 직접 고정할 수도 있습니다.
 
 이 경우에도 해당 K 안에서 시간 경계는 DP로 자동 결정됩니다.
 
+## 데이터 전처리와 정규화
+
+ContextAE는 11개 core feature를 읽은 뒤 NaN과 ±inf를 0으로 치환하고,
+시간순으로 TRAIN 60%, VALID 20%, TEST 20%로 분할합니다.
+
+중요한 점은 ContextAE에서 정규화가 한 번만 수행되는 것이 아니라
+목적에 따라 서로 다른 RobustScaler가 사용된다는 것입니다.
+
+### 1. Context discovery용 scaling
+
+TRAIN 전체 raw feature에 RobustScaler를 fit합니다.
+
+$
+x_f'
+=
+\frac{x_f-\operatorname{median}(x_f)}
+{Q_{0.75}(x_f)-Q_{0.25}(x_f)}
+$
+
+이 scaled TRAIN에서 각 5분 slot의 across-day median과 MAD를 계산합니다.
+
+현재 11개 feature를 사용하므로 기본 median+MAD profile은 22차원입니다.
+
+그 다음 288개 slot profile 전체에 다시 별도의 RobustScaler를 fit한 뒤,
+이 profile을 이용해 DP segmentation과 silhouette 기반 K 선택을 수행합니다.
+
+즉 context discovery에는:
+
+```text
+TRAIN raw
+→ RobustScaler
+→ slot별 median/MAD
+→ profile RobustScaler
+→ segmentation
+```
+
+의 두 단계 scaling이 있습니다.
+
+### 2. Context별 AE scaling
+
+context가 결정된 뒤에는 각 context마다 별도의 RobustScaler를 사용합니다.
+
+```text
+context raw TRAIN
+→ Stage-1 RobustScaler
+→ Stage-1 AE
+→ MSE 상위 5% 제거
+→ retained raw TRAIN
+→ Final RobustScaler 새로 fit
+→ Fresh Final AE
+```
+
+Final scaler는 Stage-1 scaler를 재사용하지 않습니다.
+
+VALID/TEST point는 자신의 context에 해당하는 Final RobustScaler의
+`transform()`만 적용받으며, VALID/TEST를 이용한 scaler fit은 수행하지 않습니다.
+
+---
+
 ## Context-specific AE
 
 각 context에 대해서는 기존 HourAE와 같은 학습 recipe를 유지합니다.
