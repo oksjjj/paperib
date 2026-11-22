@@ -29,11 +29,12 @@ import numpy as np
 from dash import Dash, Input, Output, State, callback_context, dcc, html, no_update
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
-if ROOT not in sys.path:
-    sys.path.insert(0, ROOT)
+REPO = os.path.dirname(ROOT)
+if REPO not in sys.path:
+    sys.path.insert(0, REPO)
 os.chdir(ROOT)
 
-from data_view import (  # noqa: E402
+from labeling.data_view import (  # noqa: E402
     M971_COL,
     PAPER_PLMNS,
     chrono_split_bounds,
@@ -49,7 +50,7 @@ from data_view import (  # noqa: E402
     to_plot_time,
     to_plot_times,
 )
-from plotting import (  # noqa: E402
+from labeling.plotting import (  # noqa: E402
     FIGURE_HEIGHT,
     build_figure,
     clamp_time_range,
@@ -58,7 +59,7 @@ from plotting import (  # noqa: E402
     ranked_hover_html,
     ranked_metric_pairs,
 )
-from ui_labels import (  # noqa: E402
+from labeling.ui_labels import (  # noqa: E402
     LABEL_HIGHLIGHT_END,
     LABEL_HIGHLIGHT_START,
     LABEL_REASON_DEFS,
@@ -74,7 +75,7 @@ from ui_labels import (  # noqa: E402
     update_label,
     value_cursor_overlays,
 )
-from ui_predictions import (  # noqa: E402
+from labeling.ui_predictions import (  # noqa: E402
     ANOMALY_SCORE_KEY,
     anomaly_score_at_time,
     apply_threshold_mode,
