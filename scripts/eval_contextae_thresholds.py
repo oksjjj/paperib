@@ -1,26 +1,17 @@
 #!/usr/bin/env python3
-"""Evaluate ContextAE operational threshold rules without retraining.
+"""ContextAE를 다시 학습하지 않고 operational threshold 규칙들을 비교하는 스크립트.
 
-Thresholds are estimated per temporal context from the final clean TRAIN
-reconstruction-error distribution. Validation labels are used only to evaluate
-the resulting binary alarms.
+각 temporal context의 Final clean TRAIN reconstruction-error 분포만 이용해
+threshold를 계산하고, VALID 전문가 label은 결과 평가에만 사용한다.
 
-Compared rules:
-- current mean + k*sigma
-- empirical train quantiles
+비교 방법:
+- 현재 방식인 mean + k*sigma
+- TRAIN empirical quantile
 - robust median + k * 1.4826 * MAD
-- POT/EVT (GPD tail fit)
+- POT/EVT의 GPD tail fit
 
-Results are written back to each ContextAE validation prediction JSON under
-`threshold_evaluation` and summarized in results/contextae_threshold_summary.*.
-
-Examples:
-    .venv/bin/python scripts/eval_contextae_thresholds.py --all
-    .venv/bin/python scripts/eval_contextae_thresholds.py --plmn P0480
-    .venv/bin/python scripts/eval_contextae_thresholds.py --all \
-        --quantiles 0.99 0.995 0.999 \
-        --mad_k 3 4 5 \
-        --pot_alpha 0.01 0.005 0.001
+결과는 각 ContextAE validation prediction JSON의 threshold_evaluation에 저장하고,
+results/contextae_threshold_summary.csv/json에도 요약한다.
 """
 
 from __future__ import annotations
