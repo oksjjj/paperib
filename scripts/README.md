@@ -4,6 +4,7 @@ Repo 루트 공용 데이터 전처리·평가·시각화 스크립트.
 
 ```bash
 # from paperib root
+.venv/bin/python scripts/build_ui_cache.py   # IB 공통 PLMN cache/ranking 생성
 .venv/bin/python scripts/download_smd.py
 .venv/bin/python scripts/preprocess_data.py --dataset SMD
 
