@@ -1,23 +1,22 @@
 #!/usr/bin/env python3
-"""24-hour contextual AutoEncoder with iterative train decontamination.
+"""하루를 24개 고정 시간대로 나누는 HourAE 실행 코드.
 
-Pipeline for each local hour h in {0,...,23}:
+각 local hour h ∈ {0,...,23}에 대해 다음 과정을 독립적으로 수행한다.
 
-1. Fit a stage-1 AutoEncoder on ALL unlabeled train points in hour h.
-2. Compute point-wise reconstruction MSE on those train points.
-3. Remove the top q% reconstruction-error points (default q=5%).
-4. Fit a FRESH final AutoEncoder on the retained points only.
-5. Compute final reconstruction-error distribution on retained train points.
-6. Calibrate each point as z=(MSE-mean_h)/std_h.
-7. Predict anomaly point when z > threshold_sigma.
+1. 해당 hour의 모든 unlabeled TRAIN point로 Stage-1 AutoEncoder를 학습한다.
+2. TRAIN point별 reconstruction MSE를 계산한다.
+3. reconstruction error 상위 q%(기본 5%)를 anomaly candidate로 제거한다.
+4. 남은 point만 사용해 새로운 Final AutoEncoder를 처음부터 다시 학습한다.
+5. retained TRAIN의 최종 reconstruction error 분포를 계산한다.
+6. 각 point score를 z=(MSE-mean_h)/std_h 형태로 보정한다.
+7. z > threshold_sigma이면 anomaly point로 판단한다.
 
-final_contamination_pct (default 0.01%) is retained as the reference tail
-probability from the user's earlier implementation. It defines a per-hour
-reference quantile after final retraining, but it does NOT alter AutoEncoder
-weights. The actual paperib decision threshold is kept separate as mean + sigma.
+final_contamination_pct(기본 0.01%)는 과거 구현과의 비교를 위해 남겨둔
+참고용 upper-tail quantile이다. AutoEncoder 학습 weight를 바꾸는 contamination
+파라미터가 아니며, 실제 기본 decision threshold는 clean TRAIN의 mean+sigma 규칙을 사용한다.
 
-No anomaly labels are loaded until all 24 AEs are trained and train/valid/test
-scores are fixed. Human labels are used only for evaluation.
+모델 학습, decontamination, score 생성에는 anomaly label을 사용하지 않는다.
+전문가 label은 모든 score가 결정된 뒤 VALID/TEST 평가에만 사용한다.
 """
 
 from __future__ import annotations
