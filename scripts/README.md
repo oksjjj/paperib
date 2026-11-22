@@ -1,22 +1,21 @@
 # scripts/
 
-Repo 루트 공용 데이터 전처리·평가·시각화 스크립트.
+인바운드 로밍 데이터 준비 및 실행 검증에 사용하는 스크립트입니다. 모든 명령은 저장소 루트에서 실행합니다.
+
+| 파일 | 용도 |
+|---|---|
+| `export_paper_raw.py` | 전체 비식별화 CSV에서 논문 대상 PLMN만 추출 |
+| `build_ib_cache.py` | 원본 CSV로부터 공통 PLMN 캐시 및 순위 생성 |
+| `smoke_test.py` | 핵심 모듈 import, 모델 forward, 데이터 로딩 및 의존성 검사 |
 
 ```bash
-# from paperib root
-.venv/bin/python scripts/build_ib_cache.py   # IB 공통 PLMN cache/ranking 생성
-.venv/bin/python scripts/download_smd.py
-.venv/bin/python scripts/preprocess_data.py --dataset SMD
+# 전체 사업자 데이터가 별도로 있을 때만 실행
+.venv/bin/python scripts/export_paper_raw.py
 
-.venv/bin/python scripts/download_smap_msl.py
-.venv/bin/python scripts/preprocess_data.py --dataset SMAP
-.venv/bin/python scripts/preprocess_data.py --dataset MSL
-
-.venv/bin/python scripts/eval_from_scores.py --dataset machine-1-1
-.venv/bin/python scripts/viz_gt_anomalies.py --dataset machine-1-1 --gt_only
+# IB 공통 캐시 생성 및 검증
+.venv/bin/python scripts/build_ib_cache.py
+.venv/bin/python scripts/smoke_test.py
 ```
-
-
 
 ## VUS 재평가
 

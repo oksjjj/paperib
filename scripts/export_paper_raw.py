@@ -18,8 +18,9 @@ from pathlib import Path
 import pandas as pd
 
 REPO = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO / "labeling"))
-from tool import PAPER_PLMNS  # noqa: E402
+if str(REPO) not in sys.path:
+    sys.path.insert(0, str(REPO))
+from core.features import PAPER_PLMNS  # noqa: E402
 
 DEFAULT_SRC = REPO / "data" / "ib_data" / "_local_raw_full"
 DEFAULT_DST = REPO / "data" / "ib_data" / "raw"
