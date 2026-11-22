@@ -8,7 +8,7 @@
 | `data/ib_data/labels/*_labels.json` | 사람 라벨 |
 | `data/ib_data/predictions/*.json` | 모델 예측 + valid 메트릭 |
 | `results/**/*.json`, `*.csv` | HP 스윕·요약 지표 |
-| `docs/`, `ContextAE/`, `HourAE/`, `RoCA/`, `common/`, `labeling/` | 코드·문서 |
+| `core/`, `models/`, `evaluation/`, `ui/`, `scripts/`, `docs/` | 코드·문서 |
 
 ## 올리지 않는 것
 
@@ -17,7 +17,7 @@
 | `*_mapping.txt` | masked ↔ 원본명 역매핑 |
 | `data/ib_data/_local_raw_full/` | 전체 사업자 raw |
 | `*.pt` / `ContextAE/model/` / `HourAE/model/` / `RoCA/model/` | 가중치 (용량) |
-| `labeling/cache/*.pkl` | 로컬 캐시 (preprocess로 재생성) |
+| `ui/cache/*.pkl` | 로컬 캐시 (preprocess로 재생성) |
 
 paper raw 재생성:
 
