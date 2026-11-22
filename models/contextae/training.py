@@ -92,12 +92,6 @@ def local_slot_ids(local_times: pd.Series) -> np.ndarray:
     return (hour * 12 + minute // 5).astype(np.int16)
 
 
-def slot_label(slot: int) -> str:
-    hour = int(slot) // 12
-    minute = (int(slot) % 12) * 5
-    return f"{hour:02d}:{minute:02d}"
-
-
 def prepare_unlabeled_plmn(plmn: str, tz_name: str) -> dict[str, Any]:
     df = load_plmn(plmn)
     cols = feature_columns(df)
