@@ -17,6 +17,57 @@ For each local hour 00..23:
 
 No anomaly label is used for model training, filtering, calibration, or score generation.
 
+## 데이터 전처리와 정규화
+
+HourAE는 11개 core feature를 사용하며, 모델 입력 직전에:
+
+```text
+NaN  → 0
++inf → 0
+-inf → 0
+```
+
+으로 치환합니다.
+
+데이터는 시간순으로 TRAIN 60%, VALID 20%, TEST 20%로 분할합니다.
+
+이후 local hour별로 서로 다른 RobustScaler를 사용합니다.
+
+예:
+
+```text
+00시 TRAIN → 00시 전용 RobustScaler
+01시 TRAIN → 01시 전용 RobustScaler
+...
+23시 TRAIN → 23시 전용 RobustScaler
+```
+
+RobustScaler는 feature별 median과 IQR을 사용합니다.
+
+$
+x_f'
+=
+\frac{x_f-\operatorname{median}(x_f)}
+{Q_{0.75}(x_f)-Q_{0.25}(x_f)}
+$
+
+또한 decontamination 전후 scaler가 다릅니다.
+
+```text
+해당 hour contaminated TRAIN
+→ Stage-1 RobustScaler
+→ Stage-1 AE
+→ reconstruction MSE 상위 5% 제거
+→ retained raw TRAIN
+→ Final RobustScaler를 새로 fit
+→ Fresh Final AE
+```
+
+VALID/TEST 데이터에는 해당 hour의 Final RobustScaler의 `transform()`만 적용하며
+VALID/TEST를 이용해 scaler를 다시 fit하지 않습니다.
+
+---
+
 ## About final contamination 0.01%
 
 A neural AutoEncoder itself has no IsolationForest-like contamination parameter.
