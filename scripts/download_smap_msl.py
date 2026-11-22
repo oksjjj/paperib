@@ -21,7 +21,7 @@ from huggingface_hub import hf_hub_download, list_repo_files
 _PAPERIB_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 
 REPO_ID = 'appleparan/telemanom'
-# Shared telemanom layout mirrored under each dataset's raw/ for uniformity.
+# SMAP/MSL 모두 같은 telemanom 디렉터리 구조를 사용하도록 각 dataset의 raw 아래에 동일한 파일 구성을 만든다.
 DATA_DIRS = (
     os.path.join('data', 'SMAP', 'raw'),
     os.path.join('data', 'MSL', 'raw'),
@@ -65,7 +65,7 @@ def download_smap_msl():
             shutil.copy2(cached, primary_path)
             print(f'[{i}/{len(npy_files)}] {category}/{filename}')
 
-        # Mirror into MSL/raw (same telemanom files).
+        # 같은 telemanom 원본 파일을 MSL/raw에도 복사해 두 dataset이 동일한 전처리 코드를 사용할 수 있게 한다.
         for d in DATA_DIRS[1:]:
             dest = os.path.join(d, category, filename)
             if not os.path.exists(dest):
