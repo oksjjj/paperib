@@ -23,6 +23,6 @@ git·문서·이슈·주석에 대응표를 올리지 않는다.
 라벨링 캐시:
 
 ```bash
-python labeling/preprocess.py --paper-only   # 지원 시
+python ui/preprocess.py --paper-only   # 지원 시
 # 또는 기존 preprocess 후 paper PLMN pickle만 사용
 ```
