@@ -24,6 +24,6 @@ git·문서·이슈·주석에 대응표를 올리지 않는다.
 라벨링 캐시:
 
 ```bash
-python scripts/build_ui_cache.py
+python scripts/build_ib_cache.py
 # 기본값은 top100.txt 대상이며 --plmn / --top / --all 옵션도 사용할 수 있음
 ```
