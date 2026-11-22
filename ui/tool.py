@@ -1228,7 +1228,7 @@ def paper_metrics_from_flat_metrics(
 
 
 def _load_evaluate_valid():
-    """common/metrics.py의 evaluate_valid()를 지연 로딩한다."""
+    """core/metrics.py의 evaluate_valid()를 지연 로딩한다."""
     import importlib.util
     from pathlib import Path
 
