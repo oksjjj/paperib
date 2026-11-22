@@ -88,7 +88,7 @@ MAX_POINTS = 1500
 HOST = "127.0.0.1"
 PORT = 8050
 
-# Paper evaluation: only these PLMNs are visible/selectable in the UI.
+# 논문 평가 대상 10개 PLMN만 UI의 사업자 선택 목록에 노출한다.
 rank_df = load_or_build_ranking(top_n=None, paper_only=True)
 plmn_options = [
     {
@@ -110,14 +110,14 @@ state: dict = {
     "plmn": None,
     "rank": None,
     "metrics": [],
-    # Currently drawn series (subset of metric_universe). Empty = draw nothing.
+    # 현재 실제 그래프에 그리고 있는 metric 목록이다. 빈 목록이면 아무 metric도 그리지 않는다.
     "visible_metrics": [],
-    # Metrics eligible in the filter under the active model run (None = all).
+    # 현재 선택한 모델 결과에서 필터 대상으로 허용되는 metric 집합이다. None이면 전체를 허용한다.
     "metric_universe": None,
     "metric_rev": 0,
     "zoom_start": None,
     "zoom_end": None,
-    # Explicit full-vs-zoomed flag (avoids stale view-range sync races).
+    # 전체 보기인지 확대 상태인지 명시적으로 기록해 브라우저/서버 x축 상태가 엇갈리는 race를 줄인다.
     "x_full_view": True,
     "x_gen": 0,
     "y_min": None,
@@ -134,8 +134,8 @@ state: dict = {
     "highlight_shape_idxs": None,
     "label_rev": 0,
     "place_rev": 0,
-    # Bump when highlight overlays change — stable uirevision otherwise keeps
-    # the previous (unselected) shapes after a click/list select.
+    # highlight overlay가 바뀔 때 revision 값을 올린다. 그렇지 않으면 Plotly의 안정된 uirevision 때문에
+    # 이전 선택 shape가 화면에 남을 수 있다.
     "hi_rev": 0,
     "confirm_action": None,
     "value_cursor_pos": None,
@@ -148,11 +148,11 @@ state: dict = {
     "selected_pred_id": None,
     "threshold_mode": "pot",  # "pot" | "best_f1_point" | "best_f1" (PA)
     "metrics_eval_split": "valid",  # "valid" | "test"
-    # Draft label reasons (applied to new placements; mirrored from selected label).
+    # 새 label에 적용할 anomaly 원인 입력 초안이다. 기존 label을 선택하면 그 값도 여기로 복사한다.
     "draft_reasons": [],
     "draft_fail_metrics": [],
     "draft_note": "",
-    # Label id currently shown in the reason panel (flush target when switching).
+    # 현재 원인 패널이 편집 중인 label ID다. 다른 label로 이동하기 전에 이 ID에 입력값을 저장한다.
     "reason_bound_id": None,
 }
 
@@ -308,7 +308,7 @@ def _pred_matches_metrics_split(
     wanted = (metrics_split or _metrics_split_wanted()).lower()
     tag = pred_chrono_split_tag(item, pred_doc or state.get("predictions"))
     if not tag:
-        # No split meta → keep (legacy exports).
+        # split 메타정보가 없는 과거 export는 호환성을 위해 그대로 유지한다.
         return True
     if wanted == "test":
         return tag == "TEST"
@@ -352,8 +352,8 @@ def _model_pred_options():
         mode_tag = "best-F1·PA"
     else:
         mode_tag = str(mode)
-    # Short labels — full attribution is shown in the panel below (keeps
-    # dropdown usable when Anomaly Transformer emits hundreds of segments).
+    # 드롭다운에는 짧은 이름만 표시하고 자세한 기여 feature 정보는 아래 패널에서 보여준다.
+    # prediction segment가 수백 개여도 드롭다운이 너무 길어지지 않게 하기 위한 처리다.
     opts = []
     for x in items:
         split_tag = pred_chrono_split_tag(x, pred)
@@ -372,7 +372,7 @@ def _pred_by_id(pred_id: str | None) -> dict | None:
     for item in _model_pred_items():
         if item.get("id") == pred_id:
             return item
-    # Fall back to full list (e.g. selection from before a Metrics switch).
+    # metrics split 변경 전에 선택했던 항목처럼 현재 필터 목록에 없으면 전체 prediction 목록에서 다시 찾는다.
     for item in (state.get("predictions") or {}).get("labels") or []:
         if item.get("id") == pred_id:
             return item
@@ -521,7 +521,7 @@ def _model_metrics_tag(pred: dict) -> tuple[str, str]:
         return "LSTM-AD", "#0369a1"
     if "anomalytransformer" in key or key.startswith("at"):
         return "AnomalyTransformer", "#7c3aed"
-    # Fallback: capitalize source stem
+    # 표시 이름을 따로 찾지 못하면 source 파일 stem을 보기 좋게 변환해 사용한다.
     stem = (pred.get("model") or pred.get("source") or "Model")
     stem = str(stem).split("_")[0]
     return stem.upper() if len(stem) <= 6 else stem, "#334155"
@@ -883,8 +883,8 @@ def _metrics_by_view_sum() -> list[str]:
         if bool(mask.any()):
             view = df.loc[mask]
 
-    # Rates / overlays first (stable), then raw metrics by sum; zeros kept at end
-    # so comb-universe items remain toggleable even when inactive in-view.
+    # rate/overlay를 먼저 고정 순서로 두고, 원본 metric은 현재 구간 합계가 큰 순서로 배치한다.
+    # 현재 구간에서 0인 metric도 뒤에 남겨 전체 선택/해제가 항상 일관되게 동작하게 한다.
     pinned = [
         m
         for m in overlay_metrics_available(df, list(state.get("metrics") or []))
@@ -911,8 +911,8 @@ def _metrics_by_view_sum() -> list[str]:
 
     active = sorted([m for m in rest if has_nonzero(m)], key=sort_key, reverse=True)
     inactive = [m for m in rest if m not in active]
-    # Always keep every universe item in the checklist (zeros at the end).
-    # Hiding in-view zeros made 「전체 선택」 check only a random-looking subset.
+    # metric universe의 모든 항목은 checklist에 유지하고 값이 0인 항목만 뒤로 보낸다.
+    # 0인 항목을 숨기면 '전체 선택'이 일부 항목만 선택하는 것처럼 보여 혼란이 생긴다.
     return pinned + active + inactive
 
 
@@ -944,7 +944,7 @@ def _pred_uses_feature_subset(preds: dict | None = None) -> bool:
     cols = list(preds.get("feature_columns") or [])
     mode = preds.get("feature_mode")
     source = str(preds.get("source") or state.get("pred_source") or "")
-    # "all" / "core" / "all_raw" = the active paper feature universe (now core).
+    # all/core/all_raw 표기는 현재 논문 feature universe를 뜻하며 지금은 core feature 집합으로 통일한다.
     return mode in ("comb", "comb_share", "selected") or (
         mode not in ("all", "core", "all_raw", None)
         and source != ""
@@ -979,7 +979,7 @@ def _metric_universe_for_predictions(preds: dict | None = None) -> list[str]:
         return full
     mode = preds.get("feature_mode")
     source = str(preds.get("source") or state.get("pred_source") or "")
-    # comb_share trains on ÷M971, but UI shows the same series as comb.
+    # comb_share 학습은 M971 대비 비율을 쓰지만 UI에서는 같은 원본 counter series 이름으로 보여준다.
     if mode in ("comb", "comb_share") or source.endswith("_comb") or source.endswith(
         "_comb_share"
     ):
@@ -1126,7 +1126,7 @@ def _select_or_toggle_label_hit(hit: dict, click_mode: str):
     state["highlight_id"] = hit["id"]
     state.pop("_offscreen_cleared", None)
     _bump_hi_rev()
-    # Block stale plotly_relayout echoes from undoing this highlight.
+    # 지연되어 도착한 plotly_relayout 이벤트가 방금 만든 highlight를 되돌리지 못하게 막는다.
     _arm_select_guard()
     if click_mode == "edit_range":
         status = f"선택 ({tag}): {label_line(hit)} — 빨간 경계를 드래그하세요."
@@ -1149,9 +1149,9 @@ def _zoom_to_label_item(item: dict) -> None:
     end_ts = parse_time(item["end"])
     kind = (item.get("kind") or "point").lower()
     is_point = kind == "point" or start_ts == end_ts
-    # Point: fixed window — same base as before, plus two more 「줌아웃」
-    # steps → × (1/0.7)^9 instead of ^7.
-    # Range: tight fit to the label (min 30 min), then widen × (1/0.7)^7.
+    # point label 선택 시 고정 폭으로 확대하되 이전보다 줌아웃 두 단계만큼 더 넓게 본다.
+    # 즉 기본 폭에 (1/0.7)^9 배를 적용한다.
+    # range label은 최소 30분 폭으로 label에 맞춘 뒤 (1/0.7)^7 배만큼 여유를 둔다.
     fixed_point = pd.Timedelta(minutes=30) * ((1.0 / 0.7) ** 9)
     if is_point:
         mid = start_ts
@@ -1170,9 +1170,9 @@ def _zoom_to_label_item(item: dict) -> None:
     state.pop("_offscreen_cleared", None)
     _bump_hi_rev()
     _reset_y()
-    # Same as 줌인/전체: bump layout uirevision so Plotly.react accepts the
-    # new x window and the Y-auto ranges from `_reset_y` (stable uirevision
-    # otherwise keeps the previous metrics/rate/score y ranges).
+    # 줌인/전체와 마찬가지로 layout uirevision을 갱신해야 Plotly.react가 새 x축과
+    # _reset_y()에서 계산한 새 Y 자동 범위를 받아들인다. uirevision이 그대로면
+    # 이전 metric/rate/score y축 범위를 계속 유지할 수 있다.
     state["x_gen"] = int(state.get("x_gen") or 0) + 1
     state["_force_ui_rev"] = time.time()
     _arm_select_guard()
@@ -1236,7 +1236,7 @@ def _zoom_to_chrono_split(which: str) -> bool:
     state["label_range_anchor"] = None
     state.pop("_offscreen_cleared", None)
     _reset_y()
-    # Hard figure replace needs a new uirevision; soft axis-cmd alone is ignored.
+    # figure를 통째로 교체하는 동작은 새 uirevision이 필요하며 axis-cmd만 보내면 무시될 수 있다.
     state["x_gen"] = int(state.get("x_gen") or 0) + 1
     state["_force_ui_rev"] = time.time()
     return True
@@ -1383,7 +1383,7 @@ def _rate_subplot_active() -> bool:
 
 
 def _metric_axis_row() -> int:
-    # score=1, metrics=2, human=3, model=4 (rate inserts before metrics if present).
+    # subplot row는 score=1, metrics=2, 전문가=3, 모델=4이며 rate가 있으면 metrics 앞에 한 행이 추가된다.
     if _rate_subplot_active():
         return 3
     return 2
@@ -1430,8 +1430,8 @@ def _build_graph(click_mode: str):
         show_predictions=True,
         highlight_pred_id=state.get("selected_pred_id"),
     )
-    # Extra revision bump so Dash/Plotly never keep a previous WebGL buffer /
-    # axis range after 줌인·이동 buttons.
+    # 줌/이동 버튼 뒤 이전 WebGL buffer나 축 범위가 남지 않도록 revision을 한 번 더 올린다.
+    # 서버가 새 figure를 그릴 때 브라우저가 예전 화면을 재사용하지 못하게 하는 목적이다.
     state["fig_gen"] = int(state.get("fig_gen") or 0) + 1
     tmin, tmax = data_time_bounds(state["df"])
     x0 = state["zoom_start"] if state["zoom_start"] is not None else tmin
@@ -1443,12 +1443,12 @@ def _build_graph(click_mode: str):
     prev = state.get("zoom_rendered")
     if prev is not None and not _same_time_window(rendered, prev):
         state["zoom_rendered_prev"] = prev
-        # Accept new x (and Y-auto) on figure replace — same need as axis-cmd.
+        # figure 교체 시 새 x축과 Y 자동 범위를 확실히 적용한다.
         state["x_gen"] = int(state.get("x_gen") or 0) + 1
     state["zoom_rendered"] = rendered
-    # Keep layout.uirevision stable across zoom (PLMN + metric_rev). Bumping
-    # metric_rev on filter changes forces Scattergl to drop removed series —
-    # otherwise Plotly.react can leave ghost WebGL traces after 전체 해제.
+    # 일반 줌 동안에는 layout.uirevision을 안정적으로 유지하고 metric filter 변경 때만 metric_rev를 올린다.
+    # 그래야 Scattergl이 필터에서 제거된 series를 실제로 버린다.
+    # 그렇지 않으면 전체 해제 후에도 사라져야 할 WebGL trace가 잔상처럼 남을 수 있다.
     metric_rev = int(state.get("metric_rev") or 0)
     label_rev = int(state.get("label_rev") or 0)
     place_rev = int(state.get("place_rev") or 0)
@@ -1463,16 +1463,16 @@ def _build_graph(click_mode: str):
             f":m{metric_rev}:l{label_rev}:p{place_rev}:c{cursor_rev}"
             f":h{hi_rev}:x{x_gen}{force_bit}"
         ),
-        # Include x_gen so Plotly accepts a new time window on rebuild.
-        # 「전체」 also sets _force_ui_rev for a one-shot hard UI reset.
-        # hi_rev: click/list highlight must change uirevision or Plotly keeps
-        # the previous unselected shapes.
+        # figure 재생성 시 새 시간 범위를 받아들이도록 x_gen을 uirevision 구성에 포함한다.
+        # '전체' 동작은 한 번의 강제 UI reset을 위해 _force_ui_rev도 설정한다.
+        # click/list highlight 변경도 hi_rev를 바꿔야 Plotly가 이전 선택 shape를
+        # 그대로 남겨두지 않는다.
         uirevision=(
             f"{state.get('plmn') or 'labeling'}"
             f":m{metric_rev}:l{label_rev}:p{place_rev}:c{cursor_rev}"
             f":h{hi_rev}:x{x_gen}{force_bit}"
         ),
-        # Metrics + score + bottom Labels track (see FIGURE_* in tool.py).
+        # figure에는 metric, score, 아래쪽 전문가/모델 label track이 포함된다.
         height=FIGURE_HEIGHT,
         autosize=True,
     )
@@ -1488,20 +1488,20 @@ def _build_graph(click_mode: str):
             )
         )
     )
-    # Always lock y for mouse drag: zoom/pan are time-axis only. Vertical scale
-    # is controlled with Y+ / Y- / Y 자동 (metrics panel). Rate / score panels
-    # auto-fit the visible x-window.
+    # 마우스 drag zoom/pan은 시간축만 움직이도록 y축은 항상 잠근다. 세로 scale은
+    # Y+ / Y- / Y 자동 버튼으로만 조절하고 rate/score 패널은
+    # 현재 보이는 x 구간에 맞춰 자동으로 y축을 맞춘다.
     y_locked = True
     y_bounds = _effective_y_bounds()
     rate_bounds = _visible_rate_y_bounds()
-    # Score band is always present; bounds may be None when empty / no preds.
+    # score 패널은 항상 자리를 확보하며 score가 없으면 y 범위가 None일 수 있다.
     score_bounds = _visible_score_y_bounds() if _has_score_panel() else None
     state["y_rendered"] = y_bounds
     state["rate_y_rendered"] = rate_bounds
     state["score_y_rendered"] = score_bounds
     rate_row = _rate_axis_row()
     metric_row = _metric_axis_row()
-    # Include score in y_gen uirevision so Y 자동 / zoom refresh the score panel.
+    # Y 자동/zoom 시 score 패널도 다시 그리도록 score 범위를 y_gen revision에 포함한다.
     score_rev = f"ys:{state.get('y_gen', 0)}"
     if score_bounds is None:
         fig.update_yaxes(
@@ -1592,7 +1592,7 @@ def _build_graph(click_mode: str):
         fig.add_shape(
             **pending_anchor_shape(state["label_range_anchor"], row=lab_row)
         )
-        # No on-plot tooltip annotation — it covers the series while placing.
+        # label 배치 중에는 그래프 위 annotation tooltip을 띄우지 않는다. series를 가리기 때문이다.
     else:
         state["_pending_fill_index"] = None
 
@@ -1600,7 +1600,7 @@ def _build_graph(click_mode: str):
         item = _label_by_id(state["highlight_id"])
         if item is not None:
             before = len(fig.layout.shapes or ())
-            # Custom JS hit-tests these edges; Plotly native shape edit stays off.
+            # label edge drag는 custom JS가 직접 hit-test하므로 Plotly 기본 shape edit 기능은 끈다.
             hs, hn = label_highlight_overlays(
                 item,
                 editable=False,
@@ -1628,15 +1628,15 @@ def _build_graph(click_mode: str):
     else:
         state["highlight_shape_idxs"] = None
 
-    # Force Plotly to accept the server x window (and refreshed high-res traces)
-    # after pan/zoom. Only set range on axes; do NOT set per-axis uirevision here —
-    # that breaks subplot `matches="x"` and can leave 「전체」 stuck on the old window.
-    # layout.uirevision carries x_gen instead.
+    # pan/zoom 뒤 서버가 계산한 x축과 고해상도 trace를 Plotly가 확실히 적용하도록 한다.
+    # 여기서는 축 range만 설정하고 각 축별 uirevision은 따로 주지 않는다.
+    # 축별 uirevision을 주면 subplot의 matches='x'가 깨져 '전체'가 이전 범위에 고정될 수 있다.
+    # 대신 layout.uirevision에 x_gen을 넣어 전체 figure 수준에서 상태를 관리한다.
     fig.update_xaxes(
         range=[x0_plot, x1_plot],
         autorange=False,
-        # Custom place-time spike draws one dotted line; keep Plotly spikes off
-        # in tip modes so zoom/pan/inspect don't show a double vertical.
+        # label 배치용 custom spike가 점선을 직접 그리므로 Plotly 기본 spike는 끈다.
+        # 그렇지 않으면 zoom/pan/inspect에서 세로선이 두 개 겹쳐 보인다.
         showspikes=(
             click_mode
             not in (
@@ -1653,7 +1653,7 @@ def _build_graph(click_mode: str):
     if click_mode == "edit_range":
         fig.update_layout(hovermode=False)
 
-    # Expose edge indices + data time bounds for browser pan clamping.
+    # 브라우저 쪽 pan 제한과 label edge drag를 위해 edge index와 데이터 시간 범위를 meta에 넣는다.
     idxs = state.get("highlight_shape_idxs") if click_mode == "edit_range" else None
     meta = {
         "edit_edges": [],
@@ -1673,14 +1673,14 @@ def _build_graph(click_mode: str):
         "pan_keep_y",
         "zoom",
     ) and samples:
-        # sample_ms is heavy (~full PLMN): push once per load; clientside cache
-        # + react merge keep it across pan/zoom. score_* is smaller and must be
-        # present whenever the score panel is on — otherwise a later Plotly.react
-        # that omits them wipes layout.meta before the tip ever ingests, and the
-        # tip shows "(없음)" even on valid.
-        # edit_range always gets sample_ms so edge drag can snap to samples.
+        # sample_ms는 전체 PLMN 길이라 크므로 사업자 로드 때 한 번만 보내고 browser cache에서 재사용한다.
+        # pan/zoom 때는 react merge로 유지한다. score 배열은 더 작지만 score 패널이 켜져 있으면 반드시
+        # meta에 계속 포함해야 한다. 그렇지 않으면 이후 Plotly.react가
+        # 값을 지워 hover tip이 score를 읽기 전에 layout.meta가 비어버릴 수 있다.
+        # 그 경우 실제 VALID score가 있어도 '(없음)'으로 표시된다.
+        # range 편집 모드에서는 edge를 실제 5분 sample에 맞추기 위해 sample_ms를 항상 전달한다.
         meta["hover_cache_seq"] = int(state.get("hover_cache_seq") or 0)
-        # Clientside tip: only the real score subplot may show score text.
+        # clientside tooltip의 score 텍스트는 실제 score subplot이 있을 때만 표시한다.
         meta["score_panel"] = True
         if not state.get("_hover_arrays_pushed") or click_mode == "edit_range":
             meta["sample_ms"] = samples
@@ -1774,7 +1774,7 @@ def _place_label_click(ts, click_mode: str):
     if click_mode == "label_point":
         state["label_range_anchor"] = None
         ts = _snap_to_data_time(ts)
-        # Keep prior selection's reasons on that label; new label starts blank.
+        # 기존 label의 원인 입력은 그 label에 저장하고 새 label을 만들 때는 빈 원인으로 시작한다.
         prev = state.get("reason_bound_id") or state.get("highlight_id")
         if prev:
             _flush_reasons_to_label(
@@ -2021,7 +2021,7 @@ def _visible_y_bounds() -> tuple[float, float] | None:
     ymax = float(series.max(numeric_only=True).max())
     if not (ymin == ymin and ymax == ymax):  # NaN check
         return None
-    # Metrics are counts, so the baseline stays at zero unless data goes below it.
+    # count metric은 기본적으로 0 이상이므로 데이터가 음수가 아닌 한 y축 하단을 0에 고정한다.
     base = min(0.0, ymin)
     if ymax <= base:
         return base, base + 1.0
@@ -2108,7 +2108,7 @@ def _scale_y(factor: float) -> bool:
     if bounds is None:
         return False
     lo, hi = float(bounds[0]), float(bounds[1])
-    # Keep an already-pinned floor; on first leave from auto, snap non-neg → 0.
+    # 사용자가 고정한 y 하단값은 유지하고, 자동 모드에서 처음 수동 전환할 때 음수가 아니면 0으로 맞춘다.
     if state.get("y_min") is not None and not state.get("y_auto"):
         lo = float(state["y_min"])
     elif lo >= 0:
@@ -2138,7 +2138,7 @@ def _select_value_pos(pos: int):
         return None
     pos = max(0, min(int(pos), len(df) - 1))
     state["value_cursor_pos"] = pos
-    # Force Plotly to accept the new cursor shape (stable uirevision can skip it).
+    # 새 값 탐색 cursor shape가 반영되도록 revision을 갱신한다.
     state["cursor_rev"] = int(state.get("cursor_rev") or 0) + 1
     row = df.iloc[pos]
     panel = _hover_panel_at_row(row)
@@ -2267,7 +2267,7 @@ def _scale_x(factor: float, *, y_auto: bool = True) -> bool:
     half = width * factor / 2
     if half <= pd.Timedelta(0):
         return False
-    # Keep at least a few samples visible when zooming in.
+    # 지나치게 확대되어 sample이 1~2개만 보이지 않도록 최소 표시 point 수를 보장한다.
     tmin, tmax = data_time_bounds(state["df"])
     min_half = pd.Timedelta(minutes=15)
     if half < min_half and factor < 1:
@@ -2275,8 +2275,8 @@ def _scale_x(factor: float, *, y_auto: bool = True) -> bool:
     new_start, new_end = _clamp_zoom(mid - half, mid + half)
 
     if factor > 1:
-        # Already (near) full → snap to exact full once so the button always
-        # does something visible when the plot looks zoomed-in-ish.
+        # 이미 거의 전체 범위라면 정확한 전체 범위로 한 번 맞춰 버튼이
+        # 눌렸을 때 아무 반응이 없는 것처럼 보이지 않게 한다.
         if _same_time_window((start_ts, end_ts), (tmin, tmax)):
             exact = start_ts == tmin and end_ts == tmax and bool(
                 state.get("x_full_view", True)
@@ -2285,7 +2285,7 @@ def _scale_x(factor: float, *, y_auto: bool = True) -> bool:
                 return False
             new_start, new_end = tmin, tmax
         elif _same_time_window((new_start, new_end), (start_ts, end_ts)):
-            # Edge clamp left the span unchanged — jump to full.
+            # 데이터 경계 clamp 때문에 폭이 변하지 않았다면 전체 보기로 이동한다.
             new_start, new_end = tmin, tmax
     elif _same_time_window((new_start, new_end), (start_ts, end_ts)):
         return False
@@ -2352,7 +2352,7 @@ def _relayout_moved_non_edge(relayout) -> bool:
     idxs = state.get("highlight_shape_idxs") or {}
     edge_idxs = {i for i in (idxs.get("start"), idxs.get("end")) if i is not None}
     if "shapes" in relayout:
-        # Full replace: treat as non-edge unless we already applied an edge update.
+        # figure 전체 교체 이벤트는 바로 직전 edge 수정이 아니면 label edge drag로 해석하지 않는다.
         return True
     touched = set()
     for key in relayout:
@@ -2501,9 +2501,9 @@ def _make_axis_cmd(
     if prev is None or not _same_time_window(rendered, prev):
         if prev is not None and not _same_time_window(rendered, prev):
             state["zoom_rendered_prev"] = prev
-        # Bump so Plotly accepts the new x range on rebuild (stable layout
-        # uirevision otherwise restores the previous zoom — 「전체」 needed 2 clicks).
-        # Pan keeps x_gen stable — otherwise every rebuild snaps the camera back.
+        # figure 재생성 시 새 x축을 받아들이도록 revision을 올린다. 안정된 layout
+        # uirevision을 그대로 두면 이전 zoom을 복원해 '전체' 버튼을 두 번 눌러야 하는 문제가 생긴다.
+        # pan에서는 x_gen을 유지해야 재생성 때 카메라가 이전 위치로 튀지 않는다.
         if bump_x_gen:
             state["x_gen"] = int(state.get("x_gen") or 0) + 1
     state["zoom_rendered"] = rendered
@@ -2522,7 +2522,7 @@ def _make_axis_cmd(
             state["score_y_rendered"] = sb
             score_payload = [float(sb[0]), float(sb[1])] if sb else None
     else:
-        # Keep the pinned / currently drawn y; do not push a new y range.
+        # 현재 고정/렌더링된 y축을 유지하고 새 y 범위를 브라우저에 밀어넣지 않는다.
         yb = None
         if state.get("y_min") is not None and state.get("y_max") is not None:
             yb = (float(state["y_min"]), float(state["y_max"]))
@@ -2533,7 +2533,7 @@ def _make_axis_cmd(
     state["axis_cmd_seq"] = int(state.get("axis_cmd_seq") or 0) + 1
     return {
         "seq": state["axis_cmd_seq"],
-        # Drag zoom/pan already set x in the browser; re-applying x fights the drag.
+        # drag zoom/pan은 브라우저가 이미 x축을 바꿨으므로 서버가 x축을 다시 적용하면 사용자 gesture와 충돌한다.
         "x": [str(to_plot_time(x0)), str(to_plot_time(x1))] if apply_x else None,
         "y": y_payload,
         "y_rate": rate_payload,
@@ -2586,7 +2586,7 @@ def _apply_axes_from_relayout(
     try:
         xwin = _relayout_x_window(relayout)
         if xwin == "autorange":
-            # Double-click zoom-out: keep server in sync with the browser full view.
+            # Plotly 더블클릭으로 전체 보기로 돌아간 경우 서버 상태도 브라우저 전체 범위와 맞춘다.
             state["zoom_start"], state["zoom_end"] = data_time_bounds(state["df"])
             state["x_full_view"] = True
             if y_auto:
@@ -2600,9 +2600,9 @@ def _apply_axes_from_relayout(
 
     if start_ts is not None and end_ts is not None and end_ts > start_ts:
         incoming = _clamp_zoom(start_ts, end_ts)
-        # Ignore echoes of the window we just drew. A delayed replay of the
-        # *previous* window is only ignored while zoom_guard is active — after
-        # that, treat it as an intentional revisit (drag back) so Y 자동 runs.
+        # 서버가 방금 그린 x 범위가 relayout echo로 다시 들어오면 중복 처리하지 않는다.
+        # 이전 범위가 늦게 재생되는 경우 zoom_guard 동안만 무시하고, guard가 끝난 뒤에는
+        # 사용자가 실제로 이전 구간으로 drag한 것으로 보고 Y 자동도 다시 계산한다.
         if _same_time_window(incoming, state.get("zoom_rendered")):
             if y_auto:
                 old_y = state.get("y_rendered")
@@ -2617,12 +2617,12 @@ def _apply_axes_from_relayout(
                 return True
             return False
         if _same_time_window(incoming, state.get("zoom_rendered_prev")):
-            # Stale echo of the previous window (common after button zoom).
-            # After the guard expires, treat the same range as a real revisit so
-            # Y 자동 is applied again.
+            # 버튼 zoom 직후 자주 들어오는 이전 x 범위의 지연 echo다.
+            # guard가 끝난 뒤 같은 범위가 다시 오면 실제 사용자 이동으로 처리해
+            # Y 자동 fitting을 다시 적용한다.
             if time.monotonic() < float(state.get("zoom_guard_until") or 0):
                 return False
-            # Past guard: intentional revisit of a prior window.
+            # guard 이후의 이전 범위 요청은 사용자가 의도적으로 다시 이동한 것으로 본다.
         prev0, prev1 = state.get("zoom_start"), state.get("zoom_end")
         prev_w = None
         if prev0 is not None and prev1 is not None and prev1 > prev0:
@@ -2639,7 +2639,7 @@ def _apply_axes_from_relayout(
                 state["y_min"], state["y_max"] = float(pinned[0]), float(pinned[1])
                 state["y_auto"] = False
         _note_x_window_changed()
-        # Drag / box zoom-in that leaves the selection off-screen → clear it.
+        # drag/box zoom으로 선택한 label이 화면 밖으로 나가면 highlight 선택을 해제한다.
         new_w = (incoming[1] - incoming[0]).total_seconds()
         if prev_w is not None and new_w < prev_w * 0.98:
             _clear_highlight_if_offscreen()
@@ -2701,7 +2701,7 @@ def _sync_zoom_from_view(view_range) -> None:
                 return
             if _same_time_window(incoming, state.get("zoom_rendered_prev")):
                 return
-            # Refuse stale full-window echoes while we believe we are zoomed.
+            # 서버가 확대 상태라고 판단하는 동안 늦게 도착한 전체 범위 relayout echo는 무시한다.
             if not state.get("x_full_view", True) and _same_time_window(
                 incoming, data_time_bounds(state["df"])
             ):
@@ -2777,7 +2777,7 @@ def _adopt_browser_x_if_tighter(view_range) -> bool:
         server = (s0, s1)
     browser_w = (browser[1] - browser[0]).total_seconds()
     server_w = max((server[1] - server[0]).total_seconds(), 1e-6)
-    # Browser shows a meaningfully tighter window → trust it.
+    # 브라우저가 서버보다 명확히 더 좁은 구간을 보여주면 실제 사용자 zoom으로 보고 브라우저 상태를 신뢰한다.
     if browser_w >= server_w * 0.95:
         return False
     if _same_time_window(browser, server):
@@ -2796,7 +2796,7 @@ def _do_load(plmn: str, click_mode: str):
     rank = int(rank_df.loc[rank_df["PLMN"] == plmn, "rank"].iloc[0])
     df = load_plmn(plmn)
     doc = load_labels(plmn, rank=rank)
-    # Resolve prediction source after plmn is known (options depend on files).
+    # 사업자가 정해져야 해당 PLMN의 prediction 파일 목록을 알 수 있으므로 그 뒤 source를 선택한다.
     state["plmn"] = plmn
     src_opts = list_prediction_sources(plmn)
     pred_source = _default_pred_source(src_opts)
@@ -2837,7 +2837,7 @@ def _do_load(plmn: str, click_mode: str):
         highlight_shape_idxs=None,
         value_cursor_pos=None,
         hover_pos=None,
-        # Epoch-ms of KST-naive plot times (matches Plotly axis / to_plot_time).
+        # Plotly 축과 동일한 KST-naive 시간을 epoch millisecond로 저장한다.
         sample_ms=_sample_plot_ms(df),
         _score_hover=None,
         _hover_arrays_pushed=False,
@@ -2860,7 +2860,7 @@ def _do_load(plmn: str, click_mode: str):
     )
 
 
-# Prefetch rank #1 so the first paint already shows data (no empty "선택하세요" flash).
+# 첫 화면부터 데이터가 보이도록 1순위 사업자를 미리 로드한다. 초기 빈 화면 깜빡임을 줄이기 위한 처리다.
 _START_PLMN = plmn_ids[0] if plmn_ids else None
 _START_LABEL_OPTS: list = []
 _START_LABEL_VALUE = None
@@ -3397,7 +3397,7 @@ app.layout = html.Div(
                 "그래프에 커서를 올리면 이 시점의 특성값이 내림차순으로 표시됩니다."
             ),
             style={
-                # Timestamp header + 2 metric grid rows (with padding).
+                # hover 패널은 timestamp header와 두 줄의 metric grid로 구성한다.
                 "height": "108px",
                 "overflow": "hidden",
                 "border": "1px solid #ddd",
@@ -3429,7 +3429,7 @@ app.layout = html.Div(
         dcc.Store(id="axis-cmd"),
         dcc.Store(id="axis-cmd-ack"),
         dcc.Store(id="rebuild-trigger"),
-        # Pan data refresh without touching graph.figure (avoids camera snap).
+        # pan 중에는 graph.figure 자체를 교체하지 않고 데이터만 갱신해 카메라가 튀는 현상을 막는다.
         dcc.Store(id="pan-plot-apply"),
         dcc.Store(id="range-label-done"),
     ],
@@ -3446,8 +3446,8 @@ app.layout = html.Div(
 def _sync_model_pred_source(plmn):
     opts = _model_pred_source_options()
     preferred = _default_pred_source(opts)
-    # Keep the already-loaded source on refresh so we don't cascade into
-    # _switch_model_pred_source → metric-filter clear → blank graph.
+    # refresh 때 현재 prediction source를 유지해 불필요한 source 변경 callback 연쇄가
+    # metric filter 초기화와 빈 그래프로 이어지지 않게 한다.
     cur = state.get("pred_source")
     if cur and any(o.get("value") == cur for o in opts):
         return opts, cur
@@ -3477,7 +3477,7 @@ def _switch_model_pred_source(source, click_mode):
     if not plmn:
         return (no_update,) * 13
     source = source or None
-    # Skip no-op reloads (e.g. startup sync rewriting the same dropdown value).
+    # startup sync처럼 같은 dropdown 값을 다시 쓰는 무의미한 reload는 건너뛴다.
     if (
         source == state.get("pred_source")
         and state.get("predictions") is not None
@@ -3533,7 +3533,7 @@ def _switch_model_pred_source(source, click_mode):
     if split_val not in split_vals:
         split_val = "valid"
     state["metrics_eval_split"] = split_val
-    # Grey Metrics split when <2 options.
+    # 선택 가능한 metric split이 2개 미만이면 split 선택 UI를 비활성화된 회색 상태로 표시한다.
     split_style = (
         {"fontSize": "13px", "opacity": "0.35", "pointerEvents": "none"}
         if len(split_opts) < 2
@@ -3614,7 +3614,7 @@ def _switch_threshold_mode(mode, click_mode):
         state["predictions"] = apply_threshold_mode(
             df, preds, threshold_mode=mode
         )
-        # Recompute live metrics for current metrics_split (thr switch).
+        # threshold mode가 바뀌면 현재 metrics_split에 대한 metric을 다시 계산한다.
         human = ((state.get("doc") or {}).get("labels")) or []
         state["predictions"] = enrich_predictions_for_ui(
             df,
@@ -3805,14 +3805,14 @@ def _pick_model_pred_on_graph(shape_click, click_data, click_mode):
     else:
         return no_update
 
-    # Human track clicks are owned by `_main_body`. Model-track clicks select preds.
+    # 전문가 label track click은 _main_body가 처리하고 모델 track click은 model prediction 선택에 사용한다.
     track = None
     if prop == "shape-click-event.data" and shape_click:
         track = shape_click.get("track")
     if track == "human":
         return no_update
     if track != "model":
-        # Ambiguous / metrics click: human label wins if present.
+        # 전문가/모델이 겹치거나 metric 영역 click이 애매하면 전문가 label 선택을 우선한다.
         if _label_at_time(ts) is not None:
             return no_update
 
@@ -3822,7 +3822,7 @@ def _pick_model_pred_on_graph(shape_click, click_data, click_mode):
     hit_id = hit.get("id")
     if not hit_id:
         return no_update
-    # Toggle off if the same segment is clicked again.
+    # 이미 선택한 model segment를 다시 누르면 선택을 해제한다.
     if state.get("selected_pred_id") is not None and str(state["selected_pred_id"]) == str(
         hit_id
     ):
@@ -3922,8 +3922,8 @@ def _main(
     if deselecting:
         _store_draft_reasons([], [], "")
     elif tid != "label-list":
-        # label-list switches are owned by _sync_label_reasons (flush + load).
-        # Keep draft in sync with UI so newly placed labels pick up current reasons.
+        # label 목록 변경 시 원인 입력 저장/불러오기는 _sync_label_reasons가 전담한다.
+        # 새 label이 현재 입력한 원인 값을 이어받도록 draft와 UI 상태를 동기화한다.
         codes = list(reason_codes or [])
         mets = list(fail_metrics or []) if "fail_surge" in codes else []
         _store_draft_reasons(codes, mets, reason_note)
@@ -3949,9 +3949,9 @@ def _main(
     if result is None:
         return (no_update,) * 10
     out = list(result) if len(result) == 9 else list(result) + [no_update, no_update]
-    # Only refresh metric-filter option labels on explicit PLMN loads.
-    # Zoom/pan/overlay rebuilds must not rewrite options — that races the
-    # checklist value and can clear all traces.
+    # metric filter option 목록은 명시적인 PLMN 로드 때만 다시 만든다.
+    # zoom/pan/overlay 재생성 때 options까지 다시 쓰면 checklist value와 callback race가 생겨
+    # 모든 trace가 사라질 수 있다.
     prop = ""
     if callback_context.triggered:
         prop = callback_context.triggered[0].get("prop_id") or ""
@@ -3997,7 +3997,7 @@ def _sync_click_mode_on_nav(_n_zoom, _list_value, _n_reset, selected_label, clic
     """선택 구간 줌 → 값 탐색; 「전체」 → 줌. 구간 편집 모드는 유지."""
     tid = getattr(callback_context, "triggered_id", None)
     if tid == "btn-reset-zoom":
-        # Avoid a redundant click-mode rewrite that can race with axis-cmd.
+        # axis-cmd와 충돌할 수 있는 불필요한 click-mode 재설정은 하지 않는다.
         if (click_mode or "zoom") == "zoom":
             return no_update
         return "zoom"
@@ -4008,10 +4008,10 @@ def _sync_click_mode_on_nav(_n_zoom, _list_value, _n_reset, selected_label, clic
     if tid == "label-list":
         if not selected_label:
             return no_update
-        # Stay in 구간 편집 when picking another label from the list.
+        # 구간 편집 모드에서 다른 label을 선택해도 편집 모드를 유지한다.
         if (click_mode or "") == "edit_range":
             return no_update
-        # Same rule as main: only when already zoomed (not full view).
+        # 메인 동작과 동일하게 전체 보기가 아니라 이미 확대된 상태에서만 자동 zoom한다.
         if _is_full_x_view():
             return no_update
         if _label_by_id(selected_label) is None:
@@ -4179,8 +4179,8 @@ def _sync_label_reasons(
     list_opts = no_update
 
     if tid in ("label-list", "dd-plmn", None):
-        # Before switching away, flush typed note/checklist to the previously
-        # bound label (note only lives in the textarea until then).
+        # 다른 label로 이동하기 전에 현재 note/checklist 입력을 이전 label에 저장한다.
+        # note는 저장 전까지 textarea에만 존재하므로 반드시 먼저 flush해야 한다.
         prev = state.get("reason_bound_id")
         if tid == "label-list" and prev and str(prev) != str(selected_label or ""):
             if _flush_reasons_to_label(
@@ -4207,7 +4207,7 @@ def _sync_label_reasons(
                 "",
                 list_opts,
             )
-        # Deselect / no label: clear reason UI so the next placement starts blank.
+        # 선택된 label이 없으면 원인 UI도 비워 다음 새 label이 빈 상태에서 시작하게 한다.
         state["reason_bound_id"] = None
         _store_draft_reasons([], [], "")
         return (
@@ -4274,11 +4274,11 @@ def _main_body(
 ):
     prop = callback_context.triggered[0]["prop_id"] if callback_context.triggered else ""
     click_mode = click_mode or "zoom"
-    # Human + model tracks are always drawn (separate subplot rows).
+    # 전문가 label과 모델 prediction track은 항상 서로 다른 subplot row에 그린다.
     state["show_anomalies"] = True
     state["show_model_preds"] = True
 
-    # ----- load on startup / dropdown change / prev / next -----
+    # ----- 초기 실행 / dropdown 변경 / 이전 / 다음 버튼에서 사업자 로드 -----
     triggered_id = getattr(callback_context, "triggered_id", None)
     boot = triggered_id is None or (not prop) or prop == "."
     target = plmn
@@ -4313,12 +4313,12 @@ def _main_body(
             )
         already = target == state.get("plmn") and state.get("df") is not None
         if already and prop == "dd-plmn.value":
-            # Echo after Prev/Next wrote the same value back.
+            # 이전/다음 버튼이 dropdown 값을 바꾼 뒤 같은 값이 다시 callback으로 들어온 echo는 무시한다.
             return (no_update,) * 7
         if already:
-            # Startup prefetch already loaded rank #1 — keep the prebuilt figure.
-            # Do NOT rewrite metric-filter options/value here: Dash may briefly
-            # clear the checklist, which empties visible_metrics and blanks the plot.
+            # startup prefetch에서 이미 1순위 사업자를 읽었으면 만들어둔 figure를 그대로 재사용한다.
+            # 여기서 metric filter options/value를 다시 쓰지 않는다. Dash가 잠깐
+            # checklist를 비우면 visible_metrics도 비어 그래프 전체가 사라질 수 있다.
             opts = _label_options()
             return (
                 no_update,
@@ -4344,22 +4344,22 @@ def _main_body(
             no_update,
         )
 
-    # Drag zoom/pan update state in `_drag_axis_nav`. Do not replay the
-    # browser view-range Store on every main event — it often lags behind
-    # list/button zooms and resets server zoom to full while the plot still
-    # shows the zoomed window (zoom-out no-ops; zoom-in then jumps wide).
+    # drag zoom/pan의 상태 갱신은 _drag_axis_nav가 담당한다. 메인 callback에서
+    # 매 이벤트마다 browser view-range Store를 다시 적용하지 않는다. 이 Store는
+    # list/button zoom보다 늦게 갱신될 수 있어 서버 상태를 전체 범위로 되돌리는
+    # 문제가 생길 수 있다.
 
-    # ----- click mode -----
+    # ----- 현재 click mode별 동작 분기 -----
     if prop == "click-mode.value":
         state["label_range_anchor"] = None
         state.pop("place_click_guard_until", None)
         if click_mode != "inspect":
             if state.get("value_cursor_pos") is not None:
                 state["value_cursor_pos"] = None
-                # Bump so Plotly drops the royalblue cursor shape (uirevision).
+                # 값 탐색 cursor shape가 사라지도록 revision을 갱신한다.
                 state["cursor_rev"] = int(state.get("cursor_rev") or 0) + 1
         else:
-            # Fresh inspect session: don't let a prior click debounce swallow the first pick.
+            # 새 값 탐색 세션의 첫 click이 이전 debounce에 막히지 않도록 click guard를 초기화한다.
             state["_last_click"] = (None, 0.0)
         keep_highlight = state.pop("_keep_highlight_id", False)
         if selected_label and not keep_highlight:
@@ -4511,7 +4511,7 @@ def _main_body(
 
     if prop == "label-list.value":
         if not selected_label:
-            # Clear highlight only. Do NOT reset zoom — keep the current window.
+            # highlight만 지우고 zoom은 그대로 유지한다.
             state["highlight_id"] = None
             state["label_range_anchor"] = None
             state.pop("_offscreen_cleared", None)
@@ -4541,9 +4541,9 @@ def _main_body(
                 no_update,
                 no_update,
             )
-        # Criterion is view state only (not whether a label is selected):
-        # full → select only; already zoomed → select + zoom to the new item.
-        # Exception: stay in 구간 편집 (do not jump to 값 탐색).
+        # 자동 zoom 여부는 label 선택 여부가 아니라 현재 화면이 전체/확대 상태인지로 판단한다.
+        # 전체 보기에서는 선택만 하고, 이미 확대되어 있으면 새 항목 선택과 함께 해당 구간으로 zoom한다.
+        # 단 구간 편집 중에는 값 탐색 모드로 강제로 바꾸지 않는다.
         do_zoom = not _is_full_x_view() and click_mode != "edit_range"
         if do_zoom:
             _zoom_to_label_item(item)
@@ -4639,7 +4639,7 @@ def _main_body(
         )
 
     if prop == "shape-click-event.data" and shape_click and shape_click.get("x") is not None:
-        # Click on plot area (shapes themselves are not clickable).
+        # Plotly shape 자체는 click event를 주지 않으므로 실제 plot 영역 click으로 label hit를 판별한다.
         if state.get("df") is None or state.get("doc") is None:
             return (no_update,) * 7
         try:
@@ -4648,7 +4648,7 @@ def _main_body(
             return (no_update,) * 7
         last_ts, last_at = state.get("_last_click", (None, 0.0))
         now = time.monotonic()
-        # Drop echo of the same sample (shape-click + clickData) only.
+        # shape-click과 clickData가 같은 sample에서 중복 발생한 경우에만 두 번째 echo를 버린다.
         if (
             last_ts is not None
             and abs((ts - last_ts).total_seconds()) < 0.1
@@ -4657,15 +4657,15 @@ def _main_body(
             return (no_update,) * 7
         state["_last_click"] = (ts, now)
 
-        # Range/point placement.
+        # range/point 전문가 label 배치 처리.
         if click_mode in ("label_range", "label_point"):
             if _place_click_guarded():
                 return (no_update,) * 7
             placed = _place_label_click(ts, click_mode)
             return placed if placed is not None else (no_update,) * 7
 
-        # Prefer human anomaly selection; model-track clicks leave preds to
-        # `_pick_model_pred_on_graph`. Wider tolerance on the thin label strips.
+        # 전문가 anomaly 선택을 우선하고 모델 track click은
+        # _pick_model_pred_on_graph가 처리한다. 얇은 label strip은 hit tolerance를 조금 넓게 잡는다.
         track = shape_click.get("track")
         on_label_track = track in ("human", "model") or bool(
             shape_click.get("label_track")
@@ -4698,9 +4698,9 @@ def _main_body(
         return (no_update,) * 7
 
     if prop == "graph.relayoutData":
-        # Drag zoom/pan: Y 자동 + high-res rebuild go through `_drag_axis_nav`
-        # (axis-cmd), same path as the toolbar buttons — avoids a second full
-        # figure rebuild fighting the live drag.
+        # drag zoom/pan은 Y 자동 fitting과 고해상도 재생성을 _drag_axis_nav 경로로 처리한다.
+        # toolbar 버튼과 같은 axis-cmd 경로를 써서 별도의 전체 figure 재생성이
+        # 사용자 drag gesture와 충돌하지 않게 한다.
         return (no_update,) * 7
 
     if prop == "graph.clickData" and click_data and click_data.get("points"):
@@ -4710,7 +4710,7 @@ def _main_body(
         ts = parse_time(x)
         last_ts, last_at = state.get("_last_click", (None, 0.0))
         now = time.monotonic()
-        # Drop echo of the same sample (shape-click + clickData) only.
+        # shape-click과 clickData가 같은 sample에서 중복 발생한 경우에만 두 번째 echo를 버린다.
         if (
             last_ts is not None
             and abs((ts - last_ts).total_seconds()) < 0.1
@@ -4719,7 +4719,7 @@ def _main_body(
             return (no_update,) * 7
         state["_last_click"] = (ts, now)
 
-        # Prefer anomaly selection even in 값 탐색; empty/trace clicks keep cursor.
+        # 값 탐색 모드에서도 anomaly 구간을 누르면 label 선택을 우선하고 빈 공간/trace click은 cursor 이동으로 처리한다.
         hit = _label_at_time(ts)
         if hit is not None and click_mode not in ("label_range", "label_point"):
             return _select_or_toggle_label_hit(hit, click_mode)
@@ -4740,7 +4740,7 @@ def _main_body(
                 no_update,
             )
 
-        # label_range / label_point: clickData on traces (exact Plotly x).
+        # label_range/label_point 모드에서는 trace clickData의 정확한 Plotly x 시간을 사용한다.
         if click_mode in ("label_range", "label_point"):
             if _place_click_guarded():
                 return (no_update,) * 7
@@ -4781,9 +4781,9 @@ def _metric_filter_changed(selected, _n_all, _n_none, click_mode):
         return [{"label": display_metric(m), "value": m} for m in ordered]
 
     if tid == "btn-metrics-all":
-        # Full universe — not just non-zero-in-view (that looked like a random subset).
+        # 현재 화면에서 값이 0이 아닌 항목만이 아니라 전체 metric universe를 기준으로 checklist를 구성한다.
         ordered = _metrics_by_view_sum()
-        # Guarantee every universe item is present even if ranking omitted one.
+        # ranking 계산에서 빠진 항목이 있어도 universe의 모든 metric을 options에 반드시 포함한다.
         missing = [m for m in universe if m not in ordered]
         ordered = ordered + missing
         state["visible_metrics"] = list(universe)
@@ -4797,7 +4797,7 @@ def _metric_filter_changed(selected, _n_all, _n_none, click_mode):
             _refresh_hover_panel(),
         )
     if tid == "btn-metrics-none":
-        # Keep the pre-clear Y scale so the empty plot doesn't jump.
+        # 전체 metric을 해제해 빈 그래프가 되어도 기존 Y scale을 유지해 화면이 튀지 않게 한다.
         _pin_y_before_x_change()
         state["y_gen"] = int(state.get("y_gen") or 0) + 1
         state["visible_metrics"] = []
@@ -4809,8 +4809,8 @@ def _metric_filter_changed(selected, _n_all, _n_none, click_mode):
             "metric 전체 해제 (Y축 유지)",
             _refresh_hover_panel(),
         )
-    # When options/value are rewritten by another callback, Dash may emit an
-    # intermediate empty checklist. Ignore that — full clear is btn-metrics-none.
+    # 다른 callback이 checklist options/value를 다시 쓰는 순간 Dash가 중간 상태로
+    # 빈 value를 잠깐 보낼 수 있으므로 무시한다. 실제 전체 해제는 전용 버튼으로만 처리한다.
     if tid == "metric-filter" and not selected:
         if state.get("visible_metrics"):
             return no_update, no_update, no_update, no_update, no_update
@@ -4943,7 +4943,7 @@ def _zoom_x_hard(gesture, click_mode):
     action = gesture.get("action")
     mode = click_mode or "zoom"
     pan_keep_y = mode == "pan_keep_y"
-    # Always sync from the live snap first (drag-zoom after 「전체」).
+    # '전체' 이후 drag-zoom처럼 서버 상태가 늦을 수 있으므로 먼저 브라우저의 현재 live view를 동기화한다.
     live = gesture.get("view")
     if live:
         _force_adopt_browser_x(live)
@@ -5008,20 +5008,20 @@ def _drag_axis_nav(relayout, click_mode):
     if not has_x:
         return no_update
     click_mode = click_mode or "zoom"
-    # 이동(Y고정) only: keep y. Zoom / 이동(Y자동) / others: Y 자동.
+    # 이동(Y고정)만 현재 y축을 유지하고 zoom/이동(Y자동) 등은 Y 자동 fitting을 사용한다.
     y_auto = click_mode != "pan_keep_y"
     is_pan = click_mode in ("pan", "pan_keep_y")
-    # After select/zoom-to-label, respect zoom_guard so delayed plotly_relayout
-    # echoes cannot overwrite the window / clear the red highlight. Outside that
-    # window keep ignore_guard so toolbar-zoom guards do not block real drags.
+    # label 선택/자동 zoom 직후에는 zoom_guard를 적용해 늦게 도착한 plotly_relayout이
+    # 새 x축이나 빨간 highlight를 덮어쓰지 못하게 한다.
+    # guard 시간이 지나면 실제 drag는 정상적으로 반영되도록 한다.
     protect = time.monotonic() < float(state.get("select_guard_until") or 0)
     if not _apply_axes_from_relayout(
         relayout, ignore_guard=not protect, y_auto=y_auto
     ):
         return no_update
-    # Pan: never live-patch axes (fights the gesture). Keep uirevision stable
-    # (bump_x_gen=False) so the deferred data rebuild does not reset the camera.
-    # Idle debounce so continuous drags finish before high-res refresh.
+    # pan 중에는 축을 실시간으로 다시 patch하지 않는다. 사용자 gesture와 충돌하기 때문이다.
+    # x_gen도 유지해 지연된 데이터 재생성이 현재 카메라 위치를 초기화하지 않게 한다.
+    # 연속 drag가 끝난 뒤에만 고해상도 데이터를 갱신하도록 짧은 idle debounce를 둔다.
     return _make_axis_cmd(
         "",
         apply_x=False,
@@ -5045,19 +5045,19 @@ def _rebuild_after_axis(trigger, click_mode):
     if not trigger or state["df"] is None:
         return no_update, no_update, no_update
     _arm_zoom_guard(3.0)
-    # Do not rewrite metric-filter options on zoom/pan rebuild. Updating options
-    # after a narrow window can drop zero-valued series from the checklist and
-    # blank the graph (especially with 사람+모델 overlays).
-    # Sync dropdown when zoom-in cleared an off-screen selection — but only if
-    # the user has not already re-selected something before this deferred rebuild.
+    # zoom/pan 재생성에서는 metric filter options를 다시 쓰지 않는다.
+    # 좁은 구간 기준으로 options를 다시 만들면 값이 0인 series가 checklist에서 빠져
+    # 그래프가 비어버릴 수 있다.
+    # zoom으로 화면 밖 selection이 해제된 경우 dropdown도 맞추되,
+    # 지연 재생성 전에 사용자가 다른 항목을 다시 선택했다면 그 선택을 덮어쓰지 않는다.
     cleared = state.pop("_offscreen_cleared", False)
     list_val = (
         None if (cleared and state.get("highlight_id") is None) else no_update
     )
     mode = click_mode or "zoom"
-    # Pan keeps layout.uirevision stable (bump_x_gen=False in axis-cmd) so
-    # Dash/Plotly.react refreshes high-res traces without resetting the camera.
-    # Clientside must not re-apply meta.zoom_x / Plots.resize in pan mode.
+    # pan에서는 layout.uirevision을 안정적으로 유지해
+    # 고해상도 trace를 갱신해도 카메라가 초기화되지 않게 한다.
+    # pan 모드에서는 clientside가 meta.zoom_x나 Plots.resize를 다시 적용하면 안 된다.
     return _build_graph(mode), no_update, list_val
 
 
@@ -5394,9 +5394,9 @@ app.clientside_callback(
 )
 
 
-# The mode radio keeps focus after being clicked, so the browser would move the
-# radio selection on arrow keys. Claiming the event during the capture phase and
-# dropping focus keeps the arrows on the value cursor.
+# mode radio가 focus를 가진 상태에서 방향키를 누르면 브라우저가 radio 선택을 바꿀 수 있다.
+# capture 단계에서 키 이벤트를 가로채고 focus를 해제해
+# 방향키가 값 탐색 cursor 이동에만 사용되도록 한다.
 app.clientside_callback(
     """
     function(mode) {
@@ -5593,11 +5593,11 @@ app.clientside_callback(
 )
 
 
-# A figure drawn before its container settles renders the WebGL traces at the
-# stale width while the SVG label overlays use the final geometry, so ranges look
-# shifted until the first zoom. Re-measuring right after each update avoids that.
-# Server-driven redraws emit no relayout event, so the stored view is refreshed
-# here as well; otherwise the next action would replay a stale range.
+# container 크기가 안정되기 전에 figure가 그려지면 WebGL trace는 이전 폭을 기준으로 렌더링되고
+# SVG label overlay는 최종 폭을 써서 구간이 어긋나 보일 수 있다.
+# figure update 직후 크기를 다시 측정하면 첫 zoom 전부터 정렬이 맞는다.
+# 서버가 직접 figure를 다시 그리면 relayout 이벤트가 발생하지 않으므로 저장된 view도
+# 여기서 함께 갱신해야 다음 동작이 오래된 x 범위를 재적용하지 않는다.
 app.clientside_callback(
     """
     function(figure) {
