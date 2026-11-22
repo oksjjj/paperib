@@ -13,6 +13,13 @@ import pandas as pd
 from sklearn.metrics import silhouette_score
 from sklearn.preprocessing import RobustScaler
 
+def slot_label(slot: int) -> str:
+    """0~287의 5분 slot 번호를 HH:MM 문자열로 변환한다."""
+    hour = int(slot) // 12
+    minute = (int(slot) % 12) * 5
+    return f"{hour:02d}:{minute:02d}"
+
+
 def robust_mad(x: np.ndarray, axis: int = 0) -> np.ndarray:
     med = np.median(x, axis=axis)
     return np.median(np.abs(x - np.expand_dims(med, axis=axis)), axis=axis)
@@ -187,7 +194,7 @@ def optimal_contiguous_partition(
 
 def fit_context_segmentation(
     slot_info: dict[str, Any],
-    cfg: Config,
+    cfg: Any,
 ) -> dict[str, Any]:
     """TRAIN slot profile만 사용해 K개의 연속 temporal context를 찾는다."""
     x = np.asarray(slot_info["profiles_scaled"], dtype=np.float64)
