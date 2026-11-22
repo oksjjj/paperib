@@ -1,5 +1,8 @@
 # ContextAE: 연속 시간구간 기반 K-context AutoEncoder
 
+> 실제 구현 위치: `models/contextae/`  
+> `ContextAE/run_plmn.py`는 이전 실행 경로를 위한 호환 wrapper입니다.
+
 이 실험은 기존 HourAE의 **고정 24개 시간대 분할**을
 TRAIN 데이터에서 자동으로 찾은 **K개의 연속 시간구간**으로 교체합니다.
 
@@ -73,7 +76,7 @@ TRAIN-only 기준으로 최고 silhouette의 K를 선택합니다.
 
 K를 직접 고정할 수도 있습니다.
 
-    ../.venv/bin/python run_plmn.py --plmn P0480 --k 6
+    .venv/bin/python -m models.contextae.run_plmn --plmn P0480 --k 6
 
 이 경우에도 해당 K 안에서 시간 경계는 DP로 자동 결정됩니다.
 
@@ -155,7 +158,7 @@ VALID/TEST point는 자신의 context에 해당하는 Final RobustScaler의
 repository root:
 
     cd ContextAE
-    ../.venv/bin/python run_plmn.py --plmn P0480
+    .venv/bin/python -m models.contextae.run_plmn --plmn P0480
 
 기본 실행은 두 모델을 모두 새로 학습합니다.
 
@@ -206,7 +209,7 @@ adaptive-K minus hour-24 차이가 함께 저장됩니다.
 
 24시간 baseline 재학습을 생략하고 adaptive context만 실행하려면:
 
-    ../.venv/bin/python run_plmn.py --plmn P0480 --skip_hour24_compare
+    .venv/bin/python -m models.contextae.run_plmn --plmn P0480 --skip_hour24_compare
 
 ## Profile ablation
 
@@ -233,4 +236,4 @@ HourAE와의 비교를 위해 다음은 그대로 유지합니다.
 
 방법과 threshold를 validation에서 고정한 뒤에만:
 
-    ../.venv/bin/python run_plmn.py --plmn P0480 --eval_test
+    .venv/bin/python -m models.contextae.run_plmn --plmn P0480 --eval_test
