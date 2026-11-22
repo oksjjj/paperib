@@ -38,6 +38,7 @@ from core.data import (  # noqa: E402
     RANK_CACHE_PATH,
     build_plmn_ranking,
     clear_plmn_cache,
+    data_signature,
     data_signature_text,
     save_ranking_cache,
 )
@@ -49,12 +50,12 @@ def _read_plmn_list(path: str | Path) -> list[str]:
 
 
 def _prune_caches(keep: set[str]) -> int:
-    """keep 목록에 없는 사업자의 ui/cache/*.pkl을 삭제하고 삭제 개수를 반환한다."""
+    """keep 목록에 없는 사업자의 공통 PLMN cache를 삭제하고 삭제 개수를 반환한다."""
     if not CACHE_DIR.is_dir():
         return 0
     removed = 0
     for name in os.listdir(CACHE_DIR):
-        if not name.endswith(".pkl"):
+        if not name.endswith(".pkl") or "_score_" in name:
             continue
         plmn = name[:-4]
         if plmn in keep:
@@ -76,7 +77,7 @@ def _build_all_caches(
     """
     LABEL_DIR.mkdir(parents=True, exist_ok=True)
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    signature = data_signature_text(DATA_DIR)
+    signature = data_signature(DATA_DIR)
 
     csv_files = sorted(f for f in os.listdir(DATA_DIR) if f.endswith(".csv"))
     if not csv_files:
@@ -112,7 +113,7 @@ def _build_all_caches(
         .reset_index(drop=True)
     )
     rank_df.insert(0, "rank", rank_df.index + 1)
-    save_ranking_cache(rank_df, signature)
+    save_ranking_cache(rank_df, data_signature_text(DATA_DIR))
 
     write_plmns = sorted(parts.keys())
     print(f"writing {len(write_plmns)} pickle caches (signature={signature})...")
