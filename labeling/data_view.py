@@ -4,7 +4,7 @@
 데이터 조회에 필요한 이름만 한곳에 모아 다시 export한다.
 """
 
-from tool import (
+from labeling.tool import (
     M971_COL,
     PAPER_PLMNS,
     chrono_split_bounds,
