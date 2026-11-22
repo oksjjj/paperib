@@ -14,7 +14,7 @@ from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
 from core.data import load_plmn
-from core.features import is_rate_metric, metric_columns
+from core.features import metric_columns
 from models.hourae.model import PointAutoEncoder
 
 @dataclass
@@ -78,7 +78,7 @@ def split_indices(
 
 
 def feature_columns(df: pd.DataFrame) -> list[str]:
-    return [c for c in metric_columns(df) if not is_rate_metric(c)]
+    return metric_columns(df)
 
 
 def prepare_unlabeled_plmn(plmn: str, tz_name: str) -> dict[str, Any]:

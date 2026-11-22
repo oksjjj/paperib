@@ -36,15 +36,6 @@ CORE_FEATURES: tuple[str, ...] = (
 )
 CORE_FEATURE_SET: frozenset[str] = frozenset(CORE_FEATURES)
 
-# UI에서만 사용하는 파생 rate 이름. 논문 모델 입력에서는 제외한다.
-RATE_FEATURES: frozenset[str] = frozenset({"S_RATE", "A_RATE"})
-
-
-def is_rate_metric(metric: str) -> bool:
-    """주어진 이름이 UI용 파생 rate인지 확인한다."""
-    return str(metric) in RATE_FEATURES
-
-
 def metric_columns(df: pd.DataFrame) -> list[str]:
     """DataFrame에 실제로 존재하는 11개 core feature를 고정 순서대로 반환한다."""
     present = set(df.columns)
@@ -53,4 +44,4 @@ def metric_columns(df: pd.DataFrame) -> list[str]:
 
 def feature_columns(df: pd.DataFrame) -> list[str]:
     """모델 학습에 사용할 raw core counter만 반환한다."""
-    return [c for c in metric_columns(df) if not is_rate_metric(c)]
+    return metric_columns(df)

@@ -241,75 +241,22 @@ def display_plmn(plmn: str) -> str:
     return f"{plmn} ({short})" if short else plmn
 
 
-M658_COL = "M658"
-M696_COL = "M696"
 M971_COL = "M971"
-S_RATE_KEY = "S_RATE"
-A_RATE_KEY = "A_RATE"
-S_RATE_COLOR = "#00BFFF"
-A_RATE_COLOR = "#e8590c"
 REF_LINE_WIDTH = 2
 REF_LINE_DASH = "3px,2px"
 REF_LINE = dict(width=REF_LINE_WIDTH, dash=REF_LINE_DASH)
-RATE_METRICS = frozenset({S_RATE_KEY, A_RATE_KEY})
-RATE_Y_RANGE = (0.0, 1.0)
-
-
-def is_rate_metric(metric: str) -> bool:
-    return metric in RATE_METRICS
-
-
-def rate_metrics_available(
-    df: pd.DataFrame | None = None,
-    metrics: list[str] | None = None,
-) -> list[str]:
-    """현재 데이터에 계산 가능한 rate metric 목록을 반환한다."""
-    cols: set[str] = set(metrics or [])
-    if df is not None:
-        cols.update(metric_columns(df))
-    return [key for key in (S_RATE_KEY, A_RATE_KEY) if key in cols]
-
-
-def overlay_metrics_available(
-    df: pd.DataFrame | None = None,
-    metrics: list[str] | None = None,
-) -> list[str]:
-    """현재 데이터에서 UI overlay로 추가할 수 있는 파생 metric 목록을 반환한다."""
-    return list(rate_metrics_available(df, metrics))
-
-
-def metric_division_rate(numerator: pd.Series, denominator: pd.Series) -> pd.Series:
-    num = numerator.astype("float64")
-    den = denominator.astype("float64")
-    with np.errstate(divide="ignore", invalid="ignore"):
-        out = num / den
-    return out.replace([np.inf, -np.inf], np.nan)
-
-
-def add_rate_columns(df: pd.DataFrame, *, force: bool = False) -> pd.DataFrame:
-    """필요한 원본 counter가 있으면 UI용 SUCCESS/ACCEPT rate column을 추가한다. 이미 있으면 기본적으로 다시 계산하지 않는다."""
-    if force or S_RATE_KEY not in df.columns:
-        if M658_COL in df.columns and M971_COL in df.columns:
-            df[S_RATE_KEY] = metric_division_rate(df[M658_COL], df[M971_COL])
-    if force or A_RATE_KEY not in df.columns:
-        if M696_COL in df.columns and M971_COL in df.columns:
-            df[A_RATE_KEY] = metric_division_rate(df[M696_COL], df[M971_COL])
-    return df
-
-
 def load_plmn(
     plmn: str,
     data_dir: str = DATA_DIR,
     *,
     use_cache: bool = True,
 ) -> pd.DataFrame:
-    """공통 core 데이터 로더를 사용하고 UI 표시용 rate column만 파생해 반환한다."""
-    df = core_load_plmn(
+    """공통 core 데이터 로더에서 원본 counter를 반환한다."""
+    return core_load_plmn(
         plmn,
         data_dir=Path(data_dir),
         use_cache=use_cache,
     ).copy()
-    return add_rate_columns(df, force=True)
 
 def display_training_feature(
     metric: str,
@@ -321,7 +268,6 @@ def display_training_feature(
     if (
         feature_mode == "comb_share"
         and metric != M971_COL
-        and not is_rate_metric(metric)
     ):
         return f"{name} ÷ M971"
     return name
@@ -329,10 +275,6 @@ def display_training_feature(
 
 def display_metric(metric: str) -> str:
     """metric ID를 화면용 이름으로 바꾼다. 로컬 mapping이 있으면 원래 이름도 함께 표시한다."""
-    if metric == S_RATE_KEY:
-        return "SUCCESS rate"
-    if metric == A_RATE_KEY:
-        return "ACCEPT rate"
     original = metric_original(metric)
     return f"{metric} ({original})" if original else metric
 
@@ -2416,8 +2358,6 @@ def format_metric_value(
     attempt: float | None = None,
 ) -> str:
     """metric 값을 보기 좋게 포맷하고 가능한 경우 M971 대비 비율도 함께 표시한다."""
-    if metric and is_rate_metric(metric):
-        return f"{float(value) * 100.0:.1f}%"
     base = f"{round(float(value)):,}"
     if attempt is None:
         return base
@@ -2513,7 +2453,6 @@ def _ranked_hover_texts_matrix(
         return ["(값 없음)"] * n
 
     labels = [display_metric(c) for c in use_cols]
-    is_rate = [is_rate_metric(c) for c in use_cols]
     metric_ids = list(use_cols)
     mat = (
         view.loc[:, use_cols].to_numpy(dtype=np.float64, copy=False)[idx]
@@ -2527,7 +2466,6 @@ def _ranked_hover_texts_matrix(
     )
 
     extra_labels: list[str] = []
-    extra_is_rate: list[bool] = []
     extra_ids: list[str] = []
     if (
         extra_cols is not None
@@ -2536,24 +2474,23 @@ def _ranked_hover_texts_matrix(
         and extra_mat.shape[0] == n
     ):
         extra_labels = [display_metric(c) for c in extra_cols]
-        extra_is_rate = [is_rate_metric(c) for c in extra_cols]
         extra_ids = list(extra_cols)
 
     texts: list[str] = []
     for i in range(n):
-        pairs: list[tuple[str, float, bool, str]] = []
+        pairs: list[tuple[str, float, str]] = []
         row = mat[i] if mat.shape[1] else None
         if row is not None:
             for j, lab in enumerate(labels):
                 v = float(row[j])
                 if v == v and v != 0:  # 유효한 수치이면서 0이 아닌 값만 사용
-                    pairs.append((lab, v, is_rate[j], metric_ids[j]))
+                    pairs.append((lab, v, metric_ids[j]))
         if extra_labels:
             erow = extra_mat[i]
             for j, lab in enumerate(extra_labels):
                 v = float(erow[j])
                 if v == v and v != 0:
-                    pairs.append((lab, v, extra_is_rate[j], extra_ids[j]))
+                    pairs.append((lab, v, extra_ids[j]))
         if not pairs:
             texts.append("(값 없음)")
             continue
@@ -2564,7 +2501,7 @@ def _ranked_hover_texts_matrix(
         if att is not None and not (att == att):
             att = None
         lines = []
-        for lab, v, rate, mid in shown:
+        for lab, v, mid in shown:
             lines.append(
                 f"{lab}={format_metric_value(v, metric=mid, attempt=att)}"
             )
@@ -3234,17 +3171,10 @@ def build_figure(
     cols = metric_columns(df) if metrics is None else list(metrics)
     if max_metrics is not None and max_metrics >= 0:
         cols = cols[:max_metrics]
-    plot_cols = list(cols)
-    primary_cols = [c for c in plot_cols if not is_rate_metric(c)]
-    available_rates = rate_metrics_available(df)
-    if metrics is None:
-        rate_cols = available_rates
-    else:
-        selected = set(cols)
-        rate_cols = [c for c in available_rates if c in selected]
+    primary_cols = [c for c in cols if c in metric_columns(df)]
     color_source = list(color_metrics) if color_metrics else list(cols)
 
-    series_cols = list(dict.fromkeys([*primary_cols, *rate_cols]))
+    series_cols = list(dict.fromkeys(primary_cols))
     has_score_col = bool(
         show_predictions and ANOMALY_SCORE_KEY in view.columns and len(view)
     )
@@ -3301,15 +3231,12 @@ def build_figure(
             times_plot = to_plot_times(view["time"])
             score_x, score_y = times_plot[idx], score_vals_all[idx]
 
-    rate_colors = {S_RATE_KEY: S_RATE_COLOR, A_RATE_KEY: A_RATE_COLOR}
-    rate_hover = "값=%{y:.1%}<extra></extra>"
     count_hover = "값=%{y:,.0f}<extra></extra>"
     # 무거운 feature 순위 tooltip은 확대 상태에서만 생성한다.
     # 전체/거의 전체 구간에서는 일반 hover만 유지해 그래프 재생성을 가볍게 한다.
     embed_ranked = bool(hover_values) and _should_embed_ranked_hover(df, start, end)
     series_hoverinfo = "skip" if embed_ranked else None
 
-    show_rate = bool(rate_cols)
     # score 영역과 사람/모델 label track은 데이터가 없어도 항상 자리를 확보한다.
     reserve_score = True
     reserve_labels = True
@@ -3317,34 +3244,13 @@ def build_figure(
     score_frac = FIGURE_SCORE_HEIGHT / FIGURE_HEIGHT
     metrics_frac = FIGURE_METRICS_HEIGHT / FIGURE_HEIGHT
     label_frac = FIGURE_LABEL_HEIGHT / FIGURE_HEIGHT
-    if reserve_score and show_rate and reserve_labels:
-        n_rows = 5
-        row_heights = [
-            score_frac,
-            0.12,
-            metrics_frac * 0.78,
-            label_frac,
-            label_frac,
-        ]
-        s = sum(row_heights)
-        row_heights = [h / s for h in row_heights]
-        titles = (
-            "Anomaly score",
-            "SUCCESS / COMB rate",
-            "Metric 값",
-            "사람 라벨",
-            "모델 예측",
-        )
-        rate_row, metric_row = 2, 3
-        human_label_row, model_label_row = 4, 5
-        spacing = 0.05
-    elif reserve_score and reserve_labels:
+    if reserve_score and reserve_labels:
         n_rows = 4
         row_heights = [score_frac, metrics_frac, label_frac, label_frac]
         s = sum(row_heights)
         row_heights = [h / s for h in row_heights]
         titles = ("Anomaly score", "Metric 값", "사람 라벨", "모델 예측")
-        rate_row, metric_row = None, 2
+        metric_row = 2
         human_label_row, model_label_row = 3, 4
         spacing = 0.05
     elif reserve_score:
@@ -3354,14 +3260,14 @@ def build_figure(
             metrics_frac / (score_frac + metrics_frac),
         ]
         titles = ("Anomaly score", "Metric 값")
-        rate_row, metric_row = None, 2
+        metric_row = 2
         human_label_row, model_label_row = None, None
         spacing = 0.08
     else:
         n_rows = 1
         row_heights = [1.0]
         titles = ("Metric 값",)
-        rate_row, metric_row = None, 1
+        metric_row = 1
         human_label_row, model_label_row = None, None
         spacing = 0.08
 
@@ -3406,32 +3312,6 @@ def build_figure(
                 col=1,
             )
 
-    if rate_row is not None:
-        for col in rate_cols:
-            x, y = series.get(col, ([], []))
-            metric_name = display_metric(col)
-            rate_kw: dict[str, Any] = dict(
-                x=x,
-                y=y,
-                mode="lines",
-                name=metric_name,
-                opacity=0.72,
-                line=dict(
-                    color=rate_colors.get(col, "#888"),
-                    width=1,
-                ),
-                uid=col,
-            )
-            if series_hoverinfo:
-                rate_kw["hoverinfo"] = series_hoverinfo
-            else:
-                rate_kw["hovertemplate"] = (
-                    f"<b>{metric_name}</b><br>"
-                    "%{x|%Y년 %m월 %d일 %H:%M}<br>"
-                    f"{rate_hover}"
-                )
-            fig.add_trace(go.Scattergl(**rate_kw), row=rate_row, col=1)
-
     for i, col in enumerate(primary_cols):
         x, y = series.get(col, ([], []))
         metric_name = display_metric(col)
@@ -3469,20 +3349,6 @@ def build_figure(
         data_rev = f"{data_rev}:score"
 
     if embed_ranked and len(view):
-        # rate 패널은 SUCC/COMB 계열을 큰 값부터 그리며 지정된 최대 sample 밀도를 사용한다.
-        if rate_cols and rate_row is not None:
-            _add_ranked_hover_anchor(
-                fig,
-                view,
-                cols=list(rate_cols),
-                row=rate_row,
-                uid="rate-values",
-                start=start,
-                end=end,
-                max_points=max_points,
-                filter_data=filter_data,
-            )
-
         # count metric 패널도 값이 큰 series부터 그린다.
         metric_hover_cols = list(primary_cols)
         if metric_hover_cols:
@@ -3497,10 +3363,10 @@ def build_figure(
                 max_points=max_points,
                 filter_data=filter_data,
             )
-    elif len(view) and (primary_cols or rate_cols) and not hover_values:
+    elif len(view) and primary_cols and not hover_values:
         # 순위 tooltip을 끈 경우에도 click/inspect가 가능하도록 보이지 않는 hit target을 남긴다.
-        hover_y_cols = primary_cols or rate_cols
-        hover_row = metric_row if primary_cols else (rate_row or 1)
+        hover_y_cols = primary_cols
+        hover_row = metric_row
         idx = _hover_sample_indices(
             view,
             hover_y_cols,
@@ -3621,23 +3487,6 @@ def build_figure(
             col=1,
         )
 
-    if rate_row is not None:
-        fig.update_yaxes(
-            title_text="rate",
-            autorange=True,
-            fixedrange=True,
-            showgrid=True,
-            showline=True,
-            mirror=True,
-            linewidth=1.5,
-            linecolor="#5f8499",
-            gridcolor="rgba(95,132,153,0.28)",
-            zeroline=False,
-            title_font=dict(size=11, color="#3d6578"),
-            tickfont=dict(size=10, color="#3d6578"),
-            row=rate_row,
-            col=1,
-        )
     fig.update_yaxes(
         title_text="value",
         fixedrange=True,
@@ -3748,7 +3597,6 @@ def build_figure(
         fig,
         n_rows=n_rows,
         show_score=reserve_score,
-        show_rate=show_rate,
         show_labels=reserve_labels,
     )
     add_split_region_overlays(fig, chrono_split_bounds(df, predictions))
@@ -3760,7 +3608,6 @@ def _style_panel_separation(
     *,
     n_rows: int = 2,
     show_score: bool = False,
-    show_rate: bool = True,
     show_labels: bool = False,
 ) -> None:
     """subplot별 배경색, 테두리, subtitle 스타일을 적용해 패널을 시각적으로 구분한다."""
@@ -3770,17 +3617,8 @@ def _style_panel_separation(
         axis = getattr(fig.layout, key, None)
         dom = getattr(axis, "domain", None) if axis is not None else None
         domains.append(dom)
-    if show_score and show_rate and show_labels and n_rows == 5:
-        # subplot 순서: score / rate / metrics / 전문가 label / 모델 prediction
-        defaults = [
-            (0.84, 1.0),
-            (0.70, 0.80),
-            (0.22, 0.66),
-            (0.11, 0.18),
-            (0.0, 0.08),
-        ]
-    elif show_score and show_labels and n_rows == 4:
-        # rate 패널이 없을 때 subplot 순서: score / metrics / 전문가 label / 모델 prediction
+    if show_score and show_labels and n_rows == 4:
+        # subplot 순서: score / metrics / 전문가 label / 모델 prediction
         defaults = [(0.82, 1.0), (0.22, 0.78), (0.11, 0.18), (0.0, 0.08)]
     elif n_rows == 4:
         defaults = [(0.82, 1.0), (0.66, 0.78), (0.14, 0.62), (0.0, 0.10)]
@@ -3790,7 +3628,7 @@ def _style_panel_separation(
         defaults = [(0.72, 1.0), (0.38, 0.64), (0.0, 0.30)]
     elif n_rows == 1:
         defaults = [(0.0, 1.0)]
-    elif show_score and not show_rate:
+    elif show_score:
         defaults = [(0.78, 1.0), (0.0, 0.70)]
     else:
         defaults = [(0.565, 1.0), (0.0, 0.435)]
@@ -3803,27 +3641,12 @@ def _style_panel_separation(
     x_dom = getattr(x_axis, "domain", None) or (0.0, 1.0)
 
     styles = []
-    if show_score and show_rate and show_labels and n_rows == 5:
-        styles = [
-            ("#efe7ff", "#6d28d9", "panel_bg_score"),
-            ("#e7f1f7", "#5f8499", "panel_bg_rate"),
-            ("#f7f5f1", "#8a7f6e", "panel_bg_metrics"),
-            ("#fef9c3", "#a16207", "panel_bg_human_labels"),
-            ("#f3e8ff", "#7c3aed", "panel_bg_model_labels"),
-        ]
-    elif show_score and show_labels and n_rows == 4:
+    if show_score and show_labels and n_rows == 4:
         styles = [
             ("#efe7ff", "#6d28d9", "panel_bg_score"),
             ("#f7f5f1", "#8a7f6e", "panel_bg_metrics"),
             ("#fef9c3", "#a16207", "panel_bg_human_labels"),
             ("#f3e8ff", "#7c3aed", "panel_bg_model_labels"),
-        ]
-    elif show_score and show_rate and show_labels and n_rows == 4:
-        styles = [
-            ("#efe7ff", "#6d28d9", "panel_bg_score"),
-            ("#e7f1f7", "#5f8499", "panel_bg_rate"),
-            ("#f7f5f1", "#8a7f6e", "panel_bg_metrics"),
-            ("#fef9c3", "#a16207", "panel_bg_labels"),
         ]
     elif show_score and show_labels and n_rows == 3:
         styles = [
@@ -3831,20 +3654,9 @@ def _style_panel_separation(
             ("#f7f5f1", "#8a7f6e", "panel_bg_metrics"),
             ("#fef9c3", "#a16207", "panel_bg_labels"),
         ]
-    elif show_score and show_rate and n_rows == 3:
-        styles = [
-            ("#efe7ff", "#6d28d9", "panel_bg_score"),
-            ("#e7f1f7", "#5f8499", "panel_bg_rate"),
-            ("#f7f5f1", "#8a7f6e", "panel_bg_metrics"),
-        ]
     elif show_score and n_rows == 2:
         styles = [
             ("#efe7ff", "#6d28d9", "panel_bg_score"),
-            ("#f7f5f1", "#8a7f6e", "panel_bg_metrics"),
-        ]
-    elif show_rate and n_rows == 2:
-        styles = [
-            ("#e7f1f7", "#5f8499", "panel_bg_rate"),
             ("#f7f5f1", "#8a7f6e", "panel_bg_metrics"),
         ]
     else:
@@ -3894,13 +3706,6 @@ def _style_panel_separation(
         borderwidth=1,
         borderpad=4,
     )
-    rate_title = dict(
-        font=dict(size=12, color="#1f4f63", family="sans-serif"),
-        bgcolor="rgba(231,241,247,0.96)",
-        bordercolor="#5f8499",
-        borderwidth=1,
-        borderpad=4,
-    )
     metrics_title = dict(
         font=dict(size=12, color="#4a4338", family="sans-serif"),
         bgcolor="rgba(247,245,241,0.96)",
@@ -3922,27 +3727,15 @@ def _style_panel_separation(
         borderwidth=1,
         borderpad=4,
     )
-    if show_score and show_rate and show_labels:
-        title_styles = (
-            score_title,
-            rate_title,
-            metrics_title,
-            human_labels_title,
-            model_labels_title,
-        )
-    elif show_score and show_labels:
+    if show_score and show_labels:
         title_styles = (
             score_title,
             metrics_title,
             human_labels_title,
             model_labels_title,
         )
-    elif show_score and show_rate:
-        title_styles = (score_title, rate_title, metrics_title)
     elif show_score:
         title_styles = (score_title, metrics_title)
-    elif show_rate:
-        title_styles = (rate_title, metrics_title)
     else:
         title_styles = (metrics_title,)
     anns = list(fig.layout.annotations or ())

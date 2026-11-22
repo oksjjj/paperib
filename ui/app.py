@@ -9,7 +9,7 @@
 브라우저가 열리면 사업자를 선택하세요 (선택 즉시 로드).
 
 새 날짜의 data/*.csv를 추가한 경우:
-    python ui/preprocess.py
+    python scripts/build_ib_cache.py
     python ui/app.py
 
 전처리는 data/ib_data/labels/*_labels.json을 수정하지 않습니다.
@@ -41,11 +41,9 @@ from ui.data_view import (  # noqa: E402
     display_metric,
     display_plmn,
     format_kst,
-    is_rate_metric,
     load_or_build_ranking,
     load_plmn,
     metric_columns,
-    overlay_metrics_available,
     parse_time,
     to_plot_time,
     to_plot_times,
@@ -225,14 +223,12 @@ def _label_options():
 
 
 def _fail_metric_options() -> list[dict[str, str]]:
-    """fail_surge 원인에 연결할 수 있는 counter metric 다중선택 옵션을 만든다. rate 계열은 제외한다."""
+    """fail_surge 원인에 연결할 수 있는 counter metric 다중선택 옵션을 만든다."""
     cols = list(state.get("metrics") or [])
     if not cols and state.get("df") is not None:
         cols = metric_columns(state["df"])
     opts = []
     for c in cols:
-        if is_rate_metric(c):
-            continue
         opts.append({"label": display_metric(c), "value": c})
     return opts
 
@@ -840,7 +836,7 @@ def _model_attr_children(item: dict | None):
     if pred_doc.get("feature_mode") == "comb_share":
         note = (
             f"{note} · 학습은 comb_share(÷M971)지만 "
-            "그래프·metric 필터는 comb와 동일(raw + S_RATE/A_RATE)"
+            "그래프·metric 필터는 comb와 동일한 원본 counter를 표시"
         )
     return html.Div(
         [
@@ -890,14 +886,9 @@ def _metrics_by_view_sum() -> list[str]:
         if bool(mask.any()):
             view = df.loc[mask]
 
-    # rate/overlay를 먼저 고정 순서로 두고, 원본 metric은 현재 구간 합계가 큰 순서로 배치한다.
-    # 현재 구간에서 0인 metric도 뒤에 남겨 전체 선택/해제가 항상 일관되게 동작하게 한다.
-    pinned = [
-        m
-        for m in overlay_metrics_available(df, list(state.get("metrics") or []))
-        if m in universe
-    ]
-    rest = [m for m in universe if m not in pinned]
+    # 원본 metric은 현재 구간 합계가 큰 순서로 배치한다.
+    # 현재 구간에서 0인 metric도 뒤에 남긴다.
+    rest = list(universe)
 
     def sort_key(m: str) -> float:
         if m not in view.columns:
@@ -920,7 +911,7 @@ def _metrics_by_view_sum() -> list[str]:
     inactive = [m for m in rest if m not in active]
     # metric universe의 모든 항목은 checklist에 유지하고 값이 0인 항목만 뒤로 보낸다.
     # 0인 항목을 숨기면 '전체 선택'이 일부 항목만 선택하는 것처럼 보여 혼란이 생긴다.
-    return pinned + active + inactive
+    return active + inactive
 
 
 def _metric_filter_ui() -> tuple[list[dict], list[str]]:
@@ -936,9 +927,7 @@ def _metric_filter_ui() -> tuple[list[dict], list[str]]:
 
 
 def _full_visible_metrics() -> list[str]:
-    metrics = list(state.get("metrics") or [])
-    overlays = overlay_metrics_available(state.get("df"), metrics)
-    return list(metrics) + [o for o in overlays if o not in metrics]
+    return list(state.get("metrics") or [])
 
 
 def _pred_uses_feature_subset(preds: dict | None = None) -> bool:
@@ -955,13 +944,13 @@ def _pred_uses_feature_subset(preds: dict | None = None) -> bool:
 
 
 def _comb_ui_metric_columns(preds: dict) -> list[str]:
-    """comb/comb_share 계열에서 UI에 보여줄 raw counter 목록을 반환한다. rate는 제외한다."""
+    """comb/comb_share 계열에서 UI에 보여줄 원본 counter 목록을 반환한다."""
     raw = list(preds.get("comb_raw_counters") or [])
     if not raw:
         raw = [
             c
             for c in (preds.get("feature_columns") or [])
-            if c and not is_rate_metric(str(c))
+            if c
         ]
     cols: list[str] = []
     seen: set[str] = set()
@@ -1170,7 +1159,7 @@ def _zoom_to_label_item(item: dict) -> None:
     _reset_y()
     # 줌인/전체와 마찬가지로 layout uirevision을 갱신해야 Plotly.react가 새 x축과
     # _reset_y()에서 계산한 새 Y 자동 범위를 받아들인다. uirevision이 그대로면
-    # 이전 metric/rate/score y축 범위를 계속 유지할 수 있다.
+    # 이전 metric/score y축 범위를 계속 유지할 수 있다.
     state["x_gen"] = int(state.get("x_gen") or 0) + 1
     state["_force_ui_rev"] = time.time()
     _arm_select_guard()
@@ -1375,32 +1364,19 @@ def _score_subplot_active() -> bool:
     return True
 
 
-def _rate_subplot_active() -> bool:
-    """SUCCESS/ACCEPT rate를 실제로 그리고 있을 때만 rate subplot이 존재하는지 판별한다."""
-    return _visible_rate_y_bounds() is not None
-
-
 def _metric_axis_row() -> int:
-    # subplot row는 score=1, metrics=2, 전문가=3, 모델=4이며 rate가 있으면 metrics 앞에 한 행이 추가된다.
-    if _rate_subplot_active():
-        return 3
+    """원본 metric 패널의 행 번호를 반환한다."""
     return 2
 
 
 def _label_axis_row() -> int:
-    """전문가 label track이 위치한 subplot row 번호를 반환한다."""
-    return 4 if _rate_subplot_active() else 3
+    """전문가 label track의 행 번호를 반환한다."""
+    return 3
 
 
 def _model_label_axis_row() -> int:
-    """model prediction track이 위치한 subplot row 번호를 반환한다."""
-    return 5 if _rate_subplot_active() else 4
-
-
-def _rate_axis_row() -> int | None:
-    if not _rate_subplot_active():
-        return None
-    return 2
+    """모델 prediction track의 행 번호를 반환한다."""
+    return 4
 
 
 def _build_graph(click_mode: str):
@@ -1487,17 +1463,14 @@ def _build_graph(click_mode: str):
         )
     )
     # 마우스 drag zoom/pan은 시간축만 움직이도록 y축은 항상 잠근다. 세로 scale은
-    # Y+ / Y- / Y 자동 버튼으로만 조절하고 rate/score 패널은
+    # Y+ / Y- / Y 자동 버튼으로만 조절하고 score 패널은
     # 현재 보이는 x 구간에 맞춰 자동으로 y축을 맞춘다.
     y_locked = True
     y_bounds = _effective_y_bounds()
-    rate_bounds = _visible_rate_y_bounds()
     # score 패널은 항상 자리를 확보하며 score가 없으면 y 범위가 None일 수 있다.
     score_bounds = _visible_score_y_bounds() if _has_score_panel() else None
     state["y_rendered"] = y_bounds
-    state["rate_y_rendered"] = rate_bounds
     state["score_y_rendered"] = score_bounds
-    rate_row = _rate_axis_row()
     metric_row = _metric_axis_row()
     # Y 자동/zoom 시 score 패널도 다시 그리도록 score 범위를 y_gen revision에 포함한다.
     score_rev = f"ys:{state.get('y_gen', 0)}"
@@ -1520,26 +1493,6 @@ def _build_graph(click_mode: str):
             row=1,
             col=1,
         )
-    if rate_row is not None:
-        if rate_bounds is None:
-            fig.update_yaxes(
-                title_text="rate",
-                autorange=True,
-                fixedrange=True,
-                uirevision=f"y1:{state.get('y_gen', 0)}",
-                row=rate_row,
-                col=1,
-            )
-        else:
-            fig.update_yaxes(
-                title_text="rate",
-                range=list(rate_bounds),
-                autorange=False,
-                fixedrange=True,
-                uirevision=f"y1:{state.get('y_gen', 0)}",
-                row=rate_row,
-                col=1,
-            )
     if y_bounds is None:
         fig.update_yaxes(
             title_text="value",
@@ -2000,11 +1953,7 @@ def _clamp_zoom(start_ts, end_ts):
 
 def _visible_y_bounds() -> tuple[float, float] | None:
     df = state["df"]
-    metrics = [
-        m
-        for m in _plot_metrics()
-        if not is_rate_metric(m)
-    ]
+    metrics = _plot_metrics()
     if df is None or not len(df) or not metrics:
         return None
     start_ts = state["zoom_start"]
@@ -2060,31 +2009,6 @@ def _visible_score_y_bounds() -> tuple[float, float] | None:
         return ymin - 1.0, ymax + 1.0
     pad = (ymax - ymin) * 0.08
     return ymin - pad, ymax + pad
-
-
-def _visible_rate_y_bounds() -> tuple[float, float] | None:
-    """현재 보이는 x 구간에서 SUCCESS/COMB rate subplot의 y축 범위를 계산한다."""
-    df = state["df"]
-    metrics = [m for m in _plot_metrics() if is_rate_metric(m)]
-    if df is None or not len(df) or not metrics:
-        return None
-    start_ts = state["zoom_start"]
-    end_ts = state["zoom_end"]
-    view = df
-    if start_ts is not None and end_ts is not None:
-        mask = (df["time"] >= start_ts) & (df["time"] <= end_ts)
-        if mask.any():
-            view = df.loc[mask]
-    series = view[metrics]
-    ymin = float(series.min(numeric_only=True).min())
-    ymax = float(series.max(numeric_only=True).max())
-    if not (ymin == ymin and ymax == ymax):  # NaN 여부 확인
-        return None
-    base = min(0.0, ymin)
-    if ymax <= base:
-        return base, base + 0.01
-    pad = (ymax - base) * 0.08
-    return base, ymax + pad
 
 
 def _effective_y_bounds() -> tuple[float, float] | None:
@@ -2487,14 +2411,10 @@ def _make_axis_cmd(
     state["zoom_rendered"] = rendered
     _arm_zoom_guard(guard_seconds)
     score_payload = None
-    rate_payload = None
     if touch_y:
         yb = _effective_y_bounds()
         state["y_rendered"] = yb
         y_payload = [float(yb[0]), float(yb[1])] if yb else None
-        rb = _visible_rate_y_bounds()
-        state["rate_y_rendered"] = rb
-        rate_payload = [float(rb[0]), float(rb[1])] if rb else None
         if _score_subplot_active():
             sb = _visible_score_y_bounds()
             state["score_y_rendered"] = sb
@@ -2514,7 +2434,6 @@ def _make_axis_cmd(
         # drag zoom/pan은 브라우저가 이미 x축을 바꿨으므로 서버가 x축을 다시 적용하면 사용자 gesture와 충돌한다.
         "x": [str(to_plot_time(x0)), str(to_plot_time(x1))] if apply_x else None,
         "y": y_payload,
-        "y_rate": rate_payload,
         "y_score": score_payload,
         "touch_y": bool(touch_y),
         "live_axes": bool(live_axes),
@@ -2532,10 +2451,9 @@ def _relayout_x_window(relayout) -> tuple[Any, Any] | str | None:
         or relayout.get("xaxis2.autorange")
         or relayout.get("xaxis3.autorange")
         or relayout.get("xaxis4.autorange")
-        or relayout.get("xaxis5.autorange")
     ):
         return "autorange"
-    for prefix in ("xaxis", "xaxis2", "xaxis3", "xaxis4", "xaxis5"):
+    for prefix in ("xaxis", "xaxis2", "xaxis3", "xaxis4"):
         k0, k1 = f"{prefix}.range[0]", f"{prefix}.range[1]"
         if k0 in relayout and k1 in relayout:
             return relayout[k0], relayout[k1]
@@ -5066,7 +4984,6 @@ app.clientside_callback(
         }
         var hasX = cmd.x && cmd.x.length === 2;
         var hasY = cmd.y && cmd.y.length === 2;
-        var hasYRate = cmd.y_rate && cmd.y_rate.length === 2;
         var hasYScore = cmd.y_score && cmd.y_score.length === 2;
         var touchY = (cmd.touch_y !== false);
         // pan 종료 직후에는 실시간 축 patch를 하지 않는다. 재생성 전에 x축이 되돌아갈 수 있기 때문이다.
@@ -5085,60 +5002,16 @@ app.clientside_callback(
         if (liveAxes && hasX) {
             patch['xaxis.autorange'] = false;
             patch['xaxis.range'] = [cmd.x[0], cmd.x[1]];
-            // score / metric / 전문가 / 모델 패널은 하나의 시간축을 공유한다. rate 패널이 있으면 함께 공유한다.
-            ['xaxis2', 'xaxis3', 'xaxis4', 'xaxis5'].forEach(function(ax) {
+            // score / metric / 전문가 / 모델 패널은 하나의 시간축을 공유한다.
+            ['xaxis2', 'xaxis3', 'xaxis4'].forEach(function(ax) {
                 patch[ax + '.autorange'] = false;
                 patch[ax + '.range'] = [cmd.x[0], cmd.x[1]];
             });
         }
         if (liveAxes && touchY) {
-            var fl = gd._fullLayout || {};
-            var hasY3 = !!fl.yaxis3;
-            var hasY2 = !!fl.yaxis2;
-            // 가능한 subplot 구성:
-            // 기본 4행: score + metrics + 전문가 label + 모델 prediction
-            // rate가 있으면 5행: score + rate + metrics + 전문가 label + 모델 prediction
-            // label track의 y축은 metric Y 자동 명령의 영향을 받지 않는다.
-            var metricsKey = 'yaxis';
-            var rateKey = null;
-            var scoreKey = null;
-            function axisTitle(key) {
-                try {
-                    var ax = fl[key];
-                    return (ax && ax.title && ax.title.text) || '';
-                } catch (err) { return ''; }
-            }
-            function isLabelAxisTitle(t) {
-                return /label|human|model/i.test(String(t));
-            }
-            if (hasY3) {
-                scoreKey = 'yaxis';
-                var y2title = axisTitle('yaxis2');
-                var y3title = axisTitle('yaxis3');
-                if (isLabelAxisTitle(y3title) || isLabelAxisTitle(axisTitle('yaxis4'))) {
-                    // score + metrics + 전문가 label(+ 모델 prediction)
-                    metricsKey = 'yaxis2';
-                    rateKey = null;
-                } else if (/rate/i.test(String(y2title))) {
-                    rateKey = 'yaxis2';
-                    metricsKey = 'yaxis3';
-                } else {
-                    metricsKey = 'yaxis2';
-                    rateKey = null;
-                }
-            } else if (hasY2) {
-                var y1title = '';
-                try {
-                    y1title = (fl.yaxis && fl.yaxis.title && fl.yaxis.title.text) || '';
-                } catch (err) {}
-                if (hasYScore || /score/i.test(String(y1title))) {
-                    scoreKey = 'yaxis';
-                    metricsKey = 'yaxis2';
-                } else {
-                    rateKey = 'yaxis';
-                    metricsKey = 'yaxis2';
-                }
-            }
+            // 고정 4행 구성: score, metrics, 전문가 label, 모델 prediction.
+            var scoreKey = 'yaxis';
+            var metricsKey = 'yaxis2';
             if (hasY) {
                 patch[metricsKey + '.autorange'] = false;
                 patch[metricsKey + '.range'] = [cmd.y[0], cmd.y[1]];
@@ -5146,16 +5019,6 @@ app.clientside_callback(
             } else {
                 patch[metricsKey + '.autorange'] = true;
                 patch[metricsKey + '.fixedrange'] = true;
-            }
-            if (rateKey) {
-                if (hasYRate) {
-                    patch[rateKey + '.autorange'] = false;
-                    patch[rateKey + '.range'] = [cmd.y_rate[0], cmd.y_rate[1]];
-                    patch[rateKey + '.fixedrange'] = true;
-                } else {
-                    patch[rateKey + '.autorange'] = true;
-                    patch[rateKey + '.fixedrange'] = true;
-                }
             }
             if (scoreKey) {
                 if (hasYScore) {
@@ -5199,7 +5062,7 @@ app.clientside_callback(
         if (Object.keys(patch).length) {
             window.__clampingDataX = true;
             // Y축만 바꿀 때는 layout 높이와 subplot domain을 그대로 유지한다.
-            if (!hasX && (hasY || hasYRate || hasYScore)) {
+            if (!hasX && (hasY || hasYScore)) {
                 var yKey2 = (gd._fullLayout && gd._fullLayout.yaxis3) ? 'yaxis3' : 'yaxis2';
                 patch[yKey2 + '.fixedrange'] = true;
             }
@@ -5279,7 +5142,7 @@ app.clientside_callback(
                 layout.xaxis = Object.assign({}, layout.xaxis || {}, {
                     range: liveX, autorange: false
                 });
-                ['xaxis2', 'xaxis3', 'xaxis4', 'xaxis5'].forEach(function(ax) {
+                ['xaxis2', 'xaxis3', 'xaxis4'].forEach(function(ax) {
                     if (layout[ax] || (gd2.layout && gd2.layout[ax])) {
                         layout[ax] = Object.assign({}, layout[ax] || {}, {
                             range: liveX, autorange: false
@@ -5298,7 +5161,7 @@ app.clientside_callback(
             window.__ignoreDataXClampUntil = Date.now() + 1500;
             // Y축은 재생성된 figure의 자동 범위를 쓰고 react 이후 x축은 절대 다시 건드리지 않는다.
             var yPatch = {};
-            ['yaxis', 'yaxis2', 'yaxis3', 'yaxis4', 'yaxis5'].forEach(function(key) {
+            ['yaxis', 'yaxis2', 'yaxis3', 'yaxis4'].forEach(function(key) {
                 var ax = layout[key];
                 if (!ax || !ax.range || ax.range.length !== 2) return;
                 if (ax.autorange) return;
@@ -5725,14 +5588,14 @@ app.clientside_callback(
                     || (layout.xaxis2 && layout.xaxis2.range)
                     || (layout.xaxis3 && layout.xaxis3.range)
                     || (layout.xaxis4 && layout.xaxis4.range)
-                    || (layout.xaxis5 && layout.xaxis5.range);
+;
                 if (!xr) return null;
                 var view = {
                     x: [String(xr[0]), String(xr[1])]
                 };
                 // metric subplot은 제목이 'value'인 축으로 찾고 전문가/모델 label track은 제외한다.
                 var yAxis = null;
-                ['yaxis', 'yaxis2', 'yaxis3', 'yaxis4', 'yaxis5'].forEach(function(key) {
+                ['yaxis', 'yaxis2', 'yaxis3', 'yaxis4'].forEach(function(key) {
                     var ax = layout[key];
                     if (!ax) return;
                     var t = '';
@@ -5740,10 +5603,8 @@ app.clientside_callback(
                     if (/value/i.test(String(t))) yAxis = ax;
                 });
                 if (!yAxis) {
-                    // 축 제목으로 찾지 못하면 score(+rate)+metrics+전문가+모델 순서로 fallback한다.
-                    if (layout.yaxis5) yAxis = layout.yaxis3;
-                    else if (layout.yaxis4) yAxis = layout.yaxis2;
-                    else yAxis = layout.yaxis2 || layout.yaxis;
+                    // 축 제목이 없으면 고정 metric 패널을 사용한다.
+                    yAxis = layout.yaxis2 || layout.yaxis;
                 }
                 if (yAxis && yAxis.range) {
                     view.y = [yAxis.range[0], yAxis.range[1]];
@@ -5802,7 +5663,7 @@ app.clientside_callback(
         window.__installSharedPanelSync = function(gd) {
                 if (!gd || gd.__sharedPanelSyncV5) return;
                 gd.__sharedPanelSyncV5 = true;
-                var X_KEYS = ['xaxis', 'xaxis2', 'xaxis3', 'xaxis4', 'xaxis5'];
+                var X_KEYS = ['xaxis', 'xaxis2', 'xaxis3', 'xaxis4'];
 
                 function xPairFromEvent(ed) {
                     if (!ed) return null;
@@ -5841,8 +5702,7 @@ app.clientside_callback(
                     if (mode === 'pan' || mode === 'pan_keep_y'
                         || window.__desiredDragmode === 'pan') return;
                     if (ed['xaxis.autorange'] || ed['xaxis2.autorange']
-                        || ed['xaxis3.autorange'] || ed['xaxis4.autorange']
-                        || ed['xaxis5.autorange']) return;
+                        || ed['xaxis3.autorange'] || ed['xaxis4.autorange']) return;
                     var pair = xPairFromEvent(ed);
                     if (!pair) return;
                     var fl = gd._fullLayout || {};
@@ -6446,8 +6306,7 @@ app.clientside_callback(
                     // autorange echo가 사용자가 의도적으로 줄인 zoom 범위를 다시 넓히지 못하게 한다.
                     if (eventData['xaxis.autorange'] || eventData['xaxis2.autorange']
                         || eventData['xaxis3.autorange']
-                        || eventData['xaxis4.autorange']
-                        || eventData['xaxis5.autorange']) return;
+                        || eventData['xaxis4.autorange']) return;
                     var meta = (gd.layout && gd.layout.meta) || {};
                     var bounds = meta.data_x;
                     if (!bounds || bounds.length < 2) return;
@@ -6456,7 +6315,7 @@ app.clientside_callback(
                     if (!(tmax > tmin)) return;
 
                     var x0, x1;
-                    var axKeys = ['xaxis', 'xaxis2', 'xaxis3', 'xaxis4', 'xaxis5'];
+                    var axKeys = ['xaxis', 'xaxis2', 'xaxis3', 'xaxis4'];
                     for (var ai = 0; ai < axKeys.length; ai++) {
                         var ax = axKeys[ai];
                         x0 = eventData[ax + '.range[0]'];
@@ -6871,7 +6730,7 @@ app.clientside_callback(
                     var xa = fl && fl.xaxis;
                     if (!xa) return;
                     // cursor가 여러 subplot을 자연스럽게 가로지르도록 위/아래 plot 영역의 합친 범위를 사용한다.
-                    // rate와 metric 패널 모두에서 같은 세로 cursor가 보이게 한다.
+                    // 각 패널에서 같은 세로 cursor가 보이게 한다.
                     var rect = (window.__combinedPlotRect && window.__combinedPlotRect(gd))
                         || plotRect;
                     if (!rect) return;
@@ -6993,9 +6852,7 @@ app.clientside_callback(
                 };
 
                 function scorePanelVisible() {
-                    // 3행 구성에서는 yaxis=score, yaxis2=rate, yaxis3=metrics다.
-                    // score subplot이 없는 2행 구성에서는 위쪽 drag 영역을 score로 해석하면 안 된다.
-                    // 잘못 해석하면 S_RATE hover 위에 'Anomaly score' tip이 뜰 수 있다.
+                    // score 패널은 첫 번째 행에 예약되어 있다.
                     var fl = gd._fullLayout;
                     if (fl && fl.yaxis3) return true;
                     var meta = (gd.layout && gd.layout.meta) || {};
@@ -7422,7 +7279,7 @@ app.clientside_callback(
                     layout.xaxis = Object.assign({}, layout.xaxis || {}, {
                         range: keepX, autorange: false
                     });
-                    ['xaxis2', 'xaxis3', 'xaxis4', 'xaxis5'].forEach(function(ax) {
+                    ['xaxis2', 'xaxis3', 'xaxis4'].forEach(function(ax) {
                         if (layout[ax]) {
                             layout[ax] = Object.assign({}, layout[ax], {
                                 range: keepX, autorange: false
@@ -7442,12 +7299,12 @@ app.clientside_callback(
                         var meta = layout.meta || {};
                         var zx = keepX || meta.zoom_x;
                         if (zx && zx.length === 2 && !window.__graphPointerDown) {
-                            ['xaxis', 'xaxis2', 'xaxis3', 'xaxis4', 'xaxis5'].forEach(function(ax) {
+                            ['xaxis', 'xaxis2', 'xaxis3', 'xaxis4'].forEach(function(ax) {
                                 patch[ax + '.autorange'] = false;
                                 patch[ax + '.range'] = [zx[0], zx[1]];
                             });
                         }
-                        ['yaxis', 'yaxis2', 'yaxis3', 'yaxis4', 'yaxis5'].forEach(function(key) {
+                        ['yaxis', 'yaxis2', 'yaxis3', 'yaxis4'].forEach(function(key) {
                             var ax = layout[key];
                             if (!ax || !ax.range || ax.range.length !== 2) return;
                             if (ax.autorange) return;

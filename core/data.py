@@ -50,7 +50,7 @@ def load_plmn(
 ) -> pd.DataFrame:
     """여러 raw CSV에서 한 PLMN의 행만 모아 시간순 DataFrame으로 반환한다.
 
-    이 함수는 모델 학습용이므로 UI용 rate column이나 display mapping을 만들지 않는다.
+    이 함수는 모델 학습용이므로 UI 표시용 파생 데이터를 만들지 않는다.
     cache에도 원래 raw counter와 time/PLMN column만 유지한다.
     """
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
