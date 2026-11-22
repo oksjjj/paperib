@@ -1,1 +1,1 @@
-"""Shared data and evaluation utilities for paperib."""
+"""paperib의 모델들이 함께 사용하는 데이터 처리와 평가 유틸리티 패키지."""
