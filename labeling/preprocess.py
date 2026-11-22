@@ -1,24 +1,19 @@
 #!/usr/bin/env python3
-"""Rebuild labeling caches after data/*.csv changes.
+"""raw CSV가 변경된 뒤 라벨링용 캐시를 다시 만드는 전처리 스크립트.
 
-Single pass over data/*.csv → artifacts under labeling/ (cache) and data/ib_data/labels/:
-  - labeling/cache/{PLMN}.pkl
-  - data/ib_data/labels/plmn_rank.csv
-  - labeling/cache/plmn_rank.signature
+data/ib_data/raw 아래의 CSV를 한 번씩 읽어 다음 산출물을 만든다.
 
-Future data/*.csv rows are expected to cover only PLMNs listed in
-repo-root top100.txt. By default this script caches that set (and prunes
-other pickles).
+- labeling/cache/{PLMN}.pkl
+- data/ib_data/labels/plmn_rank.csv
+- labeling/cache/plmn_rank.signature
 
-Usage:
-  # raw CSV를 추가하거나 교체한 뒤
+기본 실행은 저장소 루트의 top100.txt에 포함된 사업자만 캐시하고
+목록 밖의 오래된 pickle은 정리한다.
+
+사용 예:
   python labeling/preprocess.py
-  python labeling/preprocess.py --force          # wipe pickles, full rebuild
-  python labeling/preprocess.py --all            # every PLMN seen in CSV
-  python labeling/preprocess.py --plmn P0480
-
-Without --force, pickles whose signature still matches the current data/
-fingerprint are skipped. Label JSON files are never deleted or rewritten.
+  python labeling/preprocess.py --force
+  python labeling/preprocess.py --all
 """
 
 from __future__ import annotations
