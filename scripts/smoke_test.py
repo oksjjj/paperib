@@ -8,8 +8,9 @@
 3. ContextAE context discovery 함수 import
 4. RoCA window 변환과 backbone forward
 5. evaluation 모듈 import
-6. labeling UI facade import
-7. raw 데이터가 있으면 첫 논문 PLMN의 11개 core feature 로딩
+6. 연구 계층(core/models/evaluation)의 UI 의존성 금지
+7. UI facade import
+8. raw 데이터가 있으면 첫 논문 PLMN의 11개 core feature 로딩
 
 실행:
     .venv/bin/python scripts/smoke_test.py
@@ -17,6 +18,7 @@
 
 from __future__ import annotations
 
+import ast
 import sys
 from pathlib import Path
 
@@ -32,6 +34,27 @@ def check(name: str, fn) -> None:
     print(f"[CHECK] {name}")
     fn()
     print(f"[ OK  ] {name}")
+
+
+def _assert_research_layers_do_not_import_ui() -> None:
+    """core/models/evaluation 계층이 ui 패키지를 참조하지 않는지 정적으로 검사한다."""
+    violations: list[str] = []
+    for rel in ("core", "models", "evaluation"):
+        for path in (ROOT / rel).rglob("*.py"):
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            for node in ast.walk(tree):
+                module = None
+                if isinstance(node, ast.ImportFrom):
+                    module = node.module or ""
+                    if module == "ui" or module.startswith("ui."):
+                        violations.append(f"{path.relative_to(ROOT)}:{node.lineno} -> from {module}")
+                elif isinstance(node, ast.Import):
+                    for alias in node.names:
+                        module = alias.name
+                        if module == "ui" or module.startswith("ui."):
+                            violations.append(f"{path.relative_to(ROOT)}:{node.lineno} -> import {module}")
+    if violations:
+        raise AssertionError("research layer -> ui dependency found:\n" + "\n".join(violations))
 
 
 def main() -> None:
@@ -101,6 +124,8 @@ def main() -> None:
         import evaluation.eval_thresholds  # noqa: F401
 
     check("evaluation imports", _evaluation_imports)
+
+    check("research layers do not import UI", _assert_research_layers_do_not_import_ui)
 
     def _ui_facades() -> None:
         # app.py 자체는 Dash 서버용 startup state를 만들기 때문에 여기서는
