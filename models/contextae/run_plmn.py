@@ -68,6 +68,7 @@ from models.contextae.training import (
 )
 
 def segments(mask: np.ndarray) -> list[tuple[int, int]]:
+    # 연속된 True point를 하나의 이벤트 [시작,끝]으로 묶는다. 끝 인덱스는 포함한다.
     m = np.asarray(mask, dtype=bool).reshape(-1)
     out: list[tuple[int, int]] = []
     i = 0
@@ -264,6 +265,7 @@ def write_prediction(
     segment_info: dict[str, Any],
     split_meta: dict[str, str],
 ) -> str:
+    # NaN 등 점수가 없는 위치는 제외하고 TRAIN 기준 임계치를 넘는 시점만 이상으로 예측한다.
     pred = np.isfinite(scores) & (scores > threshold)
     labels = mask_to_labels(
         times,
@@ -474,6 +476,7 @@ def run(
     compare_hour24: bool = True,
 ) -> dict[str, Any]:
     set_seed(cfg.seed)
+    # 실행 장치 결정 후 라벨 없이 원본 데이터와 시간순 split을 준비한다.
     device = device_for_run()
     prep = prepare_unlabeled_plmn(plmn, cfg.timezone)
 
@@ -487,13 +490,16 @@ def run(
         flush=True,
     )
 
+    # TRAIN에 있는 동일 5분 slot의 robust profile을 만든다. VALID/TEST 데이터는 사용하지 않는다.
     slot_info = build_train_slot_profiles(
         prep["train"],
         prep["train_slots"],
         use_mad=cfg.profile_use_mad,
     )
+    # 동적 계획법과 silhouette를 사용해 하루의 연속 context 경계 및 K를 확정한다.
     segment_info = fit_context_segmentation(slot_info, cfg)
 
+    # 확정한 slot→context 매핑을 TRAIN/VALID/TEST에 그대로 사용한다. 평가 구간으로 다시 분할하지 않는다.
     train_context_ids = context_ids_from_slots(
         prep["train_slots"],
         segment_info["slot_to_context"],
@@ -523,6 +529,7 @@ def run(
     t0 = time.time()
     artifacts: dict[int, ContextArtifacts] = {}
 
+    # TRAIN에서 발견한 K개 context 각각에 대해 독립적인 scaler와 두 단계 AE를 학습한다.
     for context_id in range(int(segment_info["selected_k"])):
         idx = np.flatnonzero(train_context_ids == context_id)
         art = fit_context_model(
@@ -541,6 +548,8 @@ def run(
             flush=True,
         )
 
+    # 모델 학습이 끝난 후 각 split의 모든 시점에 해당 그룹의 최종 모델을 적용한다.
+    # TRAIN의 제거된 시점도 여기서 점수를 계산한다. 추론이므로 파라미터를 갱신하지 않는다.
     train_scores, _train_raw = score_with_context_models(
         prep["train"],
         train_context_ids,
@@ -566,7 +575,9 @@ def run(
         device=device,
     )
 
+    # 그룹별 clean TRAIN 평균/표준편차로 이미 z-score를 만들었으므로 공통 z 임계치를 사용한다.
     threshold = float(cfg.threshold_sigma)
+    # 후속 임계치 실험에서 모델을 다시 학습할 필요가 없도록 scaler와 가중치 등을 저장한다.
     model_path = save_checkpoint(
         plmn,
         artifacts,
@@ -579,14 +590,17 @@ def run(
         "training/scoring complete; loading expert labels for evaluation only",
         flush=True,
     )
+    # 중요: 학습과 점수 산출이 완료된 뒤에야 전문가 GT를 읽는다. 아래에서는 성능 평가에만 사용한다.
     label_doc = load_labels(plmn)
     y_full = human_anomaly_mask(
         prep["df"],
         label_doc.get("labels"),
     ).astype(bool)
+    # 점수와 GT가 동일한 시간순 split 및 인덱스를 사용하도록 원본 마스크를 자른다.
     y_valid = y_full[prep["train_end"] : prep["valid_end"]]
     y_test = y_full[prep["valid_end"] :]
 
+    # VUS 평가용 범위 설정과 운영 threshold 기반 point/event 성능을 공통 평가 함수에서 계산한다.
     valid_vus_window = resolve_vus_window(y_valid, None)
     valid_bundle = evaluate_valid(
         y_valid,
@@ -603,6 +617,7 @@ def run(
         prep["train_end"] : prep["valid_end"]
     ].reset_index(drop=True)
 
+    # UI에서 동일 시점의 점수, threshold, 예측 이벤트와 평가 결과를 확인할 수 있도록 저장한다.
     valid_path = write_prediction(
         plmn=plmn,
         split_name="valid",
@@ -665,6 +680,7 @@ def run(
             flush=True,
         )
 
+    # TEST 평가를 요청한 경우에만 최종 TEST 결과를 계산하고 저장한다.
     if eval_test:
         test_bundle = evaluate_valid(
             y_test,
@@ -710,6 +726,7 @@ def run(
             flush=True,
         )
 
+    # 같은 AE 및 오염 제거 설정으로 고정 24시간 baseline을 실행하여 분할 방식 차이를 비교한다.
     if compare_hour24:
         print("", flush=True)
         print(
@@ -805,6 +822,7 @@ def main() -> None:
     if args.lr <= 0:
         p.error("--lr must be > 0")
 
+    # argparse로 받은 실험 설정을 Config에 전달한다. 실제 모델 학습은 run()에서 시작한다.
     cfg = Config(
         timezone=args.timezone,
         k=args.k,

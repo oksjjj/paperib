@@ -56,6 +56,8 @@ class base_Model(nn.Module):
             self.features_len = math.floor(0.25 * self.window_size / self.stride) + 2
         else:
             self.features_len = math.floor(math.floor(0.125 * self.window_size / self.stride) + 5 / 2)
+        # Conv1d는 시간축을 따라 kernel을 이동하며 모든 입력 channel을 함께 사용한다.
+        # BatchNorm/ReLU/Pooling으로 패턴을 추출하고 시간 길이를 줄인다.
         self.conv_block1 = nn.Sequential(
             nn.Conv1d(self.input_channels, 32, kernel_size=self.kernel_size,
                       stride=self.stride, bias=False, padding=(self.kernel_size//2)),
@@ -65,6 +67,7 @@ class base_Model(nn.Module):
             nn.Dropout(self.dropout)
         )
 
+        # 이 분기는 IOpsCompetition/UCR용이며 paperib의 SWaT 설정에서는 사용하지 않는다.
         self.conv_block2 = nn.Sequential(
             nn.Conv1d(32, self.final_out_channels, kernel_size=8, stride=1, bias=False, padding=4),
             nn.BatchNorm1d(self.final_out_channels),
@@ -72,6 +75,7 @@ class base_Model(nn.Module):
             nn.MaxPool1d(kernel_size=2, stride=2, padding=1)
         )
 
+        # paperib는 block1→block3→block4 경로를 사용한다. channel은 32→64→final_out_channels.
         self.conv_block3 = nn.Sequential(
             nn.Conv1d(32, 64, kernel_size=8, stride=1, bias=False, padding=4),
             nn.BatchNorm1d(64),
@@ -98,6 +102,7 @@ class base_Model(nn.Module):
                 x = self.conv_block4(x)
             self.features_len = int(x.shape[-1])
 
+        # LSTM 입력의 마지막 차원은 CNN channel 수이다. hidden/cell state의 shape는 (layers,B,H).
         self.encoder = nn.LSTM(
             self.final_out_channels,
             self.hidden_size,
@@ -115,8 +120,10 @@ class base_Model(nn.Module):
             dropout=self.dropout,
         )
 
+        # decoder의 H차원 hidden state를 CNN channel 차원으로 변환하여 해당 시점의 표현을 복원한다.
         self.output_layer = nn.Linear(self.hidden_size, self.final_out_channels)
         self.project = nn.Linear(self.final_out_channels * self.features_len, self.project_channels, bias=False)
+        # 원본과 복원 표현에 같은 MLP 가중치를 적용한다. 최종 출력 shape는 각각 (B,project_channels).
         self.projection_head = nn.Sequential(
             nn.Linear(self.final_out_channels * self.features_len, self.final_out_channels * self.features_len // 2),
             nn.BatchNorm1d(self.final_out_channels * self.features_len // 2),
@@ -159,6 +166,7 @@ class base_Model(nn.Module):
         _, enc_hidden = self.encoder(hidden)
 
         # 3단계: Decoder는 encoder의 마지막 state에서 시작한다.
+        # encoder가 압축한 시퀀스의 마지막 hidden/cell state를 decoder의 초기 상태로 전달한다.
         dec_hidden = enc_hidden
         output = torch.zeros(hidden.shape).to(self.device)
 
@@ -166,6 +174,7 @@ class base_Model(nn.Module):
         # 학습 시에는 실제 hidden을 다음 입력으로 넣는 teacher-forcing 형태이고,
         # 평가 시에는 직전에 생성한 output을 다시 입력으로 사용한다.
         for i in reversed(range(hidden.shape[1])):
+            # 원본 구현은 decoder의 첫 번째 LSTM layer hidden을 output_layer에 넣어 해당 위치를 복원한다.
             output[:, i, :] = self.output_layer(dec_hidden[0][0, :])
             if self.training:
                 _, dec_hidden = self.decoder(
@@ -179,6 +188,7 @@ class base_Model(nn.Module):
                 )
         # 4단계: 원본 encoder sequence와 decoder reconstruction sequence를
         # 각각 flatten한 뒤 같은 projection head에 통과시킨다.
+        # (B,T',C')를 (B,T'×C')로 펼친다. 원본/복원 표현은 같은 크기를 갖는다.
         hidden = hidden.reshape(hidden.size(0), -1)
         output = output.reshape(output.size(0), -1)
         project = self.projection_head(hidden)

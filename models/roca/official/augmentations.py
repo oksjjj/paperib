@@ -20,7 +20,7 @@ def DataTransform(sample, config):
     같은 backbone에 통과시킨다.
     """
 
-    # weak augmentation: window의 feature별 크기를 랜덤하게 확대/축소한다.
+    # weak augmentation: sample별·시간 위치별 랜덤 배율을 모든 feature에 공통 적용한다.
     weak_aug = scaling(sample, config.augmentation.scale_ratio)
 
     # 원본 코드에는 magnitude_warp, permutation, rotation을 조합한
@@ -78,8 +78,10 @@ def scaling(x, sigma=1.1):
     """
 
     # 참고 아이디어 출처: https://arxiv.org/pdf/1706.00527.pdf
+    # factor shape는 (N,T)이다. 원본의 평균 2, 표준편차 sigma인 정규분포를 그대로 사용한다.
     factor = np.random.normal(loc=2., scale=sigma, size=(x.shape[0], x.shape[2]))
     ai = []
+    # 모든 channel에 같은 sample/time factor를 적용하여 channel 간 상대 크기를 보존한다.
     for i in range(x.shape[1]):
         xi = x[:, i, :]
         ai.append(np.multiply(xi, factor[:, :])[:, np.newaxis, :])

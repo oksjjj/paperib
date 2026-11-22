@@ -37,8 +37,10 @@ def _mask_to_labels(
     times = pd.to_datetime(pd.Series(times), utc=True)
     mask = np.asarray(mask, dtype=bool).reshape(-1)
     scores = np.asarray(scores, dtype=np.float64).reshape(-1)
+    # 시간, 예측 마스크, 점수의 공통 유효 길이까지만 사용한다.
     n = min(len(times), len(mask), len(scores))
     items: list[dict[str, Any]] = []
+    # 연속 True 구간을 찾아 시작/끝 시각 및 score 정보를 하나의 prediction 이벤트로 묶는다.
     i = 0
     k = 0
     while i < n:
@@ -101,6 +103,7 @@ def write_roca_prediction(
     op = eval_bundle["operational"]
     vus = eval_bundle["vus"]
 
+    # 다른 모델과 동일하게 UTC 시각 문자열로 저장하여 UI와 평가에서 원본 시계열에 정렬한다.
     times_iso = [
         pd.Timestamp(t).tz_convert("UTC").isoformat()
         if pd.Timestamp(t).tzinfo

@@ -28,7 +28,9 @@ def subsequences(sequence: np.ndarray, window_size: int, time_step: int) -> np.n
 
     반환 shape는 입력이 2차원일 때 (N, window, F)다.
     """
+    # 연속 메모리를 확보한 뒤 stride로 window를 표현할 수 있도록 준비한다.
     sq = np.ascontiguousarray(sequence)
+    # 완전한 window가 만들어지지 않는 마지막 나머지 시점 수를 계산한다.
     a = (sq.shape[0] - window_size + time_step) % time_step
     if sq.ndim == 1:
         if a != 0:
@@ -46,6 +48,7 @@ def subsequences(sequence: np.ndarray, window_size: int, time_step: int) -> np.n
         stride = sq.itemsize * np.array([time_step * sq.shape[1], sq.shape[1], 1])
     else:
         raise ValueError(f"expected 1D/2D, got ndim={sq.ndim}")
+    # stride는 메모리의 이동 간격(바이트)이며 copy로 서로 겹치는 view를 독립 배열로 만든다.
     return np.lib.stride_tricks.as_strided(sq, shape=shape, strides=stride).copy()
 
 
@@ -64,9 +67,11 @@ class RoCAWindowDataset(Dataset):
     def __init__(self, samples_nct: np.ndarray, labels: np.ndarray, config: Any):
         if samples_nct.ndim != 3:
             raise ValueError("samples must be (N, C, T)")
+        # 전체 입력은 (N,C,T), label은 (N,)이다. PyTorch 계산용 dtype으로 맞춘다.
         self.x_data = torch.from_numpy(samples_nct.astype(np.float32))
         self.y_data = torch.from_numpy(labels.astype(np.int64))
         self.len = self.x_data.shape[0]
+        # 원본 구현과 같이 Dataset 초기화 시 두 증강 view를 미리 생성한다.
         self.aug1, self.aug2 = DataTransform(self.x_data, config)
         if isinstance(self.aug1, np.ndarray):
             self.aug1 = torch.from_numpy(self.aug1.astype(np.float32))
@@ -74,6 +79,7 @@ class RoCAWindowDataset(Dataset):
             self.aug2 = torch.from_numpy(self.aug2.astype(np.float32))
 
     def __getitem__(self, index: int):
+        # DataLoader는 이 네 항목을 각각 쌓아 batch를 구성한다.
         return self.x_data[index], self.y_data[index], self.aug1[index], self.aug2[index]
 
     def __len__(self) -> int:

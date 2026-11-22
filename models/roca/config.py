@@ -37,11 +37,13 @@ class RoCAConfig:
 
     # 실제 실행 시 run_plmn.py에서 현재 core feature 수로 다시 설정된다.
     input_channels: int = 46
+    # convolution kernel 길이와 stride, CNN 출력 channel 및 LSTM hidden 차원을 설정한다.
     kernel_size: int = 8
     stride: int = 1
     final_out_channels: int = 32
     hidden_size: int = 64
     num_layers: int = 3
+    # 두 projection과 hypersphere center가 공유할 표현 공간 차원이다.
     project_channels: int = 64
     dropout: float = 0.45
     # 한 학습 sample에 포함할 시점 수.
@@ -52,11 +54,14 @@ class RoCAConfig:
     # 학습은 기본 16칸 stride지만 평가 score는 VUS 비교를 위해 stride=1로 다시 계산한다.
     time_step: int = 16
 
+    # 전체 epoch 수, 초기 center 갱신 기준 및 0에 가까운 center 성분 보정값이다.
     num_epoch: int = 20
     change_center_epoch: int = 1
     center_eps: float = 0.01
+    # 최종 loss=loss_oc+omega*loss_sigam에서 분산 regularizer의 가중치이다.
     omega: float = 0.02
 
+    # Adam의 1차/2차 모멘트 계수, 학습률과 weight decay를 정한다.
     beta1: float = 0.9
     beta2: float = 0.99
     lr: float = 3e-4

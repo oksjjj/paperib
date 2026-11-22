@@ -92,6 +92,7 @@ def score_block(
     model.eval()
     step = int(time_step if time_step is not None else cfg.time_step)
     t = len(block)
+    # window를 만들 수 없는 첫 window-1개 시점은 점수가 없으므로 NaN으로 남긴다.
     scores = np.full(t, np.nan, dtype=np.float64)
     if t < cfg.window_size:
         return scores
@@ -124,6 +125,7 @@ def score_block(
         )
         outs.append(loss_n.detach().cpu().numpy())
     err = np.concatenate(outs, axis=0)
+    # window 점수를 마지막 시점에 배치한다. 미래 시점을 사용해 과거 점수를 계산하지 않는다.
     for e, s in zip(ends, err):
         if 0 <= int(e) < t:
             scores[int(e)] = float(s)
@@ -241,8 +243,10 @@ def train_and_eval(
             aug2 = aug2.float().to(device)
 
             # 한 batch 안에서 원본/weak/strong view를 합쳐 동일 backbone에 통과시킨다.
+            # 각 view가 (B,F,W)이면 연결 결과는 (3B,F,W), projection은 각각 (3B,P)이다.
             all_data = torch.cat((data, aug1, aug2), dim=0)
 
+            # 이전 batch의 gradient를 지우고 현재 batch의 목적함수만 역전파한다.
             opt.zero_grad()
             feature1, feature_dec1 = model(all_data)
 
@@ -253,6 +257,7 @@ def train_and_eval(
             )
             # 최종 학습 loss = one-class loss + 가중된 variance regularizer.
             loss = loss_oc + cfg.omega * loss_sigam
+            # center는 optimizer 파라미터가 아니다. 이 단계에서는 backbone 가중치만 갱신한다.
             loss.backward()
             opt.step()
             losses.append(float(loss.detach()))
@@ -267,6 +272,7 @@ def train_and_eval(
                 eps=cfg.center_eps,
             )
         mean_loss = float(np.mean(losses)) if losses else float("nan")
+        # epoch 평균 loss를 기준으로 learning rate scheduler를 갱신한다.
         scheduler.step(mean_loss)
         history.append({"epoch": epoch, "loss": mean_loss})
         if not quiet:

@@ -39,11 +39,13 @@ def roca_loss(feature1, feature_dec1, center, epoch, config, device):
 
     # 원본 representation과 reconstruction representation 각각이
     # hypersphere center에서 얼마나 떨어져 있는지를 cosine distance로 계산한다.
+    # 각 거리는 1-cos(theta)로 [0,2] 범위이며 두 거리의 합은 [0,4] 범위이다.
     distance1 = 1 - F.cosine_similarity(feature1, center, eps=1e-6)
     distance_dec1 = 1 - F.cosine_similarity(feature_dec1, center, eps=1e-6)
 
     # 모든 representation이 한 점으로 collapse되는 것을 막기 위해
     # 각 representation 차원의 표준편차가 너무 작으면 penalty를 준다.
+    # var([0])는 batch 축의 분산이다. projection 차원별 산포를 계산한다.
     sigma_aug1 = torch.sqrt(feature1.var([0]) + 0.0001)
     sigma_aug2 = torch.sqrt(feature_dec1.var([0]) + 0.0001)
     sigma_loss1 = torch.max(torch.zeros_like(sigma_aug1), (1 - sigma_aug1))
@@ -70,6 +72,7 @@ def roca_loss(feature1, feature_dec1, center, epoch, config, device):
             # warmup 이후에는 현재 batch에서 score가 가장 큰 nu 비율을
             # 잠재 anomaly 후보로 간주한다. 실제 anomaly label은 사용하지 않는다.
             n = int(score.shape[0])
+            # score 길이는 원본 및 증강을 합친 batch 크기이다. 최소 한 개를 잠재 이상 후보로 선택한다.
             n_a = max(1, int(n * config.nu))
             n_n = max(1, n - n_a)
 
@@ -81,6 +84,7 @@ def roca_loss(feature1, feature_dec1, center, epoch, config, device):
 
             # normal candidate에는 center로 가까워지는 loss_n,
             # anomaly candidate에는 반대 방향인 loss_a를 사용한다.
+            # 실제 데이터 행을 삭제하는 것이 아니라 후보별로 다른 목적함수를 부여해 한 번에 최적화한다.
             loss_oc = torch.cat(
                 [loss_n[idx_n], config.mu * loss_a[idx_a]],
                 0,
@@ -109,8 +113,10 @@ def center_c(train_loader, model, device, center, config, eps=0.1):
             all_data = torch.cat((data, aug1, aug2), dim=0)
             outputs, dec = model(all_data)
             n_samples += outputs.shape[0]
+            # (3B,P) 원본 projection과 복원 projection을 이어 (6B,P)로 만든 후 P차원 합을 누적한다.
             all_feature = torch.cat((outputs, dec), dim=0)
             c = c + torch.sum(all_feature, dim=0)
+    # n_samples는 view 수를 포함한 projection 행 수이다. 양쪽 표현을 합산했으므로 2배로 나눈다.
     c = c / (2 * n_samples)
     c[(abs(c) < eps) & (c < 0)] = -eps
     c[(abs(c) < eps) & (c > 0)] = eps
