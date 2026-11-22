@@ -1,4 +1,15 @@
-"""Anomaly labeling helpers: ranking, data load, label store, plotting."""
+"""이상구간 라벨링 UI가 사용하는 공통 기능 모음.
+
+이 파일은 크게 다음 역할을 담당한다.
+- PLMN/feature 이름과 논문용 core feature 정의
+- 원본 데이터와 캐시 로딩
+- 전문가 label 저장/수정
+- 모델 prediction 및 anomaly score 정렬
+- 평가 metric 계산
+- Plotly 그래프와 overlay 생성
+
+즉 app.py가 화면 이벤트를 담당한다면, tool.py는 실제 데이터 처리와 시각화 로직을 담당한다.
+"""
 
 from __future__ import annotations
 
@@ -16,7 +27,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 KST = ZoneInfo("Asia/Seoul")
-# Display: Korean date style in Asia/Seoul (e.g. 2026년 04월 30일 00:00)
+# 화면에 표시할 날짜는 Asia/Seoul 기준의 한국식 형식을 사용한다.
 KST_FMT = "%Y년 %m월 %d일 %H:%M"
 KST_FMT_SEC = "%Y년 %m월 %d일 %H:%M:%S"
 _KST_PARSE_FMTS = (
@@ -36,7 +47,7 @@ RANK_CACHE_PATH = os.path.join(LABEL_DIR, "plmn_rank.csv")
 CACHE_DIR = os.path.join(os.path.dirname(__file__), "cache")
 RANK_SIGNATURE_PATH = os.path.join(CACHE_DIR, "plmn_rank.signature")
 
-# Paper evaluation set (labeling UI / selection). Order is intentional.
+# 논문 평가에 사용하는 10개 사업자 목록이다. UI 순서도 이 순서를 그대로 사용한다.
 PAPER_PLMNS: tuple[str, ...] = (
     "P0480",
     "P0714",
@@ -51,8 +62,8 @@ PAPER_PLMNS: tuple[str, ...] = (
 )
 PAPER_PLMN_SET: frozenset[str] = frozenset(PAPER_PLMNS)
 
-# Expert core counters for visualization + model training (exclude other M*).
-# Order is the canonical feature order for plots and model inputs.
+# 전문가 라벨링과 모델 학습에 공통으로 사용하는 핵심 counter 목록이다.
+# 이 순서는 그래프와 모델 입력에서 사용하는 표준 feature 순서이므로 임의로 바꾸지 않는다.
 CORE_FEATURES: tuple[str, ...] = (
     "M971",  # COMB_ATTEMPT
     "M185",  # COMB_AUC_FAIL
@@ -69,9 +80,9 @@ CORE_FEATURES: tuple[str, ...] = (
 CORE_FEATURE_SET: frozenset[str] = frozenset(CORE_FEATURES)
 CORE_FEATURE_MODE = "core"
 
-# Figure layout: metrics panel keeps a fixed height; score band is always
-# reserved above it; human and model label bars each get their own bottom
-# track so they do not cover metric/score traces or each other.
+# 그래프는 metric 패널 높이를 고정하고 anomaly score 영역을 항상 위쪽에 확보한다.
+# 사람 label과 모델 prediction은 서로 겹치지 않도록 아래쪽에 각각 별도 track을 사용한다.
+# 이렇게 분리해야 metric/score 선과 label overlay가 서로 가리지 않는다.
 FIGURE_METRICS_HEIGHT = 320
 FIGURE_SCORE_HEIGHT = 100
 FIGURE_LABEL_HEIGHT = 48  # per track (human + model)
@@ -84,16 +95,16 @@ FIGURE_HEIGHT = (
 
 ANOMALY_FILL = "rgba(201, 162, 39, 0.28)"
 ANOMALY_LINE = "#c9a227"
-# Model predictions — distinct from human labels.
+# 모델 prediction은 전문가 label과 시각적으로 구분해서 표시한다.
 MODEL_FILL = "rgba(124, 58, 237, 0.22)"
 MODEL_LINE = "#7c3aed"
 ANOMALY_SCORE_KEY = "__anomaly_score__"
 ANOMALY_SCORE_COLOR = "#7c3aed"
 ANOMALY_SCORE_THRESHOLD_COLOR = "#c026d3"
 
-# Chronological train / valid / test bands.
-# Opacity is high enough to read on top of panel_bg fills (#f7f5f1 etc.).
-# Chrono split bands — keep distinct from human anomaly (gold) and model (purple).
+# 시간순 TRAIN / VALID / TEST 구간 배경색 정의.
+# 패널 배경 위에서도 split 구간이 보이도록 적당한 투명도를 사용한다.
+# split 배경색은 전문가 anomaly(금색)와 모델 prediction(보라색)과 구분되게 한다.
 SPLIT_TRAIN_BAND = "rgba(14, 165, 233, 0.14)"   # sky blue
 SPLIT_VALID_BAND = "rgba(16, 185, 129, 0.14)"   # emerald
 SPLIT_TEST_BAND = "rgba(244, 114, 182, 0.12)"   # pink
@@ -101,7 +112,7 @@ SPLIT_BOUNDARY = "#0e7490"
 DEFAULT_TRAIN_RATIO = 0.6
 DEFAULT_VALID_RATIO = 0.2
 
-# Mid-tone hues: readable on white without the previous near-black density.
+# 흰 배경에서 여러 시계열을 구분하기 쉽도록 중간 밝기의 색상들을 사용한다.
 SERIES_COLORWAY = (
     "#3d7ab5",  # blue
     "#d9655a",  # coral red
@@ -125,7 +136,7 @@ SERIES_COLORWAY = (
     "#c97a55",  # rust
 )
 
-# Shapes/annotations tagged with these names are transient labeling guides.
+# 아래 이름이 붙은 shape/annotation은 실제 label이 아니라 라벨링 작업 중 잠깐 표시하는 안내선이다.
 PENDING_ANCHOR_NAME = "pending_range_anchor"
 PENDING_RANGE_FILL_NAME = "pending_range_fill"
 LABEL_HIGHLIGHT_NAME = "label_highlight"
@@ -291,7 +302,7 @@ def load_plmn(
         try:
             cached = pd.read_pickle(cache_path)
             if cached.attrs.get("signature") == signature:
-                # Rates are stored in the pickle; only backfill older caches.
+                # 최신 pickle에는 rate가 저장되어 있으므로, 오래된 캐시에 rate가 없을 때만 다시 계산한다.
                 return add_rate_columns(cached)
         except Exception:
             pass
@@ -517,7 +528,7 @@ def add_split_region_overlays(
     ]
     existing_shapes = list(fig.layout.shapes or ())
     existing_ann = list(fig.layout.annotations or ())
-    # Append after panel_bg (same layer=below) so tints are visible on top of fills.
+    # panel 배경을 먼저 만든 뒤 split tint를 추가해야 아래 layer에서도 구간 색이 보인다.
     fig.layout.shapes = tuple(existing_shapes + new_shapes)
     fig.layout.annotations = tuple(new_ann + existing_ann)
 
@@ -769,7 +780,7 @@ def list_prediction_sources(plmn: str) -> list[dict[str, str]]:
         if not name.startswith(prefix) or not name.endswith(".json"):
             continue
         source = name[len(prefix) : -len(".json")]
-        # Comparison/report artifacts are not model prediction sources.
+        # 비교표나 보고서 JSON은 모델 prediction source 목록에서 제외한다.
         if source == "context_vs_hour24":
             continue
         path = os.path.join(PRED_DIR, name)
@@ -826,7 +837,7 @@ def load_predictions(
     doc.setdefault("source", source)
     doc.setdefault("labels", [])
     _migrate_anomalytransformer_score_scale(doc)
-    # Build score index once at load (never re-parse ISO strings per hover/row).
+    # hover마다 ISO 시간을 다시 파싱하지 않도록 prediction을 읽을 때 score 시간 인덱스를 한 번만 만든다.
     _ensure_score_index(doc)
     return doc
 
@@ -966,7 +977,7 @@ def paper_metrics_from_ib_saved(
                 "note": f"primary thr on valid · {ratio_note}",
             }
     else:
-        # test: primary thr applied on test (point metrics from export when present)
+        # TEST에서는 학습/개발 단계에서 정한 primary threshold를 그대로 적용한다.
         if _as_float(m.get("test-f1")) is not None:
             out["pot"] = {
                 "precision": _as_float(m.get("test-precision")),
@@ -1471,22 +1482,22 @@ def thresholds_from_pred_doc(predictions: dict[str, Any]) -> dict[str, float | N
     method = str(predictions.get("threshold_method") or "pot")
     cached = predictions.get("thresholds") or {}
 
-    # Primary (label-free) thr from export metrics first.
+    # primary threshold는 우선 export된 label-free threshold 정보를 사용한다.
     pot = (
         _as_float(m.get("pot-threshold"))
         or _as_float(m.get("valid-pot-threshold"))
     )
     if pot is None and method in ("percentile", "energy_percentile", "pot"):
-        # Classical / LSTM store train percentile under metrics.threshold.
+        # 일부 기존 baseline은 TRAIN percentile threshold를 metrics.threshold에 저장한다.
         pot = _as_float(m.get("threshold"))
     if pot is None and predictions.get("score_scale") == "log10_thr_over_energy":
         pot = 0.0
     if pot is None and method in ("percentile", "energy_percentile"):
         pot = _as_float(m.get("energy_threshold"))
-    # Cached primary from a prior enrich (stable across mode switches).
+    # 이전 enrich 단계에서 캐시한 primary threshold가 있으면 mode 변경에도 그대로 유지한다.
     if pot is None:
         pot = _as_float(cached.get("pot"))
-    # Fresh file load only: fall back to top-level / score_series thr.
+    # 처음 파일을 읽는 경우에만 top-level 또는 score_series의 threshold를 fallback으로 사용한다.
     if pot is None and not cached:
         pot = _as_float(ss.get("threshold")) or _as_float(predictions.get("threshold"))
 
@@ -1526,7 +1537,7 @@ def mask_to_pred_labels(
             sl = np.asarray(scores[i:j], dtype=np.float64)
             finite = sl[np.isfinite(sl)]
             if len(finite):
-                # Default paperib polarity: higher score = more anomalous.
+                # paperib 기본 score 방향은 값이 클수록 더 anomalous한 것이다.
                 seg_score = float(np.max(finite))
         kind = "point" if j == i + 1 else "range"
         items.append(
@@ -1597,7 +1608,7 @@ def enrich_predictions_for_ui(
     )
     thresholds = thresholds_from_pred_doc(doc)
     export_paper = doc.get("paper_metrics")
-    # Prefer the shared metric schema from current model exports.
+    # 가능하면 현재 모델 export가 사용하는 공통 metric schema를 우선 사용한다.
     
     flat_vus = paper_metrics_from_flat_metrics(
         doc.get("metrics") or {},
@@ -1620,7 +1631,7 @@ def enrich_predictions_for_ui(
             doc.get("metrics") or {}, metrics_split=split_choice
         )
 
-    # Oracle thr always fit on **valid** (never on test).
+    # oracle threshold는 분석용으로 VALID에서만 찾고 TEST에서는 절대 다시 맞추지 않는다.
     region_valid = _eval_region_mask(df, doc, metrics_split="valid")
     region = _eval_region_mask(df, doc, metrics_split=split_choice)
     y_full = human_anomaly_mask(df, human_labels)
@@ -1635,7 +1646,7 @@ def enrich_predictions_for_ui(
         score_all = df[ANOMALY_SCORE_KEY].to_numpy(dtype=np.float64)
         s_val = score_all[region_valid]
         y_val = y_full[region_valid]
-        # Point oracle always live on valid; PA uses saved thr when present.
+        # point-F1 oracle은 VALID에서 실시간 계산하고, PA oracle은 저장된 값이 있으면 이를 사용한다.
         bf_pt, _ = best_f1_threshold(
             s_val, y_val, objective="point", higher_is_anomaly=higher
         )
@@ -1658,13 +1669,13 @@ def enrich_predictions_for_ui(
                 higher_is_anomaly=higher,
             )
 
-    # Labels per mode (full series — overlay not clipped to metrics_split)
+    # threshold mode별 prediction label은 전체 시계열 기준으로 유지하며 metric split에 맞춰 잘라내지 않는다.
     labels_by_mode: dict[str, list] = {}
     pot_thr = thresholds.get("pot")
     method = str(doc.get("threshold_method") or "pot")
     prev_by_mode = doc.get("labels_by_mode") or {}
-    # Freeze export-file labels once so mode switches cannot overwrite pot overlays
-    # with the currently active (e.g. best-F1) segment list.
+    # export 원본 label을 한 번 보관해두어 threshold mode 전환이 primary overlay를 덮어쓰지 못하게 한다.
+    # 예를 들어 best-F1 segment를 보고 다시 primary mode로 돌아올 때 원본 segment를 복원할 수 있다.
     export_labels = doc.get("export_labels")
     if export_labels is None:
         if prev_by_mode.get("pot") is not None and doc.get("threshold_mode") in (
@@ -1685,7 +1696,7 @@ def enrich_predictions_for_ui(
         "percentile",
         "energy_percentile",
     ) and export_labels and split_choice == "valid":
-        # Prefer attribution-bearing export labels when viewing valid.
+        # VALID 화면에서는 기여 feature 정보가 들어 있는 export label을 우선 사용한다.
         labels_by_mode["pot"] = export_labels
     elif pot_thr is not None:
         labels_by_mode["pot"] = rebuild_pred_labels_for_threshold(
@@ -1732,7 +1743,7 @@ def enrich_predictions_for_ui(
     doc["threshold"] = thr
     doc["threshold_mode"] = mode
     doc["thresholds"] = thresholds
-    # Live VUS / Event / FA for the active split + threshold (all models).
+    # 현재 선택된 split과 threshold에 대해 VUS, Event metric, FA/day를 실시간 재계산한다.
     if thr is not None and region.any() and ANOMALY_SCORE_KEY in df.columns:
         score_all = df[ANOMALY_SCORE_KEY].to_numpy(dtype=np.float64)
         s_reg = score_all[region]
@@ -1753,7 +1764,7 @@ def enrich_predictions_for_ui(
         )
         if live_paper is not None:
             paper = live_paper
-            # Keep flat metrics keys in sync for UI fallbacks.
+            # UI의 이전 형식 fallback도 동작하도록 flat metric key를 함께 갱신한다.
             mflat = dict(doc.get("metrics") or {})
             mflat.update(
                 {
@@ -1793,7 +1804,7 @@ def enrich_predictions_for_ui(
             )
             doc["metrics"] = mflat
         elif has_vus_paper_metrics({"paper_metrics": paper, "metrics": doc.get("metrics")}):
-            # Keep export VUS block when live recompute fails (e.g. missing vus pkg).
+            # vus 패키지 누락 등으로 실시간 계산이 실패하면 export 시 저장된 VUS 값을 유지한다.
             paper = dict(paper)
             paper["eval_split"] = split_choice
     doc["paper_metrics"] = paper
@@ -1842,7 +1853,7 @@ def apply_threshold_mode(
     thresholds = dict(doc.get("thresholds") or thresholds_from_pred_doc(doc))
     labels_by_mode = dict(doc.get("labels_by_mode") or {})
     if not labels_by_mode:
-        # Not enriched yet — caller should use enrich_predictions_for_ui.
+        # 아직 UI용 보강 처리가 되지 않은 prediction이면 enrich_predictions_for_ui()를 먼저 호출해야 한다.
         return enrich_predictions_for_ui(
             df,
             predictions,
@@ -1893,12 +1904,12 @@ def _migrate_anomalytransformer_score_scale(doc: dict[str, Any]) -> None:
     energy_thr = doc.get("energy_threshold")
     thr = doc.get("threshold")
     if energy_thr is None and thr is not None:
-        # Legacy: UI threshold was -energy_threshold.
+        # 과거 Anomaly Transformer 형식에서는 UI threshold가 -energy_threshold로 저장되었다.
         energy_thr = abs(float(thr))
     if energy_thr is None or not (float(energy_thr) > 0):
         return
     energy_thr = float(energy_thr)
-    # Legacy polarity: stored score = -energy.
+    # 과거 형식의 score는 -energy이므로 현재 score 방향과 맞추기 위한 변환이 필요하다.
     energies: list[float] = []
     for v in scores_raw:
         if v is None:
@@ -1925,7 +1936,7 @@ def _migrate_anomalytransformer_score_scale(doc: dict[str, Any]) -> None:
     doc["energy_threshold"] = energy_thr
     doc["score_polarity"] = "log10_thr_over_energy"
     doc["score_scale"] = "log10_thr_over_energy"
-    # Refresh segment scores to the new scale (min = most anomalous).
+    # score scale을 바꾼 뒤 기존 segment 대표 score도 새 scale에 맞춰 다시 계산한다.
     times = ss.get("times") or []
     if times and new_scores:
         t_ns = (
@@ -1946,7 +1957,7 @@ def _migrate_anomalytransformer_score_scale(doc: dict[str, Any]) -> None:
             mask = (t_ns >= s) & (t_ns <= e) & np.isfinite(sc)
             if np.any(mask):
                 item["score"] = float(np.min(sc[mask]))
-    # Drop stale index so it rebuilds after migration.
+    # score migration 뒤 이전 시간 인덱스는 무효이므로 삭제해 다음 접근 때 다시 만든다.
     doc.pop("_score_index", None)
 
 
@@ -1971,7 +1982,7 @@ def _ensure_score_index(predictions: dict[str, Any] | None) -> dict[str, Any] | 
     if len(times) == 0:
         predictions["_score_index"] = {"ns": np.array([], dtype=np.int64), "scores": np.array([], dtype=np.float64)}
         return predictions["_score_index"]
-    # Always nanoseconds since epoch (pandas may store datetime64[us]).
+    # pandas 내부 datetime 단위가 달라도 비교를 안정적으로 하기 위해 항상 epoch nanosecond로 변환한다.
     ns = times.to_numpy(dtype="datetime64[ns]").astype(np.int64, copy=False)
     order = np.argsort(ns, kind="mergesort")
     index = {
@@ -2018,7 +2029,7 @@ def align_scores_to_df(
     scores = index["scores"]
     pos = np.searchsorted(score_ns, sample_ns)
     tol = np.int64(5 * 60 * 1_000_000_000)
-    # Candidate indices: pos-1 and pos (clipped).
+    # 가장 가까운 시점을 찾을 때 삽입 위치의 바로 앞/뒤 두 후보만 비교하면 된다.
     left = np.clip(pos - 1, 0, len(score_ns) - 1)
     right = np.clip(pos, 0, len(score_ns) - 1)
     dt_l = np.abs(score_ns[left] - sample_ns)
@@ -2059,7 +2070,7 @@ def anomaly_score_at_time(
                 best = cand
     if best is not None and best_dt is not None and best_dt <= tol:
         return float(scores[best])
-    # Optional dict path (legacy callers).
+    # 과거 호출부와의 호환을 위해 dict 입력 경로도 유지한다.
     if lookup:
         if target in lookup:
             return lookup[target]
@@ -2076,7 +2087,7 @@ def score_hover_arrays(
     index = _ensure_score_index(predictions)
     if not index or len(index["ns"]) == 0:
         return None
-    # Rebuild UTC timestamps → plot naive (KST wall) ms, matching sample_ms.
+    # score 시간을 UTC에서 Plotly 표시용 KST wall-clock millisecond로 바꿔 sample_ms와 같은 좌표계로 맞춘다.
     utc_times = pd.to_datetime(index["ns"], unit="ns", utc=True)
     plot_ms = to_plot_times(utc_times).astype("datetime64[ms]").astype("int64")
     scores = np.asarray(index["scores"], dtype=np.float64)
@@ -2277,7 +2288,7 @@ def add_model_indicator(
     return is_range
 
 
-# Cap Plotly shapes: Anomaly Transformer can emit hundreds of segments.
+# 예측 segment가 너무 많으면 Plotly가 느려지므로 화면에 그릴 shape 수를 제한한다.
 MAX_MODEL_OVERLAYS = 48
 
 
@@ -2313,7 +2324,7 @@ def model_overlays_for_plot(
             scv = float(item["score"]) if item.get("score") is not None else 0.0
         except (TypeError, ValueError):
             scv = 0.0
-        # Longer first; then lower UI score (more anomalous).
+        # 겹치는 prediction 후보 중 긴 구간을 우선하고, 그다음 더 anomalous한 score를 우선한다.
         ranked.append((dur, -scv, item))
 
     ranked.sort(key=lambda x: (x[0], x[1]), reverse=True)
@@ -2562,14 +2573,14 @@ def format_metric_value(
     return f"{base} ({float(value) / att * 100.0:.1f}%)"
 
 
-# Highlighted in the "이 시점 특성값" panel (rank, name, and value).
+# 아래 설정은 '이 시점 특성값' 패널에서 순위·이름·값을 강조할 feature에 사용한다.
 HOVER_RED_METRICS = frozenset({"M855", "M037", "M430", "M162", "M618", "M520"})
 HOVER_ORANGE_METRICS = frozenset({"M874", "M185", "M965", "M843", "M419"})
 
 
-# Ranked Plotly tooltips are only embedded while zoomed-in. Full-window
-# rebuilds (「전체」) skip them so figure JSON stays small; series keep their
-# normal hovertemplates and the bottom panel still ranks on hoverData.
+# feature 순위 tooltip은 확대된 구간에서만 넣는다. 전체 구간에서는 데이터가 너무 커지기 때문이다.
+# 전체 보기에서는 무거운 tooltip 문자열을 생략해 figure JSON 크기를 줄인다.
+# 대신 일반 hover와 아래쪽 값 패널은 그대로 동작한다.
 HOVER_RANKED_MAX_FRAC = 0.45
 
 
@@ -3380,7 +3391,7 @@ def build_figure(
 ) -> go.Figure:
     """Trend chart: optional anomaly-score row, rates, then count metrics."""
     view = _filter_df(df, start, end) if filter_data else df
-    # `metrics=[]` must stay empty — do not treat it as falsy fallback to all cols.
+    # metrics=[]는 '아무 것도 표시하지 않음'이라는 의미이므로 falsy라고 해서 전체 feature로 대체하면 안 된다.
     cols = metric_columns(df) if metrics is None else list(metrics)
     if max_metrics is not None and max_metrics >= 0:
         cols = cols[:max_metrics]
@@ -3421,7 +3432,7 @@ def build_figure(
         score_x, score_y = series.get(ANOMALY_SCORE_KEY, ([], []))
         show_score = bool(len(score_y) and np.any(np.isfinite(np.asarray(score_y, dtype=float))))
     else:
-        # Fallback when df was not warmed with ensure_score_column.
+        # DataFrame에 미리 score column을 붙이지 못한 경우를 위한 fallback 경로다.
         score_vals_all = (
             align_scores_to_df(view, predictions)
             if show_predictions and predictions
@@ -3454,13 +3465,13 @@ def build_figure(
     rate_colors = {S_RATE_KEY: S_RATE_COLOR, A_RATE_KEY: A_RATE_COLOR}
     rate_hover = "값=%{y:.1%}<extra></extra>"
     count_hover = "값=%{y:,.0f}<extra></extra>"
-    # Ranked tooltips (heavy) only while zoomed-in. Full / near-full windows
-    # keep normal per-series hover so 「전체」 rebuilds stay light.
+    # 무거운 feature 순위 tooltip은 확대 상태에서만 생성한다.
+    # 전체/거의 전체 구간에서는 일반 hover만 유지해 그래프 재생성을 가볍게 한다.
     embed_ranked = bool(hover_values) and _should_embed_ranked_hover(df, start, end)
     series_hoverinfo = "skip" if embed_ranked else None
 
     show_rate = bool(rate_cols)
-    # Always reserve score (top) + human/model label tracks (bottom).
+    # score 영역과 사람/모델 label track은 데이터가 없어도 항상 자리를 확보한다.
     reserve_score = True
     reserve_labels = True
     has_score_data = bool(show_score and len(score_x))
@@ -3533,7 +3544,7 @@ def build_figure(
                 name="Anomaly score",
                 opacity=0.9,
                 line=dict(color=ANOMALY_SCORE_COLOR, width=1.5),
-                # Custom place-time tip owns hover text; keep pickable for 값 탐색 clicks.
+                # 라벨 배치용 커스텀 tooltip이 hover를 담당하므로 값 탐색 click은 가능하도록 trace를 유지한다.
                 hoverinfo="none",
                 uid=ANOMALY_SCORE_KEY,
                 connectgaps=False,
@@ -3619,7 +3630,7 @@ def build_figure(
         data_rev = f"{data_rev}:score"
 
     if embed_ranked and len(view):
-        # Rate panel: SUCC / COMB largest-first (full max_points sample density).
+        # rate 패널은 SUCC/COMB 계열을 큰 값부터 그리며 지정된 최대 sample 밀도를 사용한다.
         if rate_cols and rate_row is not None:
             _add_ranked_hover_anchor(
                 fig,
@@ -3633,7 +3644,7 @@ def build_figure(
                 filter_data=filter_data,
             )
 
-        # Metric panel: count metrics largest-first.
+        # count metric 패널도 값이 큰 series부터 그린다.
         metric_hover_cols = list(primary_cols)
         if metric_hover_cols:
             _add_ranked_hover_anchor(
@@ -3648,7 +3659,7 @@ def build_figure(
                 filter_data=filter_data,
             )
     elif len(view) and (primary_cols or rate_cols) and not hover_values:
-        # Keep a non-hover hit target for click/inspect when ranked tips are off.
+        # 순위 tooltip을 끈 경우에도 click/inspect가 가능하도록 보이지 않는 hit target을 남긴다.
         hover_y_cols = primary_cols or rate_cols
         hover_row = metric_row if primary_cols else (rate_row or 1)
         idx = _hover_sample_indices(
@@ -3712,8 +3723,8 @@ def build_figure(
             end=end,
             highlight_id=hid_pred,
         )
-        # Edges only for the selection (or when few bands) — hundreds of
-        # edge shapes freeze Plotly when Anomaly Transformer fires many segs.
+        # prediction이 많을 때 모든 시작/끝 선을 그리면 Plotly가 느려지므로 선택된 구간 위주로 edge를 그린다.
+        # 특히 수백 개 segment가 생기는 경우 edge shape 수를 제한해야 UI가 멈추지 않는다.
         draw_all_edges = len(overlay_items) <= 16
         for item in overlay_items:
             is_hi = bool(hid_pred and str(item.get("id") or "") == hid_pred)
@@ -3727,10 +3738,10 @@ def build_figure(
 
     fig.update_layout(
         title=title or f"{display_plmn(str(doc.get('plmn')))} anomaly labeling",
-        # Metrics keep FIGURE_METRICS_HEIGHT; score + label tracks are extra.
+        # metric 패널 높이는 고정하고 score/label 영역은 별도 높이로 추가한다.
         height=FIGURE_HEIGHT if reserve_score else FIGURE_METRICS_HEIGHT,
         autosize=True,
-        # Ranked hover uses shared-x tips; otherwise closest (one series).
+        # feature 순위 hover를 쓸 때는 같은 x의 여러 series를 함께 보여주고, 아니면 가장 가까운 한 series만 보여준다.
         hovermode="x" if embed_ranked else "closest",
         dragmode="zoom",
         showlegend=False,
@@ -3893,7 +3904,7 @@ def build_figure(
             kw["showticklabels"] = False
         fig.update_xaxes(**kw, row=row_i, col=1)
 
-    # Panel fills first, then train|valid|test tints (same layer=below → later wins).
+    # 패널 배경을 먼저 그리고 그 위에 TRAIN/VALID/TEST tint를 같은 below layer로 추가한다.
     _style_panel_separation(
         fig,
         n_rows=n_rows,
@@ -3921,7 +3932,7 @@ def _style_panel_separation(
         dom = getattr(axis, "domain", None) if axis is not None else None
         domains.append(dom)
     if show_score and show_rate and show_labels and n_rows == 5:
-        # score / rate / metrics / human / model
+        # subplot 순서: score / rate / metrics / 전문가 label / 모델 prediction
         defaults = [
             (0.84, 1.0),
             (0.70, 0.80),
@@ -3930,7 +3941,7 @@ def _style_panel_separation(
             (0.0, 0.08),
         ]
     elif show_score and show_labels and n_rows == 4:
-        # score / metrics / human / model
+        # rate 패널이 없을 때 subplot 순서: score / metrics / 전문가 label / 모델 prediction
         defaults = [(0.82, 1.0), (0.22, 0.78), (0.11, 0.18), (0.0, 0.08)]
     elif n_rows == 4:
         defaults = [(0.82, 1.0), (0.66, 0.78), (0.14, 0.62), (0.0, 0.10)]
