@@ -31,13 +31,6 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-from models.roca.config import RoCAConfig
-from models.roca.dataset import RoCAWindowDataset, block_to_nct
-from models.roca.export_predictions import write_roca_prediction
-from core.metrics import evaluate_valid
-from models.roca.official.loss import center_c, roca_loss
-from models.roca.official.network import base_Model
-
 REPO = Path(__file__).resolve().parents[2]
 ROOT = REPO / "RoCA"
 MODEL_ROOT = ROOT / "model"
@@ -46,6 +39,12 @@ if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
 from core.data import prepare_plmn
+from core.metrics import evaluate_valid
+from models.roca.config import RoCAConfig
+from models.roca.dataset import RoCAWindowDataset, block_to_nct
+from models.roca.export_predictions import write_roca_prediction
+from models.roca.official.loss import center_c, roca_loss
+from models.roca.official.network import base_Model
 
 
 def _device() -> torch.device:
