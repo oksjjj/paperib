@@ -22,7 +22,6 @@ final_contamination_pct(기본 0.01%)는 과거 구현과의 비교를 위해 �
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import json
 import random
 import sys
@@ -41,35 +40,16 @@ from torch.utils.data import DataLoader, TensorDataset
 
 ROOT = Path(__file__).resolve().parent
 REPO = ROOT.parent
-LABELING = REPO / "labeling"
 PRED_DIR = REPO / "data" / "ib_data" / "predictions"
 MODEL_DIR = ROOT / "model"
 
-if str(LABELING) not in sys.path:
-    sys.path.insert(0, str(LABELING))
+if str(REPO) not in sys.path:
+    sys.path.insert(0, str(REPO))
 
-from tool import (
-    human_anomaly_mask,
-    is_rate_metric,
-    load_labels,
-    load_plmn,
-    metric_columns,
-)
-
-
-def _load_metrics():
-    path = REPO / "common" / "metrics.py"
-    spec = importlib.util.spec_from_file_location("paperib_metrics_hourae", path)
-    if spec is None or spec.loader is None:
-        raise ImportError(path)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-
-paper_metrics = _load_metrics()
-evaluate_valid = paper_metrics.evaluate_valid
-resolve_vus_window = paper_metrics.resolve_vus_window
+from core.data import load_plmn
+from core.features import is_rate_metric, metric_columns
+from core.labels import human_anomaly_mask, load_labels
+from core.metrics import evaluate_valid, resolve_vus_window
 
 
 @dataclass
