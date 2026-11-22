@@ -1,6 +1,6 @@
 """전문가 anomaly label 편집에 필요한 UI helper facade."""
 
-from tool import (
+from labeling.tool import (
     LABEL_HIGHLIGHT_END,
     LABEL_HIGHLIGHT_START,
     LABEL_REASON_DEFS,
