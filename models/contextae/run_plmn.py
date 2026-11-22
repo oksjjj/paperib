@@ -64,6 +64,7 @@ from models.contextae.context import (
     optimal_contiguous_partition,
     fit_context_segmentation,
     context_ids_from_slots,
+    slot_label,
 )
 from models.contextae.training import (
     Config,
@@ -72,7 +73,6 @@ from models.contextae.training import (
     split_indices,
     feature_columns,
     local_slot_ids,
-    slot_label,
     prepare_unlabeled_plmn,
     fit_scaler,
     train_ae,
