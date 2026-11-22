@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Filter IB raw CSVs down to paper PLMNs (de-identified IDs only).
+"""전체 IB raw 데이터에서 논문 대상 PLMN만 추려 비식별화 CSV를 만드는 스크립트.
 
-Reads from ``data/ib_data/_local_raw_full/`` (or ``--src``) and writes
-``data/ib_data/raw/masked_*.csv`` for git. Mapping files are never copied.
+기본적으로 data/ib_data/_local_raw_full/에서 읽고,
+git에 올릴 수 있는 data/ib_data/raw/masked_*.csv를 생성한다.
+PLMN/metric 원래 이름이 들어 있는 mapping 파일은 절대 복사하지 않는다.
 
-Example:
+사용 예:
   .venv/bin/python scripts/export_paper_raw.py
 """
 
