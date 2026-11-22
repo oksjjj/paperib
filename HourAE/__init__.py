@@ -1,1 +1,1 @@
-"""24-hour contextual iterative AutoEncoder experiments."""
+"""하루를 24개 고정 시간대로 나누는 HourAE 실험 패키지."""
