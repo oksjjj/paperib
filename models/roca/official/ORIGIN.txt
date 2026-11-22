@@ -1,0 +1,4 @@
+RoCA official excerpts (MIT, RuiKing / ruiking04/RoCA).
+network.py ← models/RoCA/roca_network/model.py
+augmentations.py ← dataloader/augmentations.py
+loss.py ← models/RoCA/roca_trainer/trainer.py (train, center_c only; Merlion eval stripped)
