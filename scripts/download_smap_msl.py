@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-Download SMAP / MSL dataset (telemanom) into ``data/SMAP/raw`` and ``data/MSL/raw``.
+"""SMAP / MSL(telemanom) 데이터를 data/SMAP/raw, data/MSL/raw 아래에 내려받는 스크립트.
 
-Shared by OmniAnomaly, AnomalyTransformer, etc.
+OmniAnomaly, Anomaly Transformer 등 여러 공개 benchmark 실험에서 공통으로 사용한다.
+기존 telemanom S3 URL은 현재 403을 반환하므로 Hugging Face의
+appleparan/telemanom mirror에서 내려받는다.
 
-The original S3 URL (s3-us-west-2.amazonaws.com/telemanom/data.zip) returns 403.
-This script downloads from Hugging Face: appleparan/telemanom
-
-Next:
+다운로드 후:
   python scripts/preprocess_data.py --dataset SMAP
   python scripts/preprocess_data.py --dataset MSL
 """
