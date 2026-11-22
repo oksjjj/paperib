@@ -72,7 +72,7 @@ resolve_vus_window = paper_metrics.resolve_vus_window
 
 
 def _load_hourae():
-    """Load the existing fixed 24-hour HourAE implementation."""
+    """고정 24시간 분할 baseline인 HourAE 구현을 동적으로 불러온다."""
     path = REPO / "HourAE" / "run_plmn.py"
     spec = importlib.util.spec_from_file_location("paperib_hourae_baseline", path)
     if spec is None or spec.loader is None:
@@ -173,7 +173,7 @@ def feature_columns(df: pd.DataFrame) -> list[str]:
 
 
 def local_slot_ids(local_times: pd.Series) -> np.ndarray:
-    """5-minute slot index in local day: 00:00=0, ..., 23:55=287."""
+    """로컬 하루를 5분 단위 slot 번호로 바꾼다. 00:00=0, ..., 23:55=287이다."""
     hour = local_times.dt.hour.to_numpy(dtype=np.int16)
     minute = local_times.dt.minute.to_numpy(dtype=np.int16)
     return (hour * 12 + minute // 5).astype(np.int16)
@@ -462,7 +462,7 @@ def fit_context_segmentation(
     if not accepted:
         raise RuntimeError("no feasible contiguous K segmentation")
 
-    # Explicit --k fixes K. Otherwise choose the best TRAIN-only silhouette.
+    # --k를 명시하면 K를 고정하고, 그렇지 않으면 TRAIN profile의 silhouette가 가장 높은 K를 선택한다.
     accepted.sort(key=lambda item: (-item[0], item[1]))
     best_sil, selected_k, labels, boundaries, within_sse = accepted[0]
 
@@ -615,7 +615,7 @@ def fit_context_model(
             f"context {context_id}: too few train points ({n})"
         )
 
-    # Keep the exact HourAE training recipe so only context partition changes.
+    # HourAE와 공정하게 비교하기 위해 AE 구조와 decontamination recipe는 동일하게 유지하고 context 분할 방식만 바꾼다.
     stage1_scaler = fit_scaler(x_context_raw)
     x1 = stage1_scaler.transform(x_context_raw).astype(np.float32)
 
