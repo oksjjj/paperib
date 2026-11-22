@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Recompute VUS metrics from saved prediction score JSON files.
+"""저장된 prediction score JSON에서 VUS metric을 다시 계산하는 스크립트.
 
-No model retraining is performed. The script reads saved validation score series,
-builds the expert-label mask on the same timestamps, computes VUS metrics with
-common.metrics.vus_pr, writes them back into each prediction JSON, and emits a
-compact summary CSV/JSON.
+모델 재학습은 하지 않는다.
+저장된 validation score series와 같은 시간축의 전문가 label mask를 만든 뒤
+common.metrics.vus_pr()로 VUS를 계산하고, prediction JSON에 다시 기록한다.
+마지막으로 모델/사업자별 결과를 summary CSV/JSON으로 저장한다.
 
-Examples:
-    .venv/bin/python scripts/eval_vus.py --all
-    .venv/bin/python scripts/eval_vus.py --plmn P0480
-    .venv/bin/python scripts/eval_vus.py --all --models context_ae hour_ae roca
+사용 예:
+  .venv/bin/python scripts/eval_vus.py --all
+  .venv/bin/python scripts/eval_vus.py --plmn P0480
+  .venv/bin/python scripts/eval_vus.py --all --models context_ae hour_ae roca
 """
 
 from __future__ import annotations
