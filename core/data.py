@@ -31,7 +31,7 @@ DEFAULT_TRAIN_RATIO = 0.6
 DEFAULT_VALID_RATIO = 0.2
 
 
-def _data_signature(data_dir: Path = DATA_DIR) -> tuple[tuple[str, int, int], ...]:
+def data_signature(data_dir: Path = DATA_DIR) -> tuple[tuple[str, int, int], ...]:
     """raw CSV 목록/크기/수정시간으로 cache 유효성을 판단할 signature를 만든다."""
     if not data_dir.exists():
         return ()
@@ -55,7 +55,7 @@ def load_plmn(
     """
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     cache_path = CACHE_DIR / f"{plmn}.pkl"
-    signature = _data_signature(data_dir)
+    signature = data_signature(data_dir)
 
     if use_cache and cache_path.exists():
         try:
@@ -97,7 +97,7 @@ def load_plmn(
 
 def data_signature_text(data_dir: Path = DATA_DIR) -> str:
     """raw CSV signature를 파일 저장/비교에 사용할 안정적인 문자열로 반환한다."""
-    return json.dumps(_data_signature(data_dir), ensure_ascii=False, separators=(",", ":"))
+    return json.dumps(data_signature(data_dir), ensure_ascii=False, separators=(",", ":"))
 
 
 def clear_plmn_cache(plmn: str | None = None) -> int:
