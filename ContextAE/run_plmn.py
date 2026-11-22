@@ -235,12 +235,12 @@ def build_train_slot_profiles(
     *,
     use_mad: bool,
 ) -> dict[str, Any]:
-    """Build one robust profile for every 5-minute slot using TRAIN only.
+    """TRAIN만 사용해 하루의 각 5분 slot에 대한 robust profile을 만든다.
 
-    Raw features are robust-scaled from TRAIN only. For each slot we summarize
-    across days with median and optionally MAD. If a slot is absent from TRAIN,
-    its profile is copied from the nearest observed slot in circular clock time.
-    Validation/test data are never used to construct or fill profiles.
+    먼저 TRAIN raw feature를 RobustScaler로 변환한 뒤,
+    같은 slot에 속한 여러 날짜의 값을 median과 선택적으로 MAD로 요약한다.
+    TRAIN에 특정 slot이 하나도 없으면 validation/test를 참고하지 않고,
+    시계방향 거리상 가장 가까운 TRAIN 관측 slot의 profile을 복사한다.
     """
     clustering_input_scaler = RobustScaler(
         with_centering=True,
@@ -312,7 +312,7 @@ def build_segment_cost_matrix(
     *,
     min_segment_slots: int,
 ) -> np.ndarray:
-    """SSE cost for every contiguous [start, end) segment."""
+    """모든 연속 시간구간 [start, end)에 대해 구간 내부 SSE cost를 계산한다."""
     n, _d = x.shape
     m = int(min_segment_slots)
     cost = np.full((n + 1, n + 1), np.inf, dtype=np.float64)
@@ -346,7 +346,7 @@ def optimal_contiguous_partition(
     k: int,
     min_segment_slots: int,
 ) -> tuple[np.ndarray, list[int], float]:
-    """Minimum-SSE partition of 00:00..23:55 into exactly K segments."""
+    """00:00~23:55의 288개 slot을 정확히 K개의 연속 구간으로 나눌 때 전체 SSE가 최소인 분할을 찾는다."""
     n = cost.shape[0] - 1
     m = int(min_segment_slots)
 
@@ -400,7 +400,7 @@ def fit_context_segmentation(
     slot_info: dict[str, Any],
     cfg: Config,
 ) -> dict[str, Any]:
-    """Discover K contiguous temporal contexts from TRAIN profiles only."""
+    """TRAIN slot profile만 사용해 K개의 연속 temporal context를 찾는다."""
     x = np.asarray(slot_info["profiles_scaled"], dtype=np.float64)
     n_slots = len(x)
 
@@ -1082,7 +1082,7 @@ def print_hour24_comparison(
     context_metrics: dict[str, Any],
     hour_metrics: dict[str, Any],
 ) -> None:
-    """Compact side-by-side validation comparison."""
+    """ContextAE와 HourAE의 validation metric을 한눈에 비교할 수 있는 간단한 표를 출력한다."""
     print("", flush=True)
     print("=" * 86, flush=True)
     print(
@@ -1126,7 +1126,7 @@ def run_hour24_baseline(
     cfg: Config,
     eval_test: bool,
 ) -> dict[str, Any]:
-    """Train the existing HourAE baseline with exactly the shared AE settings."""
+    """공정한 비교를 위해 ContextAE와 동일한 AE/decontamination 설정으로 기존 HourAE baseline을 다시 학습한다."""
     hourae = _load_hourae()
     hour_cfg = hourae.Config(
         timezone=cfg.timezone,
