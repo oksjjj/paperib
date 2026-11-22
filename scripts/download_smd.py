@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-Download SMD (Server Machine Dataset) into paperib ``data/SMD/raw/``.
+"""SMD(Server Machine Dataset)를 data/SMD/raw 아래에 내려받는 스크립트.
 
-Shared by OmniAnomaly, AnomalyTransformer, etc.
+OmniAnomaly, Anomaly Transformer 등 여러 공개 benchmark 실험에서 공통으로 사용한다.
 
-Source: https://github.com/NetManAIOps/OmniAnomaly/tree/master/ServerMachineDataset
+원본 출처:
+https://github.com/NetManAIOps/OmniAnomaly/tree/master/ServerMachineDataset
 
-Next:
+다운로드 후:
   python scripts/preprocess_data.py --dataset SMD
 """
 import io
