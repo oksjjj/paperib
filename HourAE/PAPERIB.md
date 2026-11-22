@@ -1,5 +1,8 @@
 # HourAE: 24-hour contextual iterative AutoEncoder
 
+> 실제 구현 위치: `models/hourae/`  
+> `HourAE/run_plmn.py`는 이전 실행 경로를 위한 호환 wrapper입니다.
+
 This reproduces the user's earlier point-based strategy using 24 AutoEncoders.
 
 ## Pipeline
@@ -95,7 +98,7 @@ Input F -> 32 -> 8 -> 32 -> F
 From repository root:
 
     cd HourAE
-    ../.venv/bin/python run_plmn.py --plmn P0480
+    .venv/bin/python -m models.hourae.run_plmn --plmn P0480
 
 Output:
 
@@ -124,4 +127,4 @@ The checkpoint is ignored by git through the existing *.pt rule.
 
 After method and threshold choices are frozen:
 
-    ../.venv/bin/python run_plmn.py --plmn P0480 --eval_test
+    .venv/bin/python -m models.hourae.run_plmn --plmn P0480 --eval_test
