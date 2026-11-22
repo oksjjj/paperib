@@ -146,8 +146,8 @@ state: dict = {
     "predictions": None,
     "pred_source": None,
     "selected_pred_id": None,
-    "threshold_mode": "pot",  # "pot" | "best_f1_point" | "best_f1" (PA)
-    "metrics_eval_split": "valid",  # "valid" | "test"
+    "threshold_mode": "pot",  # threshold 표시 모드: primary / point best-F1 / PA best-F1
+    "metrics_eval_split": "valid",  # metric을 계산해 보여줄 split: VALID 또는 TEST
     # 새 label에 적용할 anomaly 원인 입력 초안이다. 기존 label을 선택하면 그 값도 여기로 복사한다.
     "draft_reasons": [],
     "draft_fail_metrics": [],
@@ -2010,7 +2010,7 @@ def _visible_y_bounds() -> tuple[float, float] | None:
     series = view[metrics]
     ymin = float(series.min(numeric_only=True).min())
     ymax = float(series.max(numeric_only=True).max())
-    if not (ymin == ymin and ymax == ymax):  # NaN check
+    if not (ymin == ymin and ymax == ymax):  # NaN 여부 확인
         return None
     # count metric은 기본적으로 0 이상이므로 데이터가 음수가 아닌 한 y축 하단을 0에 고정한다.
     base = min(0.0, ymin)
@@ -2071,7 +2071,7 @@ def _visible_rate_y_bounds() -> tuple[float, float] | None:
     series = view[metrics]
     ymin = float(series.min(numeric_only=True).min())
     ymax = float(series.max(numeric_only=True).max())
-    if not (ymin == ymin and ymax == ymax):  # NaN check
+    if not (ymin == ymin and ymax == ymax):  # NaN 여부 확인
         return None
     base = min(0.0, ymin)
     if ymax <= base:
