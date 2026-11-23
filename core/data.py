@@ -235,7 +235,13 @@ def chrono_split_bounds(
     train_ratio: float = DEFAULT_TRAIN_RATIO,
     valid_ratio: float = DEFAULT_VALID_RATIO,
 ) -> dict[str, pd.Timestamp] | None:
-    """시간순 split의 실제 timestamp 경계를 반환한다.
+    """시간순 TRAIN/VALID/TEST 구간의 '시각(timestamp)' 경계를 돌려준다.
+
+    split_indices는 행 번호(인덱스)만 주지만, UI·그래프에서는
+    "몇 시부터 VALID인가?"처럼 실제 시각이 필요하다. 이 함수가 그 변환을 담당한다.
+
+    반환 예 (시간축 위 경계점들):
+      t_min ── TRAIN ── train_end | valid_start ── VALID ── valid_end | test_start ── TEST ── t_max
 
     prediction export에 split 정보가 있으면 이를 우선 사용하고,
     없으면 기본 60/20/20 비율로 다시 계산한다.
@@ -243,11 +249,13 @@ def chrono_split_bounds(
     if df is None or not len(df):
         return None
 
+    # df는 이미 시간순이라고 가정. 첫/마지막 행 = 전체 구간 시작·끝
     times = pd.to_datetime(df["time"], utc=True)
     t_min = times.iloc[0]
     t_max = times.iloc[-1]
 
-    # 모델 export JSON에 이미 split 시각이 있으면 그 경계를 그대로 사용 (재현성)
+    # --- 경로 1: 모델이 학습 때 썼던 split 시각이 export에 있으면 그대로 사용 ---
+    # (나중에 다시 비율로 나누면 경계가 어긋날 수 있어 재현성을 위해 우선)
     split = (predictions or {}).get("split") or {}
     valid_start_raw = split.get("valid_time_start")
     test_start_raw = split.get("test_time_start")
@@ -257,6 +265,7 @@ def chrono_split_bounds(
         test_start = pd.to_datetime(test_start_raw, utc=True)
         train_end_raw = split.get("train_time_end")
         valid_end_raw = split.get("valid_time_end")
+        # 일부 필드가 없으면 인접 경계로 대체 (train_end ≈ valid_start 직전 개념)
         return {
             "t_min": t_min,
             "train_end": pd.to_datetime(train_end_raw, utc=True) if train_end_raw else valid_start,
@@ -266,20 +275,25 @@ def chrono_split_bounds(
             "t_max": t_max,
         }
 
+    # --- 경로 2: export에 split이 없으면 비율로 인덱스 경계를 잡고 시각으로 변환 ---
     # 행이 3개 미만이면 TRAIN/VALID/TEST를 나눌 수 없음
     if len(df) < 3:
         return None
 
-    # export에 split이 없으면 비율로 인덱스 경계를 잡고, 그 시점의 timestamp로 변환
     train_end, valid_end = split_indices(
         len(df),
         train_ratio=train_ratio,
         valid_ratio=valid_ratio,
     )
+    # 경계가 뒤집히거나 TEST 구간이 비면 실패
     if valid_end <= train_end or valid_end >= len(df):
         return None
 
-    # iloc[i-1] = 구간 마지막 시각, iloc[i] = 다음 구간 시작 시각
+    # 인덱스 → timestamp:
+    #   train_end(인덱스)는 "VALID가 시작되는 행"이므로
+    #   TRAIN의 마지막 시각 = times[train_end - 1]
+    #   VALID의 시작 시각   = times[train_end]
+    # VALID/TEST도 같은 방식
     return {
         "t_min": t_min,
         "train_end": times.iloc[train_end - 1],
