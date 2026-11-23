@@ -33,6 +33,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from core.data import prepare_unlabeled_base
 from core.labels import anomaly_mask_for_times, load_labels
 from core.metrics import detection_delay, event_f1, false_alarms_per_day, point_prf
 from core.predictions import read_json
@@ -44,9 +45,8 @@ MODEL_DIR = ROOT / "models" / "contextae" / "model"
 RESULT_DIR = ROOT / "results"
 
 from core.features import PAPER_PLMNS
-
-
-from models.contextae import run_plmn as CTX
+from models.contextae.context import context_ids_from_slots, local_slot_ids, slot_label
+from models.contextae.training import Config
 
 
 
@@ -55,7 +55,7 @@ def _slot_map(segmentation: dict[str, Any]) -> np.ndarray:
     if len(mapping) != 288:
         raise ValueError("checkpoint segmentation.slot_to_context must contain 288 slots")
     return np.asarray(
-        [int(mapping[CTX.slot_label(i)]) for i in range(288)],
+        [int(mapping[slot_label(i)]) for i in range(288)],
         dtype=np.int16,
     )
 
@@ -65,8 +65,13 @@ def _clean_train_scores(
     checkpoint: dict[str, Any],
 ) -> tuple[dict[int, np.ndarray], Any]:
     cfg_dict = dict(checkpoint.get("config") or {})
-    cfg = CTX.Config(**cfg_dict)
-    prep = CTX.prepare_unlabeled_plmn(plmn, cfg.timezone)
+    cfg = Config(**cfg_dict)
+    prep = prepare_unlabeled_base(plmn, cfg.timezone)
+    slots = local_slot_ids(prep["local_times"])
+    a, b = prep["train_end"], prep["valid_end"]
+    prep["train_slots"] = slots[:a]
+    prep["valid_slots"] = slots[a:b]
+    prep["test_slots"] = slots[b:]
 
     ckpt_cols = list(checkpoint.get("feature_columns") or [])
     if ckpt_cols and ckpt_cols != list(prep["cols"]):
@@ -75,7 +80,7 @@ def _clean_train_scores(
         )
 
     slot_to_context = _slot_map(checkpoint["segmentation"])
-    train_context_ids = CTX.context_ids_from_slots(
+    train_context_ids = context_ids_from_slots(
         prep["train_slots"],
         slot_to_context,
     )
