@@ -326,9 +326,14 @@ def prepare_plmn(
     if not cols:
         raise RuntimeError(f"{plmn}: 사용할 core feature가 없습니다.")
 
-    # feature 행렬 + 이상치/결측을 0으로 정리 (학습 입력용)
+    # df[cols]: 선택한 metric 컬럼만 뽑은 DataFrame (행=시점, 열=feature)
+    # to_numpy: pandas → 2차원 numpy 배열로 변환. 모델/스케일러 입력 형태.
+    #   shape 예: (시점 수 n, feature 수)  ← float64
     values = df[cols].to_numpy(dtype=np.float64)
+    # nan_to_num: 학습이 깨지지 않게 비정상 숫자를 0으로 치환
+    #   NaN(결측) → 0,  +inf → 0,  -inf → 0
     values = np.nan_to_num(values, nan=0.0, posinf=0.0, neginf=0.0)
+    # 시간 컬럼도 UTC datetime으로 맞춰 둔다 (split 경계·라벨 매칭용)
     times = pd.to_datetime(df["time"], utc=True)
 
     n = len(df)
