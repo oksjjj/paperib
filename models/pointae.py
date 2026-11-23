@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import random
-from typing import Any, Type
+from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 import torch
@@ -158,6 +159,112 @@ def quantile_for_contamination(
     q = 1.0 - float(contamination_pct) / 100.0
     q = float(np.clip(q, 0.0, 1.0))
     return float(np.quantile(scores, q))
+
+
+@dataclass
+class DecontaminatedAEArtifacts:
+    """한 시간 그룹/context의 2단계 AE 학습 산출물."""
+
+    stage1_scaler: RobustScaler
+    final_scaler: RobustScaler
+    stage1_state: dict[str, torch.Tensor]
+    final_state: dict[str, torch.Tensor]
+    stage1_threshold_mse: float
+    final_score_mean: float
+    final_score_std: float
+    final_reference_quantile_mse: float
+    final_reference_quantile_z: float
+    n_train: int
+    n_removed: int
+    stage1_final_loss: float
+    final_final_loss: float
+
+
+def fit_decontaminated_group(
+    x_raw: np.ndarray,
+    *,
+    cfg: Any,
+    device: torch.device,
+    group_seed: int,
+    group_name: str,
+    min_train_points: int = 20,
+) -> DecontaminatedAEArtifacts:
+    """한 그룹의 contaminated TRAIN으로 Stage-1 제거 후 fresh Final AE를 학습한다."""
+    n = len(x_raw)
+    if n < min_train_points:
+        raise RuntimeError(f"{group_name}: too few train points ({n})")
+
+    stage1_scaler = fit_robust_scaler(x_raw)
+    x1 = stage1_scaler.transform(x_raw).astype(np.float32)
+    stage1_model, stage1_hist = train_point_autoencoder(
+        x1,
+        n_features=x1.shape[1],
+        cfg=cfg,
+        epochs=int(cfg.stage1_epochs),
+        device=device,
+        seed=int(cfg.seed) + int(group_seed),
+    )
+    stage1_scores = reconstruction_mse(
+        stage1_model,
+        x1,
+        batch_size=int(cfg.batch_size),
+        device=device,
+    )
+    stage1_cut = quantile_for_contamination(
+        stage1_scores,
+        float(cfg.stage1_remove_pct),
+    )
+    clean_mask = stage1_scores <= stage1_cut
+
+    if int(clean_mask.sum()) < max(min_train_points, int(0.5 * n)):
+        raise RuntimeError(
+            f"{group_name}: stage1 retained only {int(clean_mask.sum())}/{n}"
+        )
+
+    clean_raw = x_raw[clean_mask]
+    final_scaler = fit_robust_scaler(clean_raw)
+    x2 = final_scaler.transform(clean_raw).astype(np.float32)
+    final_model, final_hist = train_point_autoencoder(
+        x2,
+        n_features=x2.shape[1],
+        cfg=cfg,
+        epochs=int(cfg.final_epochs),
+        device=device,
+        seed=int(cfg.seed) + 1000 + int(group_seed),
+    )
+    final_clean_scores = reconstruction_mse(
+        final_model,
+        x2,
+        batch_size=int(cfg.batch_size),
+        device=device,
+    )
+
+    score_mean = float(np.mean(final_clean_scores))
+    score_std = float(np.std(final_clean_scores, ddof=0))
+    if not np.isfinite(score_std) or score_std < 1e-12:
+        score_std = 1e-12
+
+    ref_mse = quantile_for_contamination(
+        final_clean_scores,
+        float(cfg.final_contamination_pct),
+    )
+    ref_z = float((ref_mse - score_mean) / score_std)
+
+    return DecontaminatedAEArtifacts(
+        stage1_scaler=stage1_scaler,
+        final_scaler=final_scaler,
+        stage1_state=cpu_state_dict(stage1_model),
+        final_state=cpu_state_dict(final_model),
+        stage1_threshold_mse=float(stage1_cut),
+        final_score_mean=score_mean,
+        final_score_std=score_std,
+        final_reference_quantile_mse=ref_mse,
+        final_reference_quantile_z=ref_z,
+        n_train=n,
+        n_removed=int((~clean_mask).sum()),
+        stage1_final_loss=float(stage1_hist[-1]),
+        final_final_loss=float(final_hist[-1]),
+    )
 
 
 def build_point_autoencoder_from_state(
