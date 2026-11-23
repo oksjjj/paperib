@@ -41,6 +41,7 @@ PRED_DIR = REPO / "data" / "ib_data" / "predictions"
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
+from core.data import prepare_unlabeled_base
 from core.labels import human_anomaly_mask, load_labels
 from core.metrics import evaluate_valid, resolve_vus_window
 from core.predictions import mask_to_labels, metric_payload
@@ -53,10 +54,7 @@ from models.pointae import (
 )
 
 
-from models.hourae.training import (
-    Config,
-    prepare_unlabeled_plmn,
-)
+from models.hourae.training import Config
 
 def hour_summary(
     artifacts: dict[int, DecontaminatedAEArtifacts],
@@ -224,7 +222,12 @@ def run(
     set_seed(cfg.seed)
     # 실행 장치 결정 후 라벨 없이 원본 데이터와 시간순 split을 준비한다.
     device = device_for_run()
-    prep = prepare_unlabeled_plmn(plmn, cfg.timezone)
+    prep = prepare_unlabeled_base(plmn, cfg.timezone)
+    hours = prep["local_times"].dt.hour.to_numpy(dtype=np.int16)
+    a, b = prep["train_end"], prep["valid_end"]
+    prep["train_hours"] = hours[:a]
+    prep["valid_hours"] = hours[a:b]
+    prep["test_hours"] = hours[b:]
 
     print(
         f"device={device} plmn={plmn} features={len(prep['cols'])} "
