@@ -147,8 +147,12 @@ def build_plmn_ranking(data_dir: Path = DATA_DIR) -> pd.DataFrame:
         except ValueError:
             # PLMN 또는 M971이 없는 CSV는 건너뛴다.
             continue
-        # 파일 안에서 PLMN별 M971 합 → 전역 sums에 누적
+        # groupby("PLMN")["M971"].sum():
+        #   같은 PLMN 행들의 M971을 더해 Series(index=PLMN, value=합)를 만든다.
+        #   예: PLMN A가 10,20 → part["A"] == 30
         part = chunk.groupby("PLMN")["M971"].sum()
+        # 파일마다 나온 부분합을 전역 dict에 더한다.
+        # sums.get(key, 0): 처음 본 PLMN이면 0부터 시작.
         for plmn, value in part.items():
             key = str(plmn)
             sums[key] = sums.get(key, 0) + int(value)
