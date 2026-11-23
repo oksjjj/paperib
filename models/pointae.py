@@ -267,6 +267,47 @@ def fit_decontaminated_group(
     )
 
 
+def score_grouped_models(
+    values_raw: np.ndarray,
+    group_ids: np.ndarray,
+    artifacts: dict[int, DecontaminatedAEArtifacts],
+    *,
+    n_features: int,
+    cfg: Any,
+    device: torch.device,
+) -> tuple[np.ndarray, np.ndarray]:
+    """각 시점을 자신의 group 모델로 추론해 z-score와 raw MSE를 원래 순서로 반환한다."""
+    raw_mse = np.full(len(values_raw), np.nan, dtype=np.float64)
+    z_scores = np.full(len(values_raw), np.nan, dtype=np.float64)
+
+    for group_id, art in artifacts.items():
+        idx = np.flatnonzero(group_ids == group_id)
+        if idx.size == 0:
+            continue
+
+        model = build_point_autoencoder_from_state(
+            art.final_state,
+            n_features=n_features,
+            hidden_dim=int(cfg.hidden_dim),
+            latent_dim=int(cfg.latent_dim),
+            device=device,
+        )
+        x = art.final_scaler.transform(values_raw[idx]).astype(np.float32)
+        mse = reconstruction_mse(
+            model,
+            x,
+            batch_size=int(cfg.batch_size),
+            device=device,
+        )
+        raw_mse[idx] = mse
+        z_scores[idx] = (
+            (mse - art.final_score_mean)
+            / max(art.final_score_std, 1e-12)
+        )
+
+    return z_scores, raw_mse
+
+
 def build_point_autoencoder_from_state(
     state: dict[str, torch.Tensor],
     *,
