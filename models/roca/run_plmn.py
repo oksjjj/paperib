@@ -32,29 +32,19 @@ import torch
 from torch.utils.data import DataLoader
 
 REPO = Path(__file__).resolve().parents[2]
-ROOT = REPO / "RoCA"
-MODEL_ROOT = ROOT / "model"
+MODEL_ROOT = REPO / "models" / "roca" / "model"
 
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
 from core.data import prepare_plmn
 from core.metrics import evaluate_valid
+from models.pointae import device_for_run
 from models.roca.config import RoCAConfig
 from models.roca.dataset import RoCAWindowDataset, block_to_nct
 from models.roca.export_predictions import write_roca_prediction
 from models.roca.official.loss import center_c, roca_loss
 from models.roca.official.network import base_Model
-
-
-def _device() -> torch.device:
-    """사용 가능한 가속기 중 MPS → CUDA → CPU 순서로 선택한다."""
-
-    if torch.backends.mps.is_available():
-        return torch.device("mps")
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    return torch.device("cpu")
 
 
 def train_quantile_threshold(train_scores: np.ndarray, quantile: float = 0.99) -> float:
@@ -176,7 +166,7 @@ def train_and_eval(
     if nu is not None:
         cfg.nu = float(nu)
 
-    device = _device()
+    device = device_for_run()
     if not quiet:
         print(
             f"device={device} plmn={plmn} window={cfg.window_size} "
