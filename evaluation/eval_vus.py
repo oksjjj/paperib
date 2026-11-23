@@ -29,7 +29,9 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from core.labels import anomaly_mask_for_times, load_labels
 from core.metrics import vus_pr
+from core.predictions import read_json
 
 PRED_DIR = ROOT / "data" / "ib_data" / "predictions"
 LABEL_DIR = ROOT / "data" / "ib_data" / "labels"
@@ -43,11 +45,6 @@ MODEL_FILES = {
     "hour_ae": "{plmn}_hour_ae_valid.json",
     "roca": "{plmn}_roca.json",
 }
-
-
-def _load_json(path: Path) -> dict[str, Any]:
-    with path.open(encoding="utf-8") as f:
-        return json.load(f)
 
 
 def _score_series(doc: dict[str, Any]) -> tuple[pd.DatetimeIndex, np.ndarray]:
@@ -65,37 +62,16 @@ def _score_series(doc: dict[str, Any]) -> tuple[pd.DatetimeIndex, np.ndarray]:
     return t, s
 
 
-def _label_mask(times: pd.DatetimeIndex, label_doc: dict[str, Any]) -> np.ndarray:
-    y = np.zeros(len(times), dtype=bool)
-    for item in label_doc.get("labels") or []:
-        start = item.get("start")
-        end = item.get("end") or start
-        if not start:
-            continue
-        a = pd.Timestamp(start)
-        b = pd.Timestamp(end)
-        if a.tzinfo is None:
-            a = a.tz_localize("UTC")
-        else:
-            a = a.tz_convert("UTC")
-        if b.tzinfo is None:
-            b = b.tz_localize("UTC")
-        else:
-            b = b.tz_convert("UTC")
-        y |= (times >= a) & (times <= b)
-    return y
-
-
 def evaluate_file(path: Path, *, vus_window: int | None = None) -> dict[str, Any]:
-    doc = _load_json(path)
+    doc = read_json(path)
     plmn = str(doc.get("plmn") or path.name.split("_")[0])
     label_path = LABEL_DIR / f"{plmn}_labels.json"
     if not label_path.exists():
         raise FileNotFoundError(label_path)
 
     times, scores = _score_series(doc)
-    labels = _load_json(label_path)
-    y = _label_mask(times, labels)
+    labels = load_labels(plmn)
+    y = anomaly_mask_for_times(times, labels.get("labels"))
 
     polarity = str(doc.get("score_polarity") or "higher_is_anomaly")
     score_for_vus = scores if polarity != "lower_is_anomaly" else -scores
