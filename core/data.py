@@ -354,7 +354,15 @@ def prepare_plmn(
     #   결과 shape = (n,) bool 배열. True = 그 시점이 anomaly로 표시됨.
     # 주의: 학습 손실의 정답(y)으로 쓰지 않고, VALID/TEST 평가용으로만 쓴다.
     label_doc = load_labels(plmn)
+    # y_full: 전체 시점 anomaly 여부. 예 n=100이면
+    #   [False, False, True, True, ..., False]  (길이 100)
+    # label_doc.get("labels"): JSON의 구간 리스트. 없으면 None → 전부 False.
     y_full = human_anomaly_mask(df, label_doc.get("labels"))
+    # 시간순 split과 같은 경계로 mask도 자른다.
+    # 예: train_end=60, valid_end=80, n=100 이면
+    #   y_full[0:60]   → TRAIN 구간 (여기선 변수로 안 남김; 평가 비대상)
+    #   y_valid = y_full[60:80]  → VALID 20개
+    #   y_test  = y_full[80:]    → TEST 20개
     y_valid = y_full[train_end:valid_end]
     y_test = y_full[valid_end:]
 
