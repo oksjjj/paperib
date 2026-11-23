@@ -71,6 +71,8 @@ def load_plmn(
             pass
 
     # --- 캐시 miss: raw CSV에서 해당 PLMN만 모아 재구성 ---
+    # Path.glob: 디렉터리에서 패턴(*.csv)에 맞는 파일 경로를 순회한다.
+    # sorted로 파일 처리 순서를 이름 기준 고정한다.
     csv_files = sorted(data_dir.glob("*.csv"))
     if not csv_files:
         raise FileNotFoundError(f"raw CSV가 없습니다: {data_dir}")
