@@ -36,6 +36,7 @@ if str(ROOT) not in sys.path:
 from core.labels import anomaly_mask_for_times, load_labels
 from core.metrics import detection_delay, event_f1, false_alarms_per_day, point_prf
 from core.predictions import read_json
+from models.pointae import build_point_autoencoder_from_state, reconstruction_mse
 
 PRED_DIR = ROOT / "data" / "ib_data" / "predictions"
 LABEL_DIR = ROOT / "data" / "ib_data" / "labels"
@@ -57,23 +58,6 @@ def _slot_map(segmentation: dict[str, Any]) -> np.ndarray:
         [int(mapping[CTX.slot_label(i)]) for i in range(288)],
         dtype=np.int16,
     )
-
-
-def _model_from_state(
-    state: dict[str, torch.Tensor],
-    *,
-    n_features: int,
-    cfg: Any,
-) -> torch.nn.Module:
-    model = CTX.PointAutoEncoder(
-        n_features=n_features,
-        hidden_dim=int(cfg.hidden_dim),
-        latent_dim=int(cfg.latent_dim),
-    )
-    model.load_state_dict(state)
-    model.to(torch.device("cpu"))
-    model.eval()
-    return model
 
 
 def _clean_train_scores(
@@ -105,13 +89,15 @@ def _clean_train_scores(
             continue
 
         raw = prep["train"][idx]
-        stage1_model = _model_from_state(
+        stage1_model = build_point_autoencoder_from_state(
             item["stage1_state"],
             n_features=n_features,
-            cfg=cfg,
+            hidden_dim=int(cfg.hidden_dim),
+            latent_dim=int(cfg.latent_dim),
+            device=torch.device("cpu"),
         )
         x1 = item["stage1_scaler"].transform(raw).astype(np.float32)
-        stage1_scores = CTX.reconstruction_mse(
+        stage1_scores = reconstruction_mse(
             stage1_model,
             x1,
             batch_size=int(cfg.batch_size),
@@ -121,13 +107,15 @@ def _clean_train_scores(
         if int(clean.sum()) < 8:
             raise ValueError(f"{plmn} context {cid}: too few clean train samples")
 
-        final_model = _model_from_state(
+        final_model = build_point_autoencoder_from_state(
             item["final_state"],
             n_features=n_features,
-            cfg=cfg,
+            hidden_dim=int(cfg.hidden_dim),
+            latent_dim=int(cfg.latent_dim),
+            device=torch.device("cpu"),
         )
         x2 = item["final_scaler"].transform(raw[clean]).astype(np.float32)
-        scores = CTX.reconstruction_mse(
+        scores = reconstruction_mse(
             final_model,
             x2,
             batch_size=int(cfg.batch_size),
