@@ -112,6 +112,10 @@ def load_plmn(
 
 def data_signature_text(data_dir: Path = DATA_DIR) -> str:
     """raw CSV signature를 파일 저장/비교에 사용할 안정적인 문자열로 반환한다."""
+    # json.dumps: Python 객체(튜플 목록) → JSON 문자열로 직렬화한다.
+    #   예: (("a.csv", 10, 99),) → '[["a.csv",10,99]]'
+    # ensure_ascii=False: 한글 등 비ASCII를 \uXXXX로 이스케이프하지 않음
+    # separators=(",", ":"): 공백 없는 콤팩트 JSON → 비교/저장 결과가 항상 동일
     return json.dumps(data_signature(data_dir), ensure_ascii=False, separators=(",", ":"))
 
 
@@ -119,6 +123,7 @@ def clear_plmn_cache(plmn: str | None = None) -> int:
     """공통 PLMN pickle cache를 삭제하고 삭제된 파일 수를 반환한다."""
     if not CACHE_DIR.exists():
         return 0
+    # plmn이 주어지면 그 파일만, 아니면 cache 디렉터리의 모든 .pkl
     targets = [CACHE_DIR / f"{plmn}.pkl"] if plmn else list(CACHE_DIR.glob("*.pkl"))
     removed = 0
     for path in targets:
@@ -126,24 +131,29 @@ def clear_plmn_cache(plmn: str | None = None) -> int:
         if "_score_" in path.name:
             continue
         if path.exists():
-            path.unlink()
+            path.unlink()  # 파일 삭제
             removed += 1
     return removed
 
 
 def build_plmn_ranking(data_dir: Path = DATA_DIR) -> pd.DataFrame:
     """raw CSV 전체에서 PLMN별 M971 합계를 계산해 내림차순 순위를 만든다."""
+    # PLMN → M971 누적합. 여러 CSV에 걸친 합을 모은다.
     sums: dict[str, int] = {}
     for path in sorted(data_dir.glob("*.csv")):
         try:
+            # 필요한 두 컬럼만 읽어 메모리를 줄인다.
             chunk = pd.read_csv(path, usecols=["PLMN", "M971"])
         except ValueError:
+            # PLMN 또는 M971이 없는 CSV는 건너뛴다.
             continue
+        # 파일 안에서 PLMN별 M971 합 → 전역 sums에 누적
         part = chunk.groupby("PLMN")["M971"].sum()
         for plmn, value in part.items():
             key = str(plmn)
             sums[key] = sums.get(key, 0) + int(value)
 
+    # M971_sum 큰 순(내림차순)으로 정렬한 뒤 1부터 순위 부여
     rank_df = (
         pd.DataFrame({"PLMN": list(sums.keys()), "M971_sum": list(sums.values())})
         .sort_values("M971_sum", ascending=False)
@@ -157,6 +167,7 @@ def save_ranking_cache(rank_df: pd.DataFrame, signature: str | None = None) -> N
     """PLMN 순위와 raw 데이터 signature를 공통 data 영역에 저장한다."""
     LABEL_DIR.mkdir(parents=True, exist_ok=True)
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    # 순위 표 + 그 순위가 어떤 raw snapshot으로 만들어졌는지 signature를 함께 저장
     rank_df.to_csv(RANK_CACHE_PATH, index=False)
     RANK_SIGNATURE_PATH.write_text(
         signature or data_signature_text(DATA_DIR),
@@ -177,15 +188,19 @@ def load_or_build_ranking(top_n: int | None = None) -> pd.DataFrame:
             pass
 
     if RANK_CACHE_PATH.exists() and cached_signature == signature:
+        # 캐시 hit: raw가 안 바뀌었으면 저장된 순위 CSV를 그대로 사용
         rank_df = pd.read_csv(RANK_CACHE_PATH)
     elif any(DATA_DIR.glob("*.csv")):
+        # raw는 있는데 캐시가 없거나 오래됨 → 다시 계산 후 저장
         rank_df = build_plmn_ranking(DATA_DIR)
         save_ranking_cache(rank_df, signature)
     elif RANK_CACHE_PATH.exists():
+        # raw CSV가 없어도 예전 캐시가 있으면 그걸로 fallback
         rank_df = pd.read_csv(RANK_CACHE_PATH)
     else:
         raise FileNotFoundError(f"No source CSV or ranking cache found under {DATA_DIR}")
 
+    # top_n이 있으면 상위 N개만 잘라 반환
     if top_n is not None:
         rank_df = rank_df.head(top_n).copy()
     return rank_df.reset_index(drop=True)
@@ -197,6 +212,9 @@ def split_indices(
     valid_ratio: float = DEFAULT_VALID_RATIO,
 ) -> tuple[int, int]:
     """전체 길이를 시간순 TRAIN / VALID / TEST 경계 인덱스로 변환한다."""
+    # 예: n=100, 0.6/0.2 → train_end=60, valid_end=80
+    #   [0:train_end)=TRAIN, [train_end:valid_end)=VALID, [valid_end:)=TEST
+    # max(..., 1) / train_end+1: 구간이 비지 않도록 최소 길이 보장
     train_end = max(int(n * train_ratio), 1)
     valid_end = max(int(n * (train_ratio + valid_ratio)), train_end + 1)
     return train_end, min(valid_end, n)
@@ -221,6 +239,7 @@ def chrono_split_bounds(
     t_min = times.iloc[0]
     t_max = times.iloc[-1]
 
+    # 모델 export JSON에 이미 split 시각이 있으면 그 경계를 그대로 사용 (재현성)
     split = (predictions or {}).get("split") or {}
     valid_start_raw = split.get("valid_time_start")
     test_start_raw = split.get("test_time_start")
@@ -239,9 +258,11 @@ def chrono_split_bounds(
             "t_max": t_max,
         }
 
+    # 행이 3개 미만이면 TRAIN/VALID/TEST를 나눌 수 없음
     if len(df) < 3:
         return None
 
+    # export에 split이 없으면 비율로 인덱스 경계를 잡고, 그 시점의 timestamp로 변환
     train_end, valid_end = split_indices(
         len(df),
         train_ratio=train_ratio,
@@ -250,6 +271,7 @@ def chrono_split_bounds(
     if valid_end <= train_end or valid_end >= len(df):
         return None
 
+    # iloc[i-1] = 구간 마지막 시각, iloc[i] = 다음 구간 시작 시각
     return {
         "t_min": t_min,
         "train_end": times.iloc[train_end - 1],
@@ -282,6 +304,7 @@ def prepare_plmn(
     if not cols:
         raise RuntimeError(f"{plmn}: 사용할 core feature가 없습니다.")
 
+    # feature 행렬 + 이상치/결측을 0으로 정리 (학습 입력용)
     values = df[cols].to_numpy(dtype=np.float64)
     values = np.nan_to_num(values, nan=0.0, posinf=0.0, neginf=0.0)
     times = pd.to_datetime(df["time"], utc=True)
@@ -289,17 +312,20 @@ def prepare_plmn(
     n = len(df)
     train_end, valid_end = split_indices(n, train_ratio, valid_ratio)
 
+    # 스케일은 TRAIN에만 fit → VALID/TEST에 같은 변환을 적용 (정보 누수 방지)
     scaler = MinMaxScaler()
     train_s = scaler.fit_transform(values[:train_end]).astype(np.float32)
     valid_s = scaler.transform(values[train_end:valid_end]).astype(np.float32)
     test_s = scaler.transform(values[valid_end:]).astype(np.float32)
     full_s = np.concatenate([train_s, valid_s, test_s], axis=0)
 
+    # 사람 라벨 → 시점별 anomaly bool mask (학습 타깃이 아니라 평가용)
     label_doc = load_labels(plmn)
     y_full = human_anomaly_mask(df, label_doc.get("labels"))
     y_valid = y_full[train_end:valid_end]
     y_test = y_full[valid_end:]
 
+    # export/UI에서 쓸 수 있게 split 경계를 문자열 timestamp로도 남긴다.
     split_meta = {
         "train_time_end": str(times.iloc[train_end - 1]),
         "valid_time_start": str(times.iloc[train_end]),
