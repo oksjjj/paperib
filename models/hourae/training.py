@@ -7,17 +7,8 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-import torch
-from sklearn.preprocessing import RobustScaler
 
 from core.data import prepare_unlabeled_base
-from models.pointae import (
-    DecontaminatedAEArtifacts,
-    build_point_autoencoder_from_state,
-    device_for_run,
-    fit_decontaminated_group,
-    reconstruction_mse,
-)
 
 # @dataclass: 필드를 선언하면 __init__/비교 등을 자동 생성해 주는 데코레이터.
 #   예: Config(timezone="UTC") 처럼 인자로 넘기며 설정 객체를 만들 수 있다.
@@ -60,50 +51,3 @@ def prepare_unlabeled_plmn(plmn: str, tz_name: str) -> dict[str, Any]:
         }
     )
     return prep
-
-
-# 각 시점을 해당 시간대(hour) 모델로 추론한 뒤 원래 시간 순서에 MSE와 z-score를 배치한다.
-def score_with_hour_models(
-    values_raw: np.ndarray,
-    hours: np.ndarray,
-    artifacts: dict[int, DecontaminatedAEArtifacts],
-    *,
-    n_features: int,
-    cfg: Config,
-    device: torch.device,
-) -> tuple[np.ndarray, np.ndarray]:
-    # 길이 T인 배열을 NaN으로 초기화한다. 점수가 할당되지 않은 위치를 0과 구분한다.
-    raw_mse = np.full(len(values_raw), np.nan, dtype=np.float64)
-    z_scores = np.full(len(values_raw), np.nan, dtype=np.float64)
-
-    # 같은 그룹의 시점 인덱스를 모아 해당 그룹에서 학습한 모델만 적용한다.
-    for hour in range(24):
-        idx = np.flatnonzero(hours == hour)
-        if idx.size == 0:
-            continue
-
-        art = artifacts[hour]
-        model = build_point_autoencoder_from_state(
-            art.final_state,
-            n_features=n_features,
-            hidden_dim=cfg.hidden_dim,
-            latent_dim=cfg.latent_dim,
-            device=device,
-        )
-        # VALID/TEST에도 clean TRAIN에서 fit한 scaler를 transform만 한다(재학습 및 통계 누출 방지).
-        x = art.final_scaler.transform(values_raw[idx]).astype(np.float32)
-        mse = reconstruction_mse(
-            model,
-            x,
-            batch_size=cfg.batch_size,
-            device=device,
-        )
-        # 그룹별 순서로 계산한 점수를 원본 시계열의 인덱스 위치에 되돌려 놓는다.
-        raw_mse[idx] = mse
-        z_scores[idx] = (
-            (mse - art.final_score_mean)
-            / max(art.final_score_std, 1e-12)
-        )
-
-    # 첫 번째는 임계치와 비교할 표준화 점수, 두 번째는 진단용 원래 MSE이다.
-    return z_scores, raw_mse
