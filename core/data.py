@@ -228,6 +228,55 @@ def split_indices(
     return train_end, min(valid_end, n)
 
 
+def prepare_unlabeled_base(
+    plmn: str,
+    tz_name: str,
+    *,
+    train_ratio: float = DEFAULT_TRAIN_RATIO,
+    valid_ratio: float = DEFAULT_VALID_RATIO,
+) -> dict[str, Any]:
+    """HourAE/ContextAE가 공유하는 라벨 없는 기본 데이터 묶음을 만든다.
+
+    raw 로딩, 11개 core feature 선택, NaN/±inf 처리, UTC/KST 시간 변환,
+    시간순 split까지만 공통으로 수행한다. hour/slot/context 계산과 scaler fit은
+    각 모델의 training.py가 담당한다.
+    """
+    df = load_plmn(plmn)
+    cols = metric_columns(df)
+    if not cols:
+        raise RuntimeError(f"{plmn}: no raw feature columns")
+
+    values = df[cols].to_numpy(dtype=np.float64)
+    values = np.nan_to_num(values, nan=0.0, posinf=0.0, neginf=0.0)
+
+    times = pd.to_datetime(df["time"], utc=True)
+    local_times = times.dt.tz_convert(tz_name)
+    train_end, valid_end = split_indices(
+        len(df),
+        train_ratio=train_ratio,
+        valid_ratio=valid_ratio,
+    )
+
+    return {
+        "df": df,
+        "cols": cols,
+        "times": times,
+        "local_times": local_times,
+        "train_end": train_end,
+        "valid_end": valid_end,
+        "train": values[:train_end],
+        "valid": values[train_end:valid_end],
+        "test": values[valid_end:],
+        "split": {
+            "train_time_end": str(times.iloc[train_end - 1]),
+            "valid_time_start": str(times.iloc[train_end]),
+            "valid_time_end": str(times.iloc[valid_end - 1]),
+            "test_time_start": str(times.iloc[valid_end]),
+            "test_time_end": str(times.iloc[-1]),
+        },
+    }
+
+
 def chrono_split_bounds(
     df: pd.DataFrame,
     predictions: dict[str, Any] | None = None,
