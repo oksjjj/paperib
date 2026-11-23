@@ -43,20 +43,31 @@ def load_labels(plmn: str) -> dict[str, Any]:
     return doc
 
 
-def human_anomaly_mask(
-    df: pd.DataFrame,
+def anomaly_mask_for_times(
+    times: pd.DatetimeIndex | pd.Series,
     labels: list[dict[str, Any]] | None,
 ) -> np.ndarray:
-    """전문가 point/range label이 각 sample을 덮는지 boolean mask로 변환한다."""
-    mask = np.zeros(len(df), dtype=bool)
-    if not labels or not len(df):
+    """전문가 point/range label을 주어진 시간축의 boolean mask로 변환한다."""
+    t = pd.to_datetime(times, utc=True)
+    mask = np.zeros(len(t), dtype=bool)
+    if not labels or not len(t):
         return mask
 
-    times = pd.to_datetime(df["time"], utc=True)
     for item in labels:
         if not isinstance(item, dict) or not item.get("start"):
             continue
         start = pd.to_datetime(item["start"], utc=True)
         end = pd.to_datetime(item.get("end") or item["start"], utc=True)
-        mask |= (times >= start) & (times <= end)
+        mask |= (t >= start) & (t <= end)
     return mask
+
+
+def human_anomaly_mask(
+    df: pd.DataFrame,
+    labels: list[dict[str, Any]] | None,
+) -> np.ndarray:
+    """전문가 point/range label이 각 sample을 덮는지 boolean mask로 변환한다."""
+    return anomaly_mask_for_times(
+        pd.to_datetime(df["time"], utc=True),
+        labels,
+    )
