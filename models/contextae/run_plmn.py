@@ -34,9 +34,8 @@ import pandas as pd
 import torch
 
 REPO = Path(__file__).resolve().parents[2]
-ROOT = REPO / "ContextAE"
+MODEL_DIR = REPO / "models" / "contextae" / "model"
 PRED_DIR = REPO / "data" / "ib_data" / "predictions"
-MODEL_DIR = ROOT / "model"
 
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
