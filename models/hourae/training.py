@@ -3,12 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
-import numpy as np
-import pandas as pd
-
-from core.data import prepare_unlabeled_base
 
 # @dataclass: 필드를 선언하면 __init__/비교 등을 자동 생성해 주는 데코레이터.
 #   예: Config(timezone="UTC") 처럼 인자로 넘기며 설정 객체를 만들 수 있다.
@@ -36,18 +31,3 @@ class Config:
     # 난수 초기값 및 평가에서 하루당 오경보 수 등을 환산하기 위한 표본 간격(분).
     seed: int = 2
     sample_minutes: float = 5.0
-
-# 원본 데이터에서 학습/평가 배열을 만든다. 이 과정에는 전문가 라벨이 입력되지 않는다.
-def prepare_unlabeled_plmn(plmn: str, tz_name: str) -> dict[str, Any]:
-    """공통 라벨 없는 데이터 준비 후 local hour만 HourAE용으로 추가한다."""
-    prep = prepare_unlabeled_base(plmn, tz_name)
-    hours = prep["local_times"].dt.hour.to_numpy(dtype=np.int16)
-    a, b = prep["train_end"], prep["valid_end"]
-    prep.update(
-        {
-            "train_hours": hours[:a],
-            "valid_hours": hours[a:b],
-            "test_hours": hours[b:],
-        }
-    )
-    return prep
