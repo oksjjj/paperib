@@ -32,11 +32,14 @@ DEFAULT_VALID_RATIO = 0.2
 
 def data_signature(data_dir: Path = DATA_DIR) -> tuple[tuple[str, int, int], ...]:
     """raw CSV 목록/크기/수정시간으로 cache 유효성을 판단할 signature를 만든다."""
+    # 디렉터리가 없으면 빈 signature → 캐시와도 절대 일치하지 않음
     if not data_dir.exists():
         return ()
+    # 각 원소: (파일명, 바이트 크기, 수정시각 ns). 정렬해 순서를 고정한다.
     rows: list[tuple[str, int, int]] = []
     for path in sorted(data_dir.glob("*.csv")):
         stat = path.stat()
+        # 내용 해시 대신 메타데이터만 모아 빠른 변경 감지에 쓴다.
         rows.append((path.name, int(stat.st_size), int(stat.st_mtime_ns)))
     return tuple(rows)
 
@@ -52,18 +55,22 @@ def load_plmn(
     이 함수는 모델 학습용이므로 UI 표시용 파생 데이터를 만들지 않는다.
     cache에도 원래 raw counter와 time/PLMN column만 유지한다.
     """
+    # PLMN별 pickle 캐시: raw가 같으면 CSV 재스캔을 건너뛴다.
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     cache_path = CACHE_DIR / f"{plmn}.pkl"
     signature = data_signature(data_dir)
 
+    # 캐시 hit: 저장된 signature가 현재 raw와 같으면 바로 반환
     if use_cache and cache_path.exists():
         try:
             cached = pd.read_pickle(cache_path)
             if cached.attrs.get("signature") == signature:
                 return cached
         except Exception:
+            # 깨진/구버전 pickle은 무시하고 아래에서 다시 만든다.
             pass
 
+    # --- 캐시 miss: raw CSV에서 해당 PLMN만 모아 재구성 ---
     csv_files = sorted(data_dir.glob("*.csv"))
     if not csv_files:
         raise FileNotFoundError(f"raw CSV가 없습니다: {data_dir}")
@@ -73,6 +80,7 @@ def load_plmn(
         frame = pd.read_csv(path)
         if "PLMN" not in frame.columns:
             continue
+        # 타입 혼재(숫자/문자)에 대비해 문자열로 비교
         part = frame[frame["PLMN"].astype(str) == str(plmn)]
         if not part.empty:
             parts.append(part)
@@ -80,15 +88,18 @@ def load_plmn(
     if not parts:
         raise ValueError(f"PLMN={plmn} 데이터가 없습니다.")
 
+    # 여러 CSV 조각을 하나로 합치고 시간순으로 정렬
     df = pd.concat(parts, ignore_index=True)
     df = df.sort_values("time").reset_index(drop=True)
     df["time"] = pd.to_datetime(df["time"], utc=True)
+    # 다음에 캐시 유효성 비교할 때 쓸 signature를 DataFrame에 붙인다.
     df.attrs["signature"] = signature
 
     if use_cache:
         try:
             df.to_pickle(cache_path)
         except Exception:
+            # 디스크 쓰기 실패해도 메모리 결과는 반환한다.
             pass
 
     return df
