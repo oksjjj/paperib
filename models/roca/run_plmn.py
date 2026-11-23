@@ -2,7 +2,7 @@
 """한 사업자의 contaminated train data로 RoCA를 학습하고 validation 결과를 저장한다.
 
 원본 ruiking04/RoCA의 network와 loss를 사용하되 Merlion 의존성은 제거하고,
-paperib의 공통 데이터/평가 형식에 연결한 실행 wrapper다.
+paperib의 공통 데이터/평가 형식에 직접 연결한 실행 코드다.
 
 전체 흐름:
     사업자 데이터 로드
@@ -39,7 +39,7 @@ if str(REPO) not in sys.path:
 
 from core.data import prepare_plmn
 from core.metrics import evaluate_valid
-from models.pointae import device_for_run
+from models.pointae import device_for_run, set_seed
 from models.roca.config import RoCAConfig
 from models.roca.dataset import RoCAWindowDataset, block_to_nct
 from models.roca.export_predictions import write_roca_prediction
@@ -138,9 +138,8 @@ def train_and_eval(
     save_checkpoint: bool = True,
     quiet: bool = False,
 ) -> dict[str, Any]:
-    # 실험 재현성을 위해 PyTorch와 NumPy seed를 고정한다.
-    torch.manual_seed(seed)
-    np.random.seed(seed)
+    # 실험 재현성을 위해 공통 seed 유틸리티를 사용한다.
+    set_seed(seed)
 
     # prepare_plmn()은 11개 core feature 선택, 시간순 60/20/20 split,
     # TRAIN-only MinMaxScaler fit을 수행한다.
@@ -410,8 +409,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    # RoCA 디렉터리 안에서 python run_plmn.py 형태로 실행해도
-    # config.py, dataset.py 같은 로컬 모듈을 찾을 수 있도록 경로를 보정한다.
-    if str(ROOT) not in sys.path:
-        sys.path.insert(0, str(ROOT))
     main()
