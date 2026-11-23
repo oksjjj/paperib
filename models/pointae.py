@@ -158,6 +158,9 @@ def quantile_for_contamination(
     """상위 contamination_pct%를 자르는 empirical quantile 경계를 반환한다."""
     q = 1.0 - float(contamination_pct) / 100.0
     q = float(np.clip(q, 0.0, 1.0))
+    # np.quantile(scores, q): scores를 작은→큰 순으로 볼 때 하위 q*100% 지점의 값.
+    #   예: contamination_pct=5 → q=0.95 → 상위 5%가 시작되는 점수(=경계 임계값).
+    #   이 값보다 큰 score를 "제거할 후보"로 본다.
     return float(np.quantile(scores, q))
 
 
