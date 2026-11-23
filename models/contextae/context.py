@@ -12,6 +12,13 @@ import numpy as np
 from sklearn.metrics import silhouette_score
 from sklearn.preprocessing import RobustScaler
 
+def local_slot_ids(local_times: pd.Series) -> np.ndarray:
+    """로컬 시각을 5분 단위 slot 번호(00:00=0, ..., 23:55=287)로 변환한다."""
+    hour = local_times.dt.hour.to_numpy(dtype=np.int16)
+    minute = local_times.dt.minute.to_numpy(dtype=np.int16)
+    return (hour * 12 + minute // 5).astype(np.int16)
+
+
 def slot_label(slot: int) -> str:
     """0~287의 5분 slot 번호를 HH:MM 문자열로 변환한다."""
     hour = int(slot) // 12
