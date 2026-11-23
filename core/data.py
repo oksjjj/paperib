@@ -346,7 +346,13 @@ def prepare_plmn(
     test_s = scaler.transform(values[valid_end:]).astype(np.float32)
     full_s = np.concatenate([train_s, valid_s, test_s], axis=0)
 
-    # 사람 라벨 → 시점별 anomaly bool mask (학습 타깃이 아니라 평가용)
+    # 사람(전문가) 라벨 → 시점별 anomaly bool mask
+    # load_labels: PLMN별 label JSON을 읽는다.
+    #   예: {"plmn": "...", "labels": [{"start": "...", "end": "..."}, ...]}
+    #   파일이 없으면 labels=[] 인 빈 문서를 준다.
+    # human_anomaly_mask: 각 label 구간 [start, end]에 들어가는 행을 True로 표시.
+    #   결과 shape = (n,) bool 배열. True = 그 시점이 anomaly로 표시됨.
+    # 주의: 학습 손실의 정답(y)으로 쓰지 않고, VALID/TEST 평가용으로만 쓴다.
     label_doc = load_labels(plmn)
     y_full = human_anomaly_mask(df, label_doc.get("labels"))
     y_valid = y_full[train_end:valid_end]
