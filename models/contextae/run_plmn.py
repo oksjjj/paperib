@@ -47,6 +47,7 @@ from models.pointae import (
     DecontaminatedAEArtifacts,
     device_for_run,
     fit_decontaminated_group,
+    score_grouped_models,
     set_seed,
 )
 
@@ -66,7 +67,6 @@ from models.contextae.context import (
 from models.contextae.training import (
     Config,
     prepare_unlabeled_plmn,
-    score_with_context_models,
 )
 
 def context_summary(
@@ -475,7 +475,7 @@ def run(
 
     # 모델 학습이 끝난 후 각 split의 모든 시점에 해당 그룹의 최종 모델을 적용한다.
     # TRAIN의 제거된 시점도 여기서 점수를 계산한다. 추론이므로 파라미터를 갱신하지 않는다.
-    train_scores, _train_raw = score_with_context_models(
+    train_scores, _train_raw = score_grouped_models(
         prep["train"],
         train_context_ids,
         artifacts,
@@ -483,7 +483,7 @@ def run(
         cfg=cfg,
         device=device,
     )
-    valid_scores, valid_raw = score_with_context_models(
+    valid_scores, valid_raw = score_grouped_models(
         prep["valid"],
         valid_context_ids,
         artifacts,
@@ -491,7 +491,7 @@ def run(
         cfg=cfg,
         device=device,
     )
-    test_scores, test_raw = score_with_context_models(
+    test_scores, test_raw = score_grouped_models(
         prep["test"],
         test_context_ids,
         artifacts,
