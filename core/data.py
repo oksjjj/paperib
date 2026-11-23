@@ -157,12 +157,16 @@ def build_plmn_ranking(data_dir: Path = DATA_DIR) -> pd.DataFrame:
             key = str(plmn)
             sums[key] = sums.get(key, 0) + int(value)
 
-    # M971_sum 큰 순(내림차순)으로 정렬한 뒤 1부터 순위 부여
+    # sums dict → 2열 DataFrame(PLMN, M971_sum)으로 만든다.
+    # keys()/values()는 같은 삽입 순서를 따르므로 행이 짝을 맞춘다.
+    # sort_values(..., ascending=False): M971_sum 큰 쪽이 위로 (내림차순)
+    # reset_index(drop=True): 정렬 후 인덱스를 0,1,2...로 다시 매긴다.
     rank_df = (
         pd.DataFrame({"PLMN": list(sums.keys()), "M971_sum": list(sums.values())})
         .sort_values("M971_sum", ascending=False)
         .reset_index(drop=True)
     )
+    # insert(0, ...): 맨 앞 열에 rank를 넣는다. index+1 → 1등, 2등, ...
     rank_df.insert(0, "rank", rank_df.index + 1)
     return rank_df
 
