@@ -92,6 +92,9 @@ def load_plmn(
 
     # 여러 CSV 조각을 하나로 합치고 시간순으로 정렬
     df = pd.concat(parts, ignore_index=True)
+    # sort_values("time"): time 컬럼 기준으로 오름차순 정렬
+    # reset_index(drop=True): 정렬로 헝클어진 인덱스를 0,1,2...로 다시 매기고
+    #   옛 인덱스는 버리고(drop) 새 연속 인덱스만 남긴다.
     df = df.sort_values("time").reset_index(drop=True)
     df["time"] = pd.to_datetime(df["time"], utc=True)
     # 다음에 캐시 유효성 비교할 때 쓸 signature를 DataFrame에 붙인다.
