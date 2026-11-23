@@ -11,6 +11,7 @@ import torch
 from sklearn.preprocessing import RobustScaler
 
 from core.data import prepare_unlabeled_base
+from models.contextae.context import local_slot_ids
 from models.pointae import (
     PointAutoEncoder,
     build_point_autoencoder_from_state,
