@@ -33,11 +33,13 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from core.labels import anomaly_mask_for_times, load_labels
 from core.metrics import detection_delay, event_f1, false_alarms_per_day, point_prf
+from core.predictions import read_json
 
 PRED_DIR = ROOT / "data" / "ib_data" / "predictions"
 LABEL_DIR = ROOT / "data" / "ib_data" / "labels"
-MODEL_DIR = ROOT / "ContextAE" / "model"
+MODEL_DIR = ROOT / "models" / "contextae" / "model"
 RESULT_DIR = ROOT / "results"
 
 from core.features import PAPER_PLMNS
@@ -45,32 +47,6 @@ from core.features import PAPER_PLMNS
 
 from models.contextae import run_plmn as CTX
 
-
-
-def _load_json(path: Path) -> dict[str, Any]:
-    with path.open(encoding="utf-8") as f:
-        return json.load(f)
-
-
-def _label_mask(times: pd.DatetimeIndex, label_doc: dict[str, Any]) -> np.ndarray:
-    y = np.zeros(len(times), dtype=bool)
-    for item in label_doc.get("labels") or []:
-        start = item.get("start")
-        end = item.get("end") or start
-        if not start:
-            continue
-        a = pd.Timestamp(start)
-        b = pd.Timestamp(end)
-        if a.tzinfo is None:
-            a = a.tz_localize("UTC")
-        else:
-            a = a.tz_convert("UTC")
-        if b.tzinfo is None:
-            b = b.tz_localize("UTC")
-        else:
-            b = b.tz_convert("UTC")
-        y |= (times >= a) & (times <= b)
-    return y
 
 
 def _slot_map(segmentation: dict[str, Any]) -> np.ndarray:
@@ -389,7 +365,7 @@ def evaluate_plmn(plmn: str, args: argparse.Namespace) -> tuple[list[dict[str, A
     if not label_path.exists():
         raise FileNotFoundError(label_path)
 
-    pred_doc = _load_json(pred_path)
+    pred_doc = read_json(pred_path)
     ss = pred_doc.get("score_series") or {}
     times = pd.to_datetime(ss.get("times") or [], utc=True)
     raw_values = ss.get("raw_reconstruction_mse") or []
@@ -405,7 +381,8 @@ def evaluate_plmn(plmn: str, args: argparse.Namespace) -> tuple[list[dict[str, A
     raw_mse = raw_mse[:n]
     context_ids = context_ids[:n]
 
-    y = _label_mask(times, _load_json(label_path))
+    label_doc = load_labels(plmn)
+    y = anomaly_mask_for_times(times, label_doc.get("labels"))
 
     try:
         checkpoint = torch.load(
