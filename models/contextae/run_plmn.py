@@ -40,6 +40,7 @@ PRED_DIR = REPO / "data" / "ib_data" / "predictions"
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
+from core.data import prepare_unlabeled_base
 from core.labels import human_anomaly_mask, load_labels
 from core.metrics import evaluate_valid, resolve_vus_window
 from core.predictions import mask_to_labels, metric_payload
@@ -59,15 +60,13 @@ def _load_hourae():
 
 
 from models.contextae.context import (
+    local_slot_ids,
     build_train_slot_profiles,
     fit_context_segmentation,
     context_ids_from_slots,
     slot_label,
 )
-from models.contextae.training import (
-    Config,
-    prepare_unlabeled_plmn,
-)
+from models.contextae.training import Config
 
 def context_summary(
     artifacts: dict[int, DecontaminatedAEArtifacts],
@@ -402,7 +401,12 @@ def run(
     set_seed(cfg.seed)
     # 실행 장치 결정 후 라벨 없이 원본 데이터와 시간순 split을 준비한다.
     device = device_for_run()
-    prep = prepare_unlabeled_plmn(plmn, cfg.timezone)
+    prep = prepare_unlabeled_base(plmn, cfg.timezone)
+    slots = local_slot_ids(prep["local_times"])
+    a, b = prep["train_end"], prep["valid_end"]
+    prep["train_slots"] = slots[:a]
+    prep["valid_slots"] = slots[a:b]
+    prep["test_slots"] = slots[b:]
 
     print(
         f"device={device} plmn={plmn} features={len(prep['cols'])} "
