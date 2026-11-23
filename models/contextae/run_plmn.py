@@ -43,6 +43,12 @@ if str(REPO) not in sys.path:
 from core.labels import human_anomaly_mask, load_labels
 from core.metrics import evaluate_valid, resolve_vus_window
 from core.predictions import mask_to_labels, metric_payload
+from models.pointae import (
+    DecontaminatedAEArtifacts,
+    device_for_run,
+    fit_decontaminated_group,
+    set_seed,
+)
 
 
 def _load_hourae():
@@ -59,16 +65,12 @@ from models.contextae.context import (
 )
 from models.contextae.training import (
     Config,
-    ContextArtifacts,
-    set_seed,
-    device_for_run,
     prepare_unlabeled_plmn,
-    fit_context_model,
     score_with_context_models,
 )
 
 def context_summary(
-    artifacts: dict[int, ContextArtifacts],
+    artifacts: dict[int, DecontaminatedAEArtifacts],
     slot_to_context: np.ndarray,
     cfg: Config,
 ) -> list[dict[str, Any]]:
@@ -130,7 +132,7 @@ def segmentation_payload(
 
 def save_checkpoint(
     plmn: str,
-    artifacts: dict[int, ContextArtifacts],
+    artifacts: dict[int, DecontaminatedAEArtifacts],
     cols: list[str],
     cfg: Config,
     segment_info: dict[str, Any],
@@ -183,7 +185,7 @@ def write_prediction(
     bundle: dict[str, Any],
     cols: list[str],
     cfg: Config,
-    artifacts: dict[int, ContextArtifacts],
+    artifacts: dict[int, DecontaminatedAEArtifacts],
     segment_info: dict[str, Any],
     split_meta: dict[str, str],
 ) -> str:
@@ -449,16 +451,17 @@ def run(
     )
 
     t0 = time.time()
-    artifacts: dict[int, ContextArtifacts] = {}
+    artifacts: dict[int, DecontaminatedAEArtifacts] = {}
 
     # TRAIN에서 발견한 K개 context 각각에 대해 독립적인 scaler와 두 단계 AE를 학습한다.
     for context_id in range(int(segment_info["selected_k"])):
         idx = np.flatnonzero(train_context_ids == context_id)
-        art = fit_context_model(
+        art = fit_decontaminated_group(
             prep["train"][idx],
-            context_id=context_id,
             cfg=cfg,
             device=device,
+            group_seed=context_id,
+            group_name=f"context {context_id}",
         )
         artifacts[context_id] = art
 
