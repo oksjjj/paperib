@@ -44,20 +44,22 @@ if str(REPO) not in sys.path:
 from core.labels import human_anomaly_mask, load_labels
 from core.metrics import evaluate_valid, resolve_vus_window
 from core.predictions import mask_to_labels, metric_payload
+from models.pointae import (
+    DecontaminatedAEArtifacts,
+    device_for_run,
+    fit_decontaminated_group,
+    set_seed,
+)
 
 
 from models.hourae.training import (
     Config,
-    HourArtifacts,
-    set_seed,
-    device_for_run,
     prepare_unlabeled_plmn,
-    fit_hour,
     score_with_hour_models,
 )
 
 def hour_summary(
-    artifacts: dict[int, HourArtifacts],
+    artifacts: dict[int, DecontaminatedAEArtifacts],
     cfg: Config,
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
@@ -93,7 +95,7 @@ def hour_summary(
 
 def save_checkpoint(
     plmn: str,
-    artifacts: dict[int, HourArtifacts],
+    artifacts: dict[int, DecontaminatedAEArtifacts],
     cols: list[str],
     cfg: Config,
 ) -> str:
@@ -139,7 +141,7 @@ def write_prediction(
     bundle: dict[str, Any],
     cols: list[str],
     cfg: Config,
-    artifacts: dict[int, HourArtifacts],
+    artifacts: dict[int, DecontaminatedAEArtifacts],
     split_meta: dict[str, str],
 ) -> str:
     # NaN 등 점수가 없는 위치는 제외하고 TRAIN 기준 임계치를 넘는 시점만 이상으로 예측한다.
@@ -241,15 +243,16 @@ def run(
     )
 
     t0 = time.time()
-    artifacts: dict[int, HourArtifacts] = {}
+    artifacts: dict[int, DecontaminatedAEArtifacts] = {}
 
     for hour in range(24):
         idx = np.flatnonzero(prep["train_hours"] == hour)
-        art = fit_hour(
+        art = fit_decontaminated_group(
             prep["train"][idx],
-            hour=hour,
             cfg=cfg,
             device=device,
+            group_seed=hour,
+            group_name=f"hour {hour:02d}",
         )
         artifacts[hour] = art
 
