@@ -61,8 +61,7 @@ def main() -> None:
     from core.features import CORE_FEATURES, PAPER_PLMNS
     from core.data import DATA_DIR, load_plmn
     from core.metrics import point_prf
-    from models.hourae.model import PointAutoEncoder as HourAEModel
-    from models.contextae.model import PointAutoEncoder as ContextAEModel
+    from models.pointae import PointAutoEncoder
     from models.contextae.context import slot_label
     from models.roca.config import RoCAConfig
     from models.roca.dataset import block_to_nct
@@ -77,7 +76,7 @@ def main() -> None:
     )
 
     def _hour_forward() -> None:
-        model = HourAEModel(
+        model = PointAutoEncoder(
             n_features=len(CORE_FEATURES),
             hidden_dim=32,
             latent_dim=8,
@@ -88,7 +87,7 @@ def main() -> None:
     check("HourAE forward", _hour_forward)
 
     def _context_forward() -> None:
-        model = ContextAEModel(
+        model = PointAutoEncoder(
             n_features=len(CORE_FEATURES),
             hidden_dim=32,
             latent_dim=8,
