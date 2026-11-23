@@ -13,15 +13,11 @@ from sklearn.preprocessing import RobustScaler
 from core.data import prepare_unlabeled_base
 from models.contextae.context import local_slot_ids
 from models.pointae import (
-    PointAutoEncoder,
+    DecontaminatedAEArtifacts,
     build_point_autoencoder_from_state,
-    cpu_state_dict,
     device_for_run,
-    fit_robust_scaler,
-    quantile_for_contamination,
+    fit_decontaminated_group,
     reconstruction_mse,
-    set_seed,
-    train_point_autoencoder,
 )
 
 @dataclass
@@ -56,27 +52,6 @@ class Config:
     seed: int = 2
     sample_minutes: float = 5.0
 
-@dataclass
-class ContextArtifacts:
-    context_id: int
-    # Stage-1은 오염 가능 TRAIN 전체, Final은 Stage-1에서 남긴 원본 데이터로 각각 fit한 scaler.
-    stage1_scaler: RobustScaler
-    final_scaler: RobustScaler
-    # 두 모델의 state_dict(가중치/버퍼)를 CPU에 복사해 추론 및 checkpoint에 저장한다.
-    stage1_state: dict[str, torch.Tensor]
-    final_state: dict[str, torch.Tensor]
-    # 1차 제거 기준 MSE, 최종 clean TRAIN MSE의 평균/표준편차 및 참고 분위수.
-    stage1_threshold_mse: float
-    final_score_mean: float
-    final_score_std: float
-    final_reference_quantile_mse: float
-    final_reference_quantile_z: float
-    # 원래 학습 시점 수, 제거 시점 수, 각 AE 마지막 epoch의 평균 배치 손실.
-    n_train: int
-    n_removed: int
-    stage1_final_loss: float
-    final_final_loss: float
-
 # 원본 데이터에서 학습/평가 배열을 만든다. 이 과정에는 전문가 라벨이 입력되지 않는다.
 def prepare_unlabeled_plmn(plmn: str, tz_name: str) -> dict[str, Any]:
     """공통 라벨 없는 데이터 준비 후 5분 slot만 ContextAE용으로 추가한다."""
@@ -93,116 +68,11 @@ def prepare_unlabeled_plmn(plmn: str, tz_name: str) -> dict[str, Any]:
     return prep
 
 
-# 하나의 context에 해당하는 TRAIN 행만으로 1차 학습 → 오염 후보 제거 → 최종 학습을 수행한다.
-def fit_context_model(
-    x_context_raw: np.ndarray,
-    *,
-    context_id: int,
-    cfg: Config,
-    device: torch.device,
-) -> ContextArtifacts:
-    # 지나치게 적은 표본으로 불안정한 모델을 학습하지 않도록 최소 20개를 요구한다.
-    n = len(x_context_raw)
-    if n < 20:
-        raise RuntimeError(
-            f"context {context_id}: too few train points ({n})"
-        )
-
-    # HourAE와 공정하게 비교하기 위해 AE 구조와 decontamination recipe는 동일하게 유지하고 context 분할 방식만 바꾼다.
-    # [Stage-1] 잠재 오염을 포함한 TRAIN 그룹으로 scaler와 첫 번째 AE를 학습한다.
-    stage1_scaler = fit_robust_scaler(x_context_raw)
-    x1 = stage1_scaler.transform(x_context_raw).astype(np.float32)
-
-    stage1_model, stage1_hist = train_point_autoencoder(
-        x1,
-        n_features=x1.shape[1],
-        cfg=cfg,
-        epochs=cfg.stage1_epochs,
-        device=device,
-        seed=cfg.seed + context_id,
-    )
-    # Stage-1 TRAIN의 모든 시점에 복원오차를 부여한다. 높은 오차는 제거 후보이지 정답 이상치가 아니다.
-    stage1_scores = reconstruction_mse(
-        stage1_model,
-        x1,
-        batch_size=cfg.batch_size,
-        device=device,
-    )
-
-    # 기본 95% 분위수보다 큰 MSE를 제거한다. 경계와 같은 값은 clean_mask에 남는다.
-    stage1_cut = quantile_for_contamination(
-        stage1_scores,
-        cfg.stage1_remove_pct,
-    )
-    clean_mask = stage1_scores <= stage1_cut
-
-    # 제거 후 충분한 학습 행이 남았는지 확인한다.
-    if int(clean_mask.sum()) < max(20, int(0.5 * n)):
-        raise RuntimeError(
-            f"context {context_id}: stage1 retained only "
-            f"{int(clean_mask.sum())}/{n}"
-        )
-
-    # [Final] 원본 단위의 행을 추출한 뒤 scaler도 새로 fit한다. 1차 정규화값을 재사용하지 않는다.
-    clean_raw = x_context_raw[clean_mask]
-    final_scaler = fit_robust_scaler(clean_raw)
-    x2 = final_scaler.transform(clean_raw).astype(np.float32)
-
-    # clean TRAIN으로 새로운 AE를 처음부터 학습한다.
-    final_model, final_hist = train_point_autoencoder(
-        x2,
-        n_features=x2.shape[1],
-        cfg=cfg,
-        epochs=cfg.final_epochs,
-        device=device,
-        seed=cfg.seed + 1000 + context_id,
-    )
-    # 운영 임계치와 점수 표준화의 기준은 Final 모델의 clean TRAIN 복원오차이다.
-    final_clean_scores = reconstruction_mse(
-        final_model,
-        x2,
-        batch_size=cfg.batch_size,
-        device=device,
-    )
-
-    # 그룹마다 MSE 분포가 다르므로 이후 z=(MSE-mean)/std로 공통 척도에서 비교한다.
-    score_mean = float(np.mean(final_clean_scores))
-    score_std = float(np.std(final_clean_scores, ddof=0))
-    # 분산이 0에 가까울 때 0으로 나누는 문제를 방지한다.
-    if not np.isfinite(score_std) or score_std < 1e-12:
-        score_std = 1e-12
-
-    # 99.99% 참고 분위수는 진단 및 저장용이다. 여기서 데이터를 추가로 제거하지 않는다.
-    ref_mse = quantile_for_contamination(
-        final_clean_scores,
-        cfg.final_contamination_pct,
-    )
-    ref_z = float((ref_mse - score_mean) / score_std)
-
-    # 재학습 없이 추론과 임계치 분석을 수행할 수 있도록 모든 필요한 산출물을 보존한다.
-    return ContextArtifacts(
-        context_id=context_id,
-        stage1_scaler=stage1_scaler,
-        final_scaler=final_scaler,
-        stage1_state=cpu_state_dict(stage1_model),
-        final_state=cpu_state_dict(final_model),
-        stage1_threshold_mse=float(stage1_cut),
-        final_score_mean=score_mean,
-        final_score_std=score_std,
-        final_reference_quantile_mse=ref_mse,
-        final_reference_quantile_z=ref_z,
-        n_train=n,
-        n_removed=int((~clean_mask).sum()),
-        stage1_final_loss=float(stage1_hist[-1]),
-        final_final_loss=float(final_hist[-1]),
-    )
-
-
 # 각 시점을 해당 context 모델로 추론한 뒤 원래 시간 순서에 MSE와 z-score를 배치한다.
 def score_with_context_models(
     values_raw: np.ndarray,
     context_ids: np.ndarray,
-    artifacts: dict[int, ContextArtifacts],
+    artifacts: dict[int, DecontaminatedAEArtifacts],
     *,
     n_features: int,
     cfg: Config,
