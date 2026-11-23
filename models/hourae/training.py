@@ -17,6 +17,8 @@ from core.data import load_plmn
 from core.features import metric_columns
 from models.hourae.model import PointAutoEncoder
 
+# @dataclass: 필드를 선언하면 __init__/비교 등을 자동 생성해 주는 데코레이터.
+#   예: Config(timezone="UTC") 처럼 인자로 넘기며 설정 객체를 만들 수 있다.
 @dataclass
 class Config:
     # UTC 시각을 로컬 시각으로 변환해 매일 반복되는 시간대(hour)를 식별한다.
