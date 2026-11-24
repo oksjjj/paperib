@@ -269,10 +269,14 @@ def fit_decontaminated_group(
     if not np.isfinite(score_std) or score_std < 1e-12:
         score_std = 1e-12
 
+    # ref_mse: clean TRAIN 점수에서 상위 final_contamination_pct%가 시작되는 MSE 경계.
+    #   (진단/기록용 참고 분위수. Stage-1처럼 추가 제거 단계는 아니다.)
     ref_mse = quantile_for_contamination(
         final_clean_scores,
         float(cfg.final_contamination_pct),
     )
+    # ref_z: 그 경계를 z-score로 환산 → (경계 - 평균) / 표준편차.
+    #   나중에 "이 분위수가 대략 몇 σ 위치인가"를 볼 때 쓴다.
     ref_z = float((ref_mse - score_mean) / score_std)
 
     return DecontaminatedAEArtifacts(
