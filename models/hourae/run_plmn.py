@@ -250,6 +250,12 @@ def run(
 
     for hour in range(24):
         idx = np.flatnonzero(prep["train_hours"] == hour)
+        # HourAE에서는 hour 번호를 group_seed로 사용한다.
+        # 공통 fit_decontaminated_group() 안에서
+        #   Stage-1 seed = cfg.seed + hour
+        #   Final seed   = cfg.seed + 1000 + hour
+        # 로 계산된다. 따라서 hour별 AE끼리, 그리고 같은 hour의 Stage-1/Final끼리
+        # 서로 다른 초기 weight와 shuffle 순서에서 시작한다.
         art = fit_decontaminated_group(
             prep["train"][idx],
             cfg=cfg,
