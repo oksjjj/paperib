@@ -11,10 +11,6 @@
 6. 각 point score를 z=(MSE-mean_h)/std_h 형태로 보정한다.
 7. z > threshold_sigma이면 anomaly point로 판단한다.
 
-final_contamination_pct(기본 0.01%)는 과거 구현과의 비교를 위해 남겨둔
-참고용 upper-tail quantile이다. AutoEncoder 학습 weight를 바꾸는 contamination
-파라미터가 아니며, 실제 기본 decision threshold는 clean TRAIN의 mean+sigma 규칙을 사용한다.
-
 모델 학습, decontamination, score 생성에는 anomaly label을 사용하지 않는다.
 전문가 label은 모든 score가 결정된 뒤 VALID/TEST 평가에만 사용한다.
 """
@@ -75,9 +71,6 @@ def hour_summary(
                 "stage1_threshold_mse": art.stage1_threshold_mse,
                 "final_train_mse_mean": art.final_score_mean,
                 "final_train_mse_std": art.final_score_std,
-                "final_reference_contamination_pct": cfg.final_contamination_pct,
-                "final_reference_quantile_mse": art.final_reference_quantile_mse,
-                "final_reference_quantile_z": art.final_reference_quantile_z,
                 "decision_threshold_sigma": cfg.threshold_sigma,
                 "decision_threshold_mse": (
                     art.final_score_mean
@@ -113,8 +106,6 @@ def save_checkpoint(
                     "stage1_threshold_mse": art.stage1_threshold_mse,
                     "final_score_mean": art.final_score_mean,
                     "final_score_std": art.final_score_std,
-                    "final_reference_quantile_mse": art.final_reference_quantile_mse,
-                    "final_reference_quantile_z": art.final_reference_quantile_z,
                     "n_train": art.n_train,
                     "n_removed": art.n_removed,
                 }
@@ -235,9 +226,7 @@ def run(
         flush=True,
     )
     print(
-        f"stage1 remove={cfg.stage1_remove_pct}% "
-        f"final reference contamination={cfg.final_contamination_pct}% "
-        f"threshold=mean+{cfg.threshold_sigma}sigma",
+        f"stage1 remove={cfg.stage1_remove_pct}% "        f"threshold=mean+{cfg.threshold_sigma}sigma",
         flush=True,
     )
     print(
@@ -450,7 +439,6 @@ def main() -> None:
     p.add_argument("--plmn", default="P0480")
     p.add_argument("--timezone", default="Asia/Seoul")
     p.add_argument("--stage1_remove_pct", type=float, default=5.0)
-    p.add_argument("--final_contamination_pct", type=float, default=0.01)
     p.add_argument("--threshold_sigma", type=float, default=3.0)
     p.add_argument("--hidden_dim", type=int, default=32)
     p.add_argument("--latent_dim", type=int, default=8)
@@ -469,8 +457,6 @@ def main() -> None:
 
     if not (0.0 < args.stage1_remove_pct < 50.0):
         p.error("--stage1_remove_pct must be in (0,50)")
-    if not (0.0 < args.final_contamination_pct < 50.0):
-        p.error("--final_contamination_pct must be in (0,50)")
     if args.threshold_sigma <= 0:
         p.error("--threshold_sigma must be > 0")
     if args.hidden_dim < 2:
@@ -488,7 +474,6 @@ def main() -> None:
     cfg = Config(
         timezone=args.timezone,
         stage1_remove_pct=args.stage1_remove_pct,
-        final_contamination_pct=args.final_contamination_pct,
         threshold_sigma=args.threshold_sigma,
         hidden_dim=args.hidden_dim,
         latent_dim=args.latent_dim,
