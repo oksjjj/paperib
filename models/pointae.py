@@ -199,13 +199,19 @@ def fit_decontaminated_group(
 
     stage1_scaler = fit_robust_scaler(x_raw)
     x1 = stage1_scaler.transform(x_raw).astype(np.float32)
+    # Stage-1은 그룹마다 서로 다른 난수 초기화를 사용한다.
+    # cfg.seed는 전체 실험의 기준 seed이고, group_seed는 HourAE에서는 hour,
+    # ContextAE에서는 context_id이다. 따라서 서로 다른 그룹의 AE가 우연히
+    # 완전히 같은 초기 weight와 DataLoader shuffle 순서에서 시작하지 않도록 한다.
+    # 예: cfg.seed=2, hour=5이면 Stage-1 seed는 7이다.
+    stage1_seed = int(cfg.seed) + int(group_seed)
     stage1_model, stage1_hist = train_point_autoencoder(
         x1,
         n_features=x1.shape[1],
         cfg=cfg,
         epochs=int(cfg.stage1_epochs),
         device=device,
-        seed=int(cfg.seed) + int(group_seed),
+        seed=stage1_seed,
     )
     stage1_scores = reconstruction_mse(
         stage1_model,
@@ -227,13 +233,25 @@ def fit_decontaminated_group(
     clean_raw = x_raw[clean_mask]
     final_scaler = fit_robust_scaler(clean_raw)
     x2 = final_scaler.transform(clean_raw).astype(np.float32)
+    # Final AE는 Stage-1 가중치를 이어서 학습하는 모델이 아니라,
+    # Stage-1이 골라낸 clean candidate TRAIN으로 처음부터 다시 만드는 fresh model이다.
+    # 그래서 Final 단계에서도 새 PointAutoEncoder를 생성하며, seed까지 Stage-1과
+    # 다르게 해 초기 weight와 shuffle 순서를 독립적으로 만든다.
+    #
+    # +1000은 통계적/이론적 의미가 있는 값이 아니다.
+    # Stage-1 seed 영역과 Final seed 영역이 겹치지 않도록 분리하기 위한 단순 offset이다.
+    # 같은 seed를 다시 써도 새 모델 객체이므로 'fresh model'이긴 하지만,
+    # 그 경우 초기 weight가 Stage-1과 동일하게 재현될 수 있다.
+    # 현재 구현은 완전히 독립적인 재초기화를 명확히 하기 위해 다른 seed를 사용한다.
+    # 예: cfg.seed=2, hour/context=5이면 Final seed는 1007이다.
+    final_seed = int(cfg.seed) + 1000 + int(group_seed)
     final_model, final_hist = train_point_autoencoder(
         x2,
         n_features=x2.shape[1],
         cfg=cfg,
         epochs=int(cfg.final_epochs),
         device=device,
-        seed=int(cfg.seed) + 1000 + int(group_seed),
+        seed=final_seed,
     )
     final_clean_scores = reconstruction_mse(
         final_model,
