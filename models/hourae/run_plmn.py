@@ -90,9 +90,20 @@ def save_checkpoint(
     cols: list[str],
     cfg: Config,
 ) -> str:
+    # 학습 결과를 PLMN별 .pt 한 파일에 묶어 저장한다.
+    # 경로 예: MODEL_DIR/{plmn}/paperib/hour_ae.pt
     path = MODEL_DIR / plmn / "paperib" / "hour_ae.pt"
     path.parent.mkdir(parents=True, exist_ok=True)
 
+    # torch.save에 넣는 dict 구조:
+    #   feature_columns — 학습에 쓴 metric 컬럼 이름 목록 (추론 시 동일 순서 필요)
+    #   config          — Config를 dict로 변환한 하이퍼파라미터
+    #   hours           — 시간대(0~23)별 모델·스케일러·점수 통계
+    #     final_state / stage1_state — AE 가중치 (추론은 주로 final_state)
+    #     stage1_scaler / final_scaler — 각 단계 RobustScaler
+    #     stage1_threshold_mse — Stage-1에서 상위 % 자를 때 쓴 MSE 경계
+    #     final_score_mean / final_score_std — clean TRAIN MSE의 평균·표준편차 (z-score용)
+    #     n_train / n_removed — 원래 TRAIN 수, Stage-1에서 제거한 수
     torch.save(
         {
             "feature_columns": cols,

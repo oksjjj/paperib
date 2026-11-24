@@ -4,7 +4,7 @@
   "model": "roca",
   "run_name": "paperib",
   "eval_split": "valid",
-  "updated_at": "2026-11-15T12:22:47.286404+00:00",
+  "updated_at": "2026-11-24T04:17:28.607122+00:00",
   "threshold": 0.08962452411651611,
   "threshold_method": "percentile",
   "window_length": 32,
@@ -15176,7 +15176,7 @@
       0.029738903045654297
     ],
     "threshold": 0.08962452411651611,
-    "note": "RoCA score = distance-to-center (loss_n; higher = more anomalous); threshold = train score q0.99 by default. Upstream: ruiking04/RoCA."
+    "note": "RoCA score는 hypersphere center 거리 기반 loss_n이며 값이 클수록 anomaly에 가깝다. 기본 threshold는 TRAIN score q0.99이다. 원본 구현: ruiking04/RoCA."
   },
   "score_polarity": "higher_is_anomaly",
   "metrics": {
@@ -15391,7 +15391,7 @@
     "threshold_method": "percentile",
     "score_polarity": "higher_is_anomaly",
     "eval_split": "valid",
-    "note": "PA-F1 / Accuracy excluded from primary reporting",
+    "note": "PA-F1과 Accuracy는 primary reporting에서 제외함",
     "primary_metric": "vus_pr",
     "vus_pr": 0.029730844125758868,
     "vus_roc": 0.5866733692682543,
@@ -15399,5 +15399,5 @@
     "auc_pr": 0.02720717189880542,
     "vus_window": 7
   },
-  "vus_evaluated_at": "2026-11-17T06:12:22.744626+00:00"
+  "vus_evaluated_at": "2026-11-24T04:17:49.731770+00:00"
 }
