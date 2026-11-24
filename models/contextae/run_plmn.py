@@ -460,6 +460,13 @@ def run(
     # TRAIN에서 발견한 K개 context 각각에 대해 독립적인 scaler와 두 단계 AE를 학습한다.
     for context_id in range(int(segment_info["selected_k"])):
         idx = np.flatnonzero(train_context_ids == context_id)
+        # ContextAE에서는 context_id를 group_seed로 사용한다.
+        # 공통 fit_decontaminated_group() 안에서
+        #   Stage-1 seed = cfg.seed + context_id
+        #   Final seed   = cfg.seed + 1000 + context_id
+        # 로 계산된다. 따라서 context별 AE끼리, 그리고 같은 context의
+        # Stage-1/Final끼리 서로 다른 초기 weight와 shuffle 순서에서 시작한다.
+        # 이 규칙은 HourAE와 동일해서 두 방법의 AE 학습 조건도 일관되게 유지된다.
         art = fit_decontaminated_group(
             prep["train"][idx],
             cfg=cfg,
