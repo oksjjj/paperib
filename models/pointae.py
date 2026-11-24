@@ -261,7 +261,11 @@ def fit_decontaminated_group(
     )
 
     score_mean = float(np.mean(final_clean_scores))
+    # ddof=0: n으로 나누는 편향 표준편차 (√(Σ(x-mean)²/n)). z-score 분모로 쓴다.
+    #   참고: ddof=1이면 n-1로 나누는 불편향(표본) 표준편차.
     score_std = float(np.std(final_clean_scores, ddof=0))
+    # std가 0·NaN·inf이면 이후 (score-mean)/std 나눗셈이 깨지므로
+    # 아주 작은 양수(1e-12)로 바닥을 깐다.
     if not np.isfinite(score_std) or score_std < 1e-12:
         score_std = 1e-12
 
