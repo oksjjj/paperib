@@ -90,9 +90,6 @@ def context_summary(
                 "stage1_threshold_mse": art.stage1_threshold_mse,
                 "final_train_mse_mean": art.final_score_mean,
                 "final_train_mse_std": art.final_score_std,
-                "final_reference_contamination_pct": cfg.final_contamination_pct,
-                "final_reference_quantile_mse": art.final_reference_quantile_mse,
-                "final_reference_quantile_z": art.final_reference_quantile_z,
                 "decision_threshold_sigma": cfg.threshold_sigma,
                 "decision_threshold_mse": (
                     art.final_score_mean
@@ -153,12 +150,6 @@ def save_checkpoint(
                     "stage1_threshold_mse": art.stage1_threshold_mse,
                     "final_score_mean": art.final_score_mean,
                     "final_score_std": art.final_score_std,
-                    "final_reference_quantile_mse": (
-                        art.final_reference_quantile_mse
-                    ),
-                    "final_reference_quantile_z": (
-                        art.final_reference_quantile_z
-                    ),
                     "n_train": art.n_train,
                     "n_removed": art.n_removed,
                 }
@@ -372,7 +363,6 @@ def run_hour24_baseline(
     hour_cfg = hourae.Config(
         timezone=cfg.timezone,
         stage1_remove_pct=cfg.stage1_remove_pct,
-        final_contamination_pct=cfg.final_contamination_pct,
         threshold_sigma=cfg.threshold_sigma,
         hidden_dim=cfg.hidden_dim,
         latent_dim=cfg.latent_dim,
@@ -444,9 +434,7 @@ def run(
     print_context_map(segment_info, train_context_ids)
 
     print(
-        f"stage1 remove={cfg.stage1_remove_pct}% "
-        f"final reference contamination={cfg.final_contamination_pct}% "
-        f"threshold=mean+{cfg.threshold_sigma}sigma",
+        f"stage1 remove={cfg.stage1_remove_pct}% "        f"threshold=mean+{cfg.threshold_sigma}sigma",
         flush=True,
     )
     print(
@@ -707,7 +695,6 @@ def main() -> None:
     )
 
     p.add_argument("--stage1_remove_pct", type=float, default=5.0)
-    p.add_argument("--final_contamination_pct", type=float, default=0.01)
     p.add_argument("--threshold_sigma", type=float, default=3.0)
     p.add_argument("--hidden_dim", type=int, default=32)
     p.add_argument("--latent_dim", type=int, default=8)
@@ -743,8 +730,6 @@ def main() -> None:
 
     if not (0.0 < args.stage1_remove_pct < 50.0):
         p.error("--stage1_remove_pct must be in (0,50)")
-    if not (0.0 < args.final_contamination_pct < 50.0):
-        p.error("--final_contamination_pct must be in (0,50)")
     if args.threshold_sigma <= 0:
         p.error("--threshold_sigma must be > 0")
     if args.hidden_dim < 2:
@@ -767,7 +752,6 @@ def main() -> None:
         min_segment_slots=args.min_segment_slots,
         profile_use_mad=not args.median_only_profile,
         stage1_remove_pct=args.stage1_remove_pct,
-        final_contamination_pct=args.final_contamination_pct,
         threshold_sigma=args.threshold_sigma,
         hidden_dim=args.hidden_dim,
         latent_dim=args.latent_dim,
