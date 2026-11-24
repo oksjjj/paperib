@@ -310,6 +310,9 @@ def score_grouped_models(
     z_scores = np.full(len(values_raw), np.nan, dtype=np.float64)
 
     for group_id, art in artifacts.items():
+        # flatnonzero: True인 위치의 인덱스를 1차원 배열로 반환.
+        #   예: group_ids=[0,2,0,1], group_id=0 → [True,False,True,False] → idx=[0, 2]
+        #   즉 "이 그룹에 속하는 시점들의 행 번호"를 모은다.
         idx = np.flatnonzero(group_ids == group_id)
         if idx.size == 0:
             continue
