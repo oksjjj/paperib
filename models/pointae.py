@@ -175,8 +175,6 @@ class DecontaminatedAEArtifacts:
     stage1_threshold_mse: float
     final_score_mean: float
     final_score_std: float
-    final_reference_quantile_mse: float
-    final_reference_quantile_z: float
     n_train: int
     n_removed: int
     stage1_final_loss: float
@@ -269,16 +267,6 @@ def fit_decontaminated_group(
     if not np.isfinite(score_std) or score_std < 1e-12:
         score_std = 1e-12
 
-    # ref_mse: clean TRAIN 점수에서 상위 final_contamination_pct%가 시작되는 MSE 경계.
-    #   (진단/기록용 참고 분위수. Stage-1처럼 추가 제거 단계는 아니다.)
-    ref_mse = quantile_for_contamination(
-        final_clean_scores,
-        float(cfg.final_contamination_pct),
-    )
-    # ref_z: 그 경계를 z-score로 환산 → (경계 - 평균) / 표준편차.
-    #   나중에 "이 분위수가 대략 몇 σ 위치인가"를 볼 때 쓴다.
-    ref_z = float((ref_mse - score_mean) / score_std)
-
     return DecontaminatedAEArtifacts(
         stage1_scaler=stage1_scaler,
         final_scaler=final_scaler,
@@ -287,8 +275,6 @@ def fit_decontaminated_group(
         stage1_threshold_mse=float(stage1_cut),
         final_score_mean=score_mean,
         final_score_std=score_std,
-        final_reference_quantile_mse=ref_mse,
-        final_reference_quantile_z=ref_z,
         n_train=n,
         n_removed=int((~clean_mask).sum()),
         stage1_final_loss=float(stage1_hist[-1]),
