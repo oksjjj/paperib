@@ -331,6 +331,9 @@ def score_grouped_models(
             batch_size=int(cfg.batch_size),
             device=device,
         )
+        # idx와 mse는 같은 길이·같은 순서 → 각 idx[i] 자리에 mse[i]를 넣는다.
+        #   예: idx=[0,2], mse=[0.1,0.4] → raw_mse[0]=0.1, raw_mse[2]=0.4
+        # z_scores도 동일하게, 해당 시점 위치에만 기록해 원래 시계열 순서를 유지한다.
         raw_mse[idx] = mse
         z_scores[idx] = (
             (mse - art.final_score_mean)
