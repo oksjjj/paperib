@@ -3071,7 +3071,6 @@ def build_figure(
         row_heights = [score_frac, metrics_frac, label_frac, label_frac]
         s = sum(row_heights)
         row_heights = [h / s for h in row_heights]
-        titles = ("Anomaly score", "Metric 값", "사람 라벨", "모델 예측")
         metric_row = 2
         human_label_row, model_label_row = 3, 4
         spacing = 0.05
@@ -3081,14 +3080,12 @@ def build_figure(
             score_frac / (score_frac + metrics_frac),
             metrics_frac / (score_frac + metrics_frac),
         ]
-        titles = ("Anomaly score", "Metric 값")
         metric_row = 2
         human_label_row, model_label_row = None, None
         spacing = 0.08
     else:
         n_rows = 1
         row_heights = [1.0]
-        titles = ("Metric 값",)
         metric_row = 1
         human_label_row, model_label_row = None, None
         spacing = 0.08
@@ -3099,7 +3096,7 @@ def build_figure(
         shared_xaxes=True,
         vertical_spacing=spacing,
         row_heights=row_heights,
-        subplot_titles=titles,
+        # 패널 이름은 y축에 표시하므로 그래프를 가리는 중복 제목은 생성하지 않는다.
     )
 
     if has_score_data:
