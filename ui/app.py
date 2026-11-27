@@ -2617,64 +2617,6 @@ app.layout = html.Div(
                 "borderRadius": "6px",
             },
         ),
-        html.Div(
-            [
-                html.Div(
-                    [
-                        html.B("표시 metric", style={"marginRight": "8px"}),
-                        html.Button(
-                            "전체 선택",
-                            id="btn-metrics-all",
-                            n_clicks=0,
-                            title="모든 metric을 다시 표시",
-                        ),
-                        html.Button(
-                            "전체 해제",
-                            id="btn-metrics-none",
-                            n_clicks=0,
-                            title="모든 metric 숨김 (Y축 스케일 유지)",
-                        ),
-                        html.Span(
-                            "체크 해제하면 그래프에서 숨깁니다",
-                            style={
-                                "fontSize": "12px",
-                                "color": "#666",
-                                "marginLeft": "8px",
-                            },
-                        ),
-                    ],
-                    style={
-                        "display": "flex",
-                        "alignItems": "center",
-                        "flexWrap": "wrap",
-                        "gap": "4px",
-                        "marginBottom": "4px",
-                    },
-                ),
-                dcc.Checklist(
-                    id="metric-filter",
-                    options=_START_METRIC_OPTS,
-                    value=_START_METRIC_VALS,
-                    inline=True,
-                    labelStyle={
-                        "display": "inline-block",
-                        "marginRight": "12px",
-                        "marginBottom": "2px",
-                        "fontSize": "12px",
-                        "whiteSpace": "nowrap",
-                    },
-                    style={"lineHeight": "1.6"},
-                ),
-            ],
-            style={
-                "border": "1px solid #e0e0e0",
-                "padding": "6px 8px",
-                "marginBottom": "4px",
-                "maxHeight": "110px",
-                "overflowY": "auto",
-                "background": "#fafafa",
-            },
-        ),
         html.H3("3) Anomaly", style={"margin": "10px 0 4px"}),
         html.Div(
             "anomaly 라벨: 구간은 왼쪽 시작 → 오른쪽 끝 2클릭, 점은 시점 1클릭으로 추가하세요. "
@@ -2973,6 +2915,65 @@ app.layout = html.Div(
                 "showTips": False,
             },
             style={"width": "100%", "height": f"{FIGURE_HEIGHT}px"},
+        ),
+        html.Div(
+            [
+                html.Div(
+                    [
+                        html.B("표시 metric", style={"marginRight": "8px"}),
+                        html.Button(
+                            "전체 선택",
+                            id="btn-metrics-all",
+                            n_clicks=0,
+                            title="모든 metric을 다시 표시",
+                        ),
+                        html.Button(
+                            "전체 해제",
+                            id="btn-metrics-none",
+                            n_clicks=0,
+                            title="모든 metric 숨김 (Y축 스케일 유지)",
+                        ),
+                        html.Span(
+                            "체크 해제하면 그래프에서 숨깁니다",
+                            style={
+                                "fontSize": "12px",
+                                "color": "#666",
+                                "marginLeft": "8px",
+                            },
+                        ),
+                    ],
+                    style={
+                        "display": "flex",
+                        "alignItems": "center",
+                        "flexWrap": "wrap",
+                        "gap": "4px",
+                        "marginBottom": "4px",
+                    },
+                ),
+                dcc.Checklist(
+                    id="metric-filter",
+                    options=_START_METRIC_OPTS,
+                    value=_START_METRIC_VALS,
+                    inline=True,
+                    labelStyle={
+                        "display": "inline-block",
+                        "marginRight": "12px",
+                        "marginBottom": "2px",
+                        "fontSize": "12px",
+                        "whiteSpace": "nowrap",
+                    },
+                    style={"lineHeight": "1.6"},
+                ),
+            ],
+            style={
+                "border": "1px solid #e0e0e0",
+                "padding": "6px 8px",
+                "marginTop": "8px",
+                "marginBottom": "8px",
+                "maxHeight": "110px",
+                "overflowY": "auto",
+                "background": "#fafafa",
+            },
         ),
         html.Div(id="status", style={"display": "none"}),
         html.B("이 시점 특성값 (값 내림차순)"),
