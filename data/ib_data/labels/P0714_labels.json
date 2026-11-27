@@ -1,7 +1,7 @@
 {
   "plmn": "P0714",
   "rank": 2,
-  "updated_at": "2026-11-27T09:53:10.596707+00:00",
+  "updated_at": "2026-11-27T10:02:16.296326+00:00",
   "labels": [
     {
       "id": "f772a82e",
@@ -161,11 +161,14 @@
       "kind": "point",
       "start": "2026-05-31T16:35:00+00:00",
       "end": "2026-05-31T16:35:00+00:00",
-      "updated_at": "2026-11-27T09:49:57.425495+00:00",
+      "updated_at": "2026-11-27T10:00:13.420768+00:00",
       "reasons": [
-        "attempt_spike"
+        "attempt_spike",
+        "fail_surge"
       ],
-      "fail_metrics": [],
+      "fail_metrics": [
+        "M419"
+      ],
       "note": ""
     },
     {
@@ -173,7 +176,7 @@
       "kind": "point",
       "start": "2026-06-04T23:45:00+00:00",
       "end": "2026-06-04T23:45:00+00:00",
-      "updated_at": "2026-11-27T09:50:22.115430+00:00",
+      "updated_at": "2026-11-27T10:00:24.848076+00:00",
       "reasons": [
         "attempt_spike"
       ],
@@ -185,11 +188,14 @@
       "kind": "point",
       "start": "2026-06-05T05:00:00+00:00",
       "end": "2026-06-05T05:00:00+00:00",
-      "updated_at": "2026-11-27T09:50:58.770846+00:00",
+      "updated_at": "2026-11-27T10:02:07.393050+00:00",
       "reasons": [
-        "attempt_spike"
+        "attempt_spike",
+        "fail_surge"
       ],
-      "fail_metrics": [],
+      "fail_metrics": [
+        "M419"
+      ],
       "note": ""
     },
     {
@@ -197,11 +203,14 @@
       "kind": "point",
       "start": "2026-06-07T00:55:00+00:00",
       "end": "2026-06-07T00:55:00+00:00",
-      "updated_at": "2026-11-27T09:51:19.627293+00:00",
+      "updated_at": "2026-11-27T10:02:16.296266+00:00",
       "reasons": [
-        "attempt_spike"
+        "attempt_spike",
+        "fail_surge"
       ],
-      "fail_metrics": [],
+      "fail_metrics": [
+        "M419"
+      ],
       "note": ""
     },
     {

@@ -2527,61 +2527,7 @@ app.layout = html.Div(
                 "flexWrap": "wrap",
             },
         ),
-        html.Div(
-            [
-                html.H3("2) 그래프 설정", style={"margin": "0"}),
-                html.Div(
-                    [
-                        html.Span(
-                            "회색=TRAIN · 보라=VALID · 노랑=TEST  (점선=경계)",
-                            style={
-                                "fontSize": "12px",
-                                "color": "#64748b",
-                                "marginRight": "8px",
-                            },
-                        ),
-                        html.Button(
-                            "Train 구간",
-                            id="btn-zoom-train",
-                            n_clicks=0,
-                            title="train 구간으로 줌",
-                        ),
-                        html.Button(
-                            "Valid 구간",
-                            id="btn-zoom-valid",
-                            n_clicks=0,
-                            title="valid 구간으로 줌 (모델 평가)",
-                        ),
-                        html.Button(
-                            "Test 구간",
-                            id="btn-zoom-test",
-                            n_clicks=0,
-                            title="test 구간으로 줌 (hold-out)",
-                        ),
-                        html.Button(
-                            "전체 구간",
-                            id="btn-zoom-full-split",
-                            n_clicks=0,
-                            title="train+valid+test 전체 보기",
-                        ),
-                    ],
-                    style={
-                        "display": "flex",
-                        "alignItems": "center",
-                        "gap": "8px",
-                        "flexWrap": "wrap",
-                    },
-                ),
-            ],
-            style={
-                "display": "flex",
-                "alignItems": "center",
-                "justifyContent": "space-between",
-                "gap": "12px",
-                "margin": "10px 0 4px",
-                "flexWrap": "wrap",
-            },
-        ),
+        html.H3("2) 그래프 설정", style={"margin": "10px 0 4px"}),
         html.Div(
             [
                 html.B("모델 run", style={"marginRight": "8px"}),
@@ -2669,54 +2615,6 @@ app.layout = html.Div(
                 "background": "#f8fafc",
                 "border": "1px solid #e2e8f0",
                 "borderRadius": "6px",
-            },
-        ),
-        html.Div(
-            [
-                dcc.RadioItems(
-                    id="click-mode",
-                    options=[
-                        {"label": "줌", "value": "zoom"},
-                        {"label": "이동(Y자동)", "value": "pan"},
-                        {"label": "이동(Y고정)", "value": "pan_keep_y"},
-                        {"label": "값 탐색(클릭+←→)", "value": "inspect"},
-                        {"label": "구간 라벨(2클릭)", "value": "label_range"},
-                        {"label": "점 라벨(1클릭)", "value": "label_point"},
-                        {"label": "구간 편집", "value": "edit_range"},
-                    ],
-                    value="zoom",
-                    inline=True,
-                    style={"marginRight": "12px"},
-                ),
-                html.Button("◀", id="btn-pan-left", n_clicks=0, title="왼쪽(과거)으로 이동"),
-                html.Button("▶", id="btn-pan-right", n_clicks=0, title="오른쪽(미래)으로 이동"),
-                html.Button("Y+", id="btn-y-in", n_clicks=0, title="세로축 확대"),
-                html.Button("Y-", id="btn-y-out", n_clicks=0, title="세로축 축소"),
-                html.Button("Y 자동", id="btn-y-auto", n_clicks=0, title="세로축 자동 맞춤"),
-                html.Button("줌인", id="btn-zoom-in", n_clicks=0, title="시간축 한 단계 확대 (중앙 기준)"),
-                html.Button(
-                    "줌인(왼쪽)",
-                    id="btn-zoom-in-left",
-                    n_clicks=0,
-                    title="왼쪽 시작점 고정 후 시간축 확대",
-                ),
-                html.Button("줌아웃", id="btn-zoom-out", n_clicks=0, title="시간축 한 단계 축소"),
-                html.Button("전체", id="btn-reset-zoom", n_clicks=0, title="가로·세로 전체 보기"),
-                html.Button(
-                    "시작점 취소",
-                    id="btn-cancel-range",
-                    n_clicks=0,
-                    style={"display": "none"},
-                ),
-            ],
-            style={
-                "display": "flex",
-                "flexWrap": "nowrap",
-                "alignItems": "center",
-                "gap": "8px",
-                "border": "1px solid #e0e0e0",
-                "padding": "6px",
-                "marginBottom": "4px",
             },
         ),
         html.Div(
@@ -2826,47 +2724,60 @@ app.layout = html.Div(
                         "marginBottom": "4px",
                     },
                 ),
-                dcc.Checklist(
-                    id="label-reason-codes",
-                    options=_reason_checklist_options(),
-                    value=[],
-                    inline=True,
-                    labelStyle={
-                        "display": "inline-block",
-                        "marginRight": "14px",
-                        "marginBottom": "2px",
-                        "fontSize": "12px",
-                        "whiteSpace": "nowrap",
-                    },
-                    style={"lineHeight": "1.7"},
-                ),
                 html.Div(
                     [
-                        html.Span(
-                            "fail_surge 지표",
-                            style={
+                        dcc.Checklist(
+                            id="label-reason-codes",
+                            options=_reason_checklist_options(),
+                            value=[],
+                            inline=True,
+                            labelStyle={
+                                "display": "inline-block",
+                                "marginRight": "14px",
+                                "marginBottom": "2px",
                                 "fontSize": "12px",
-                                "fontWeight": "600",
-                                "marginRight": "8px",
                                 "whiteSpace": "nowrap",
                             },
+                            style={"lineHeight": "1.7"},
                         ),
-                        dcc.Dropdown(
-                            id="label-fail-metrics",
-                            options=[],
-                            value=[],
-                            multi=True,
-                            placeholder="FAIL/TO 등 폭증 지표 (복수)",
-                            style={"flex": "1 1 360px", "minWidth": "260px"},
+                        html.Div(
+                            [
+                                html.Span(
+                                    "fail_surge 지표",
+                                    style={
+                                        "fontSize": "12px",
+                                        "fontWeight": "600",
+                                        "marginRight": "6px",
+                                        "whiteSpace": "nowrap",
+                                    },
+                                ),
+                                dcc.Dropdown(
+                                    id="label-fail-metrics",
+                                    options=[],
+                                    value=[],
+                                    multi=True,
+                                    placeholder="지표 선택",
+                                    style={
+                                        "width": "160px",
+                                        "minWidth": "140px",
+                                        "flex": "0 0 auto",
+                                    },
+                                ),
+                            ],
+                            id="label-fail-metrics-wrap",
+                            style={
+                                "display": "none",
+                                "alignItems": "center",
+                                "gap": "4px",
+                                "flex": "0 0 auto",
+                            },
                         ),
                     ],
-                    id="label-fail-metrics-wrap",
                     style={
-                        "display": "none",
+                        "display": "flex",
                         "alignItems": "center",
-                        "gap": "4px",
-                        "marginTop": "6px",
                         "flexWrap": "wrap",
+                        "gap": "10px",
                     },
                 ),
             ],
@@ -2961,6 +2872,97 @@ app.layout = html.Div(
                     },
                 ),
             ],
+        ),
+        html.Div(
+            [
+                html.Span(
+                    "회색=TRAIN · 보라=VALID · 노랑=TEST  (점선=경계)",
+                    style={
+                        "fontSize": "12px",
+                        "color": "#64748b",
+                        "marginRight": "8px",
+                    },
+                ),
+                html.Button(
+                    "Train 구간",
+                    id="btn-zoom-train",
+                    n_clicks=0,
+                    title="train 구간으로 줌",
+                ),
+                html.Button(
+                    "Valid 구간",
+                    id="btn-zoom-valid",
+                    n_clicks=0,
+                    title="valid 구간으로 줌 (모델 평가)",
+                ),
+                html.Button(
+                    "Test 구간",
+                    id="btn-zoom-test",
+                    n_clicks=0,
+                    title="test 구간으로 줌 (hold-out)",
+                ),
+                html.Button(
+                    "전체 구간",
+                    id="btn-zoom-full-split",
+                    n_clicks=0,
+                    title="train+valid+test 전체 보기",
+                ),
+            ],
+            style={
+                "display": "flex",
+                "alignItems": "center",
+                "gap": "8px",
+                "flexWrap": "wrap",
+                "margin": "8px 0 4px",
+            },
+        ),
+        html.Div(
+            [
+                dcc.RadioItems(
+                    id="click-mode",
+                    options=[
+                        {"label": "줌", "value": "zoom"},
+                        {"label": "이동(Y자동)", "value": "pan"},
+                        {"label": "이동(Y고정)", "value": "pan_keep_y"},
+                        {"label": "값 탐색(클릭+←→)", "value": "inspect"},
+                        {"label": "구간 라벨(2클릭)", "value": "label_range"},
+                        {"label": "점 라벨(1클릭)", "value": "label_point"},
+                        {"label": "구간 편집", "value": "edit_range"},
+                    ],
+                    value="zoom",
+                    inline=True,
+                    style={"marginRight": "12px"},
+                ),
+                html.Button("◀", id="btn-pan-left", n_clicks=0, title="왼쪽(과거)으로 이동"),
+                html.Button("▶", id="btn-pan-right", n_clicks=0, title="오른쪽(미래)으로 이동"),
+                html.Button("Y+", id="btn-y-in", n_clicks=0, title="세로축 확대"),
+                html.Button("Y-", id="btn-y-out", n_clicks=0, title="세로축 축소"),
+                html.Button("Y 자동", id="btn-y-auto", n_clicks=0, title="세로축 자동 맞춤"),
+                html.Button("줌인", id="btn-zoom-in", n_clicks=0, title="시간축 한 단계 확대 (중앙 기준)"),
+                html.Button(
+                    "줌인(왼쪽)",
+                    id="btn-zoom-in-left",
+                    n_clicks=0,
+                    title="왼쪽 시작점 고정 후 시간축 확대",
+                ),
+                html.Button("줌아웃", id="btn-zoom-out", n_clicks=0, title="시간축 한 단계 축소"),
+                html.Button("전체", id="btn-reset-zoom", n_clicks=0, title="가로·세로 전체 보기"),
+                html.Button(
+                    "시작점 취소",
+                    id="btn-cancel-range",
+                    n_clicks=0,
+                    style={"display": "none"},
+                ),
+            ],
+            style={
+                "display": "flex",
+                "flexWrap": "wrap",
+                "alignItems": "center",
+                "gap": "8px",
+                "border": "1px solid #e0e0e0",
+                "padding": "6px",
+                "marginBottom": "4px",
+            },
         ),
         dcc.Graph(
             id="graph",
@@ -3722,11 +3724,10 @@ def _confirm_modal_ui(
 def _fail_metrics_wrap_style(reasons: list[str] | None) -> dict[str, str]:
     show = "fail_surge" in (reasons or [])
     return {
-        "display": "flex" if show else "none",
+        "display": "inline-flex" if show else "none",
         "alignItems": "center",
         "gap": "4px",
-        "marginTop": "6px",
-        "flexWrap": "wrap",
+        "flex": "0 0 auto",
     }
 
 
