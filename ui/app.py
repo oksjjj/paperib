@@ -3618,6 +3618,8 @@ def _sync_click_mode_on_nav(_n_zoom, _list_value, _n_reset, selected_label, clic
             return no_update
         return "inspect"
     if tid == "label-list":
+        if state.pop("_skip_list_mode_sync", False):
+            return no_update
         if not selected_label:
             return no_update
         # 구간 편집 모드에서 다른 label을 선택해도 편집 모드를 유지한다.
@@ -4081,18 +4083,32 @@ def _main_body(
                     no_update,
                     no_update,
                 )
-            remove_label(state["doc"], selected_label)
-            if state.get("highlight_id") == selected_label:
+            removed_id = str(selected_label)
+            remove_label(state["doc"], removed_id)
+            if str(state.get("highlight_id") or "") == removed_id:
                 state["highlight_id"] = None
+            if str(state.get("reason_bound_id") or "") == removed_id:
+                state["reason_bound_id"] = None
+            state["label_range_anchor"] = None
+            state.pop("_offscreen_cleared", None)
             _bump_label_rev()
             opts = _label_options()
-            # 다음 항목을 자동 선택하면 label-list → (줌) → click-mode 연쇄로
-            # figure가 2~3번 더 그려지므로, 삭제 후에는 선택만 해제한다.
+            next_id = opts[0]["value"] if opts else None
+            if next_id is not None:
+                state["highlight_id"] = next_id
+                _bump_hi_rev()
+                _arm_select_guard()
+                # label-list/mode echo가 figure를 한 번 더 그리거나 자동 줌하지 않게 한다.
+                state["_skip_list_select_rebuild"] = True
+                state["_skip_list_mode_sync"] = True
+                state["_skip_mode_rebuild"] = True
+            else:
+                _bump_hi_rev()
             return (
                 _build_graph(click_mode),
                 opts,
-                None,
-                f"삭제됨: {selected_label} — Save Labels로 저장",
+                next_id,
+                f"삭제됨: {removed_id} — Save Labels로 저장",
                 _cancel_style(click_mode),
                 no_update,
                 no_update,
@@ -4139,6 +4155,28 @@ def _main_body(
         )
 
     if prop == "label-list.value":
+        # 삭제 직후 다음 항목 자동 선택: figure/options는 이미 갱신됨.
+        if state.pop("_skip_list_select_rebuild", False):
+            item = _label_by_id(selected_label) if selected_label else None
+            if item is None:
+                return (
+                    no_update,
+                    no_update,
+                    selected_label,
+                    "라벨 선택이 해제되었습니다." if not selected_label else "",
+                    _cancel_style(click_mode),
+                    no_update,
+                    no_update,
+                )
+            return (
+                no_update,
+                no_update,
+                selected_label,
+                f"선택: {label_line(item)}",
+                _cancel_style(click_mode),
+                no_update,
+                no_update,
+            )
         if not selected_label:
             # highlight만 지우고 zoom은 그대로 유지한다.
             state["highlight_id"] = None
