@@ -967,7 +967,7 @@ def _select_or_toggle_label_hit(hit: dict, click_mode: str):
     if already:
         if click_mode == "edit_range":
             return (
-                _build_graph(click_mode),
+                _build_graph(click_mode, light=True),
                 _label_options(),
                 hit["id"],
                 f"선택 유지 ({tag}): 빨간 경계를 드래그하세요.",
@@ -980,7 +980,7 @@ def _select_or_toggle_label_hit(hit: dict, click_mode: str):
         _bump_hi_rev()
         _store_draft_reasons([], [], "")
         return (
-            _build_graph(click_mode),
+            _build_graph(click_mode, light=True),
             no_update,
             None,
             "라벨 선택이 해제되었습니다.",
@@ -998,7 +998,7 @@ def _select_or_toggle_label_hit(hit: dict, click_mode: str):
     else:
         status = f"선택 ({tag}): {label_line(hit)} · 「선택 구간으로 줌」으로 확대"
     return (
-        _build_graph(click_mode),
+        _build_graph(click_mode, light=True),
         _label_options(),
         hit["id"],
         status,
@@ -1257,7 +1257,14 @@ def _model_label_axis_row() -> int:
     return 4
 
 
-def _build_graph(click_mode: str):
+def _build_graph(click_mode: str, *, light: bool = False):
+    """그래프 figure를 만든다.
+
+    light=True: highlight/커서 등 overlay만 바뀐 경우.
+      - 비싼 ranked hover를 끄고
+      - datarevision(fig_gen)을 올리지 않아 WebGL trace 재생성을 피한다.
+    light=False: zoom/metric/label 내용 등 trace 데이터가 바뀌는 경우.
+    """
     if state["df"] is None or state["doc"] is None:
         return _empty_figure()
 
@@ -1273,7 +1280,8 @@ def _build_graph(click_mode: str):
         start=state["zoom_start"],
         end=state["zoom_end"],
         title=title,
-        hover_values=True,
+        # light 경로에서는 순위 hover 생성을 생략해 선택/해제 응답을 빠르게 한다.
+        hover_values=not light,
         max_metrics=-1,
         max_points=MAX_POINTS,
         show_labels=True,
@@ -1282,9 +1290,10 @@ def _build_graph(click_mode: str):
         show_predictions=True,
         highlight_pred_id=state.get("selected_pred_id"),
     )
-    # 줌/이동 버튼 뒤 이전 WebGL buffer나 축 범위가 남지 않도록 revision을 한 번 더 올린다.
-    # 서버가 새 figure를 그릴 때 브라우저가 예전 화면을 재사용하지 못하게 하는 목적이다.
-    state["fig_gen"] = int(state.get("fig_gen") or 0) + 1
+    # trace 데이터가 실제로 바뀔 때만 fig_gen을 올린다.
+    # highlight마다 올리면 datarevision이 바뀌어 Scattergl을 매번 다시 그린다.
+    if not light:
+        state["fig_gen"] = int(state.get("fig_gen") or 0) + 1
     tmin, tmax = data_time_bounds(state["df"])
     x0 = state["zoom_start"] if state["zoom_start"] is not None else tmin
     x1 = state["zoom_end"] if state["zoom_end"] is not None else tmax
@@ -1309,16 +1318,13 @@ def _build_graph(click_mode: str):
     x_gen = int(state.get("x_gen") or 0)
     force_ui = state.pop("_force_ui_rev", None)
     force_bit = f":f{force_ui}" if force_ui is not None else ""
+    # datarevision: WebGL/metric trace 무효화용. highlight·cursor·pending overlay는 제외.
+    # uirevision: shape/overlay가 바뀔 때 갱신해 이전 선택 잔상을 남기지 않는다.
     fig.update_layout(
         datarevision=(
-            f"{fig.layout.datarevision}:{state['fig_gen']}"
-            f":m{metric_rev}:l{label_rev}:p{place_rev}:c{cursor_rev}"
-            f":h{hi_rev}:x{x_gen}{force_bit}"
+            f"{fig.layout.datarevision}:{state.get('fig_gen') or 0}"
+            f":m{metric_rev}:l{label_rev}:x{x_gen}{force_bit}"
         ),
-        # figure 재생성 시 새 시간 범위를 받아들이도록 x_gen을 uirevision 구성에 포함한다.
-        # '전체' 동작은 한 번의 강제 UI reset을 위해 _force_ui_rev도 설정한다.
-        # click/list highlight 변경도 hi_rev를 바꿔야 Plotly가 이전 선택 shape를
-        # 그대로 남겨두지 않는다.
         uirevision=(
             f"{state.get('plmn') or 'labeling'}"
             f":m{metric_rev}:l{label_rev}:p{place_rev}:c{cursor_rev}"
@@ -2520,226 +2526,9 @@ app.layout = html.Div(
                 "flexWrap": "wrap",
             },
         ),
-        html.H3("2) Anomaly", style={"margin": "10px 0 4px"}),
-        html.Div(
-            "anomaly 라벨: 구간은 왼쪽 시작 → 오른쪽 끝 2클릭, 점은 시점 1클릭으로 추가하세요. "
-            "목록에서 선택 후 구간 편집으로 경계를 조절할 수 있습니다.",
-            style={"fontSize": "12px", "color": "#666", "marginBottom": "6px"},
-        ),
         html.Div(
             [
-                dcc.Dropdown(
-                    id="label-list",
-                    options=_START_LABEL_OPTS,
-                    value=_START_LABEL_VALUE,
-                    clearable=True,
-                    searchable=False,
-                    placeholder="anomaly 구간 선택",
-                    style={"width": "680px", "flex": "0 0 680px"},
-                ),
-                html.Button("라벨 선택해제", id="btn-clear-selection", n_clicks=0),
-                html.Button("선택 구간으로 줌", id="btn-zoom-selected", n_clicks=0),
-                html.Button("선택 라벨 삭제", id="btn-delete", n_clicks=0),
-                html.Button("Save Labels", id="btn-save", n_clicks=0),
-                html.Button("Reload Saved", id="btn-reload", n_clicks=0),
-            ],
-            style={
-                "display": "flex",
-                "gap": "8px",
-                "alignItems": "center",
-                "flexWrap": "wrap",
-                "marginBottom": "8px",
-            },
-        ),
-        html.Div(
-            [
-                html.Div(
-                    [
-                        html.B("판정 기준", style={"marginRight": "8px"}),
-                        html.Span(
-                            "선택 라벨에 저장 · 새로 찍는 라벨에도 적용 (복수 가능)",
-                            style={"fontSize": "12px", "color": "#666"},
-                        ),
-                    ],
-                    style={
-                        "display": "flex",
-                        "alignItems": "center",
-                        "flexWrap": "wrap",
-                        "gap": "4px",
-                        "marginBottom": "4px",
-                    },
-                ),
-                dcc.Checklist(
-                    id="label-reason-codes",
-                    options=_reason_checklist_options(),
-                    value=[],
-                    inline=True,
-                    labelStyle={
-                        "display": "inline-block",
-                        "marginRight": "14px",
-                        "marginBottom": "2px",
-                        "fontSize": "12px",
-                        "whiteSpace": "nowrap",
-                    },
-                    style={"lineHeight": "1.7"},
-                ),
-                html.Div(
-                    [
-                        html.Span(
-                            "fail_surge 지표",
-                            style={
-                                "fontSize": "12px",
-                                "fontWeight": "600",
-                                "marginRight": "8px",
-                                "whiteSpace": "nowrap",
-                            },
-                        ),
-                        dcc.Dropdown(
-                            id="label-fail-metrics",
-                            options=[],
-                            value=[],
-                            multi=True,
-                            placeholder="FAIL/TO 등 폭증 지표 (복수)",
-                            style={"flex": "1 1 360px", "minWidth": "260px"},
-                        ),
-                    ],
-                    id="label-fail-metrics-wrap",
-                    style={
-                        "display": "none",
-                        "alignItems": "center",
-                        "gap": "4px",
-                        "marginTop": "6px",
-                        "flexWrap": "wrap",
-                    },
-                ),
-                dcc.Textarea(
-                    id="label-reason-note",
-                    value="",
-                    placeholder="메모 (선택, other면 권장)",
-                    style={
-                        "width": "100%",
-                        "height": "48px",
-                        "marginTop": "6px",
-                        "fontSize": "12px",
-                        "resize": "vertical",
-                    },
-                ),
-                html.Div(
-                    [
-                        html.Button(
-                            "메모·기준 반영",
-                            id="btn-apply-reason",
-                            n_clicks=0,
-                            title="같은 라벨에 머문 채 메모를 즉시 저장 (다른 라벨로 옮기거나 Save 할 때도 자동 저장됨)",
-                            style={"fontSize": "12px"},
-                        ),
-                        html.Span(
-                            id="reason-status",
-                            style={
-                                "fontSize": "12px",
-                                "color": "#64748b",
-                                "marginLeft": "10px",
-                            },
-                        ),
-                    ],
-                    style={"marginTop": "6px", "display": "flex", "alignItems": "center"},
-                ),
-            ],
-            style={
-                "border": "1px solid #e0e0e0",
-                "padding": "8px 10px",
-                "marginBottom": "8px",
-                "background": "#fafafa",
-            },
-        ),
-        html.Div(
-            id="confirm-modal",
-            style={
-                "display": "none",
-                "position": "fixed",
-                "inset": "0",
-                "zIndex": 2000,
-                "alignItems": "center",
-                "justifyContent": "center",
-            },
-            children=[
-                html.Div(
-                    id="confirm-modal-backdrop",
-                    n_clicks=0,
-                    style={
-                        "position": "absolute",
-                        "inset": "0",
-                        "background": "rgba(15, 23, 42, 0.45)",
-                    },
-                ),
-                html.Div(
-                    [
-                        html.H4(
-                            id="confirm-modal-title",
-                            children="확인",
-                            style={"margin": "0 0 10px", "fontSize": "18px"},
-                        ),
-                        html.P(
-                            id="confirm-modal-message",
-                            children="",
-                            style={
-                                "margin": "0 0 18px",
-                                "lineHeight": "1.5",
-                                "whiteSpace": "pre-wrap",
-                                "color": "#334155",
-                            },
-                        ),
-                        html.Div(
-                            [
-                                html.Button(
-                                    "취소",
-                                    id="btn-confirm-cancel",
-                                    n_clicks=0,
-                                    style={
-                                        "padding": "8px 16px",
-                                        "border": "1px solid #cbd5e1",
-                                        "borderRadius": "6px",
-                                        "background": "#fff",
-                                        "cursor": "pointer",
-                                    },
-                                ),
-                                html.Button(
-                                    "확인",
-                                    id="btn-confirm-ok",
-                                    n_clicks=0,
-                                    style={
-                                        "padding": "8px 16px",
-                                        "border": "none",
-                                        "borderRadius": "6px",
-                                        "background": "#2563eb",
-                                        "color": "#fff",
-                                        "cursor": "pointer",
-                                        "fontWeight": "600",
-                                    },
-                                ),
-                            ],
-                            style={
-                                "display": "flex",
-                                "justifyContent": "flex-end",
-                                "gap": "8px",
-                            },
-                        ),
-                    ],
-                    style={
-                        "position": "relative",
-                        "zIndex": 1,
-                        "width": "min(420px, calc(100vw - 32px))",
-                        "background": "#fff",
-                        "borderRadius": "10px",
-                        "padding": "20px 22px",
-                        "boxShadow": "0 18px 40px rgba(15, 23, 42, 0.25)",
-                    },
-                ),
-            ],
-        ),
-        html.Div(
-            [
-                html.H3("3) 그래프", style={"margin": "0"}),
+                html.H3("2) 그래프 설정", style={"margin": "0"}),
                 html.Div(
                     [
                         html.Span(
@@ -2986,6 +2775,223 @@ app.layout = html.Div(
                 "overflowY": "auto",
                 "background": "#fafafa",
             },
+        ),
+        html.H3("3) Anomaly", style={"margin": "10px 0 4px"}),
+        html.Div(
+            "anomaly 라벨: 구간은 왼쪽 시작 → 오른쪽 끝 2클릭, 점은 시점 1클릭으로 추가하세요. "
+            "목록에서 선택 후 구간 편집으로 경계를 조절할 수 있습니다.",
+            style={"fontSize": "12px", "color": "#666", "marginBottom": "6px"},
+        ),
+        html.Div(
+            [
+                dcc.Dropdown(
+                    id="label-list",
+                    options=_START_LABEL_OPTS,
+                    value=_START_LABEL_VALUE,
+                    clearable=True,
+                    searchable=False,
+                    placeholder="anomaly 구간 선택",
+                    style={"width": "680px", "flex": "0 0 680px"},
+                ),
+                html.Button("라벨 선택해제", id="btn-clear-selection", n_clicks=0),
+                html.Button("선택 구간으로 줌", id="btn-zoom-selected", n_clicks=0),
+                html.Button("선택 라벨 삭제", id="btn-delete", n_clicks=0),
+                html.Button("Save Labels", id="btn-save", n_clicks=0),
+                html.Button("Reload Saved", id="btn-reload", n_clicks=0),
+            ],
+            style={
+                "display": "flex",
+                "gap": "8px",
+                "alignItems": "center",
+                "flexWrap": "wrap",
+                "marginBottom": "8px",
+            },
+        ),
+        html.Div(
+            [
+                html.Div(
+                    [
+                        html.B("판정 기준", style={"marginRight": "8px"}),
+                        html.Span(
+                            "선택 라벨에 저장 · 새로 찍는 라벨에도 적용 (복수 가능)",
+                            style={"fontSize": "12px", "color": "#666"},
+                        ),
+                    ],
+                    style={
+                        "display": "flex",
+                        "alignItems": "center",
+                        "flexWrap": "wrap",
+                        "gap": "4px",
+                        "marginBottom": "4px",
+                    },
+                ),
+                dcc.Checklist(
+                    id="label-reason-codes",
+                    options=_reason_checklist_options(),
+                    value=[],
+                    inline=True,
+                    labelStyle={
+                        "display": "inline-block",
+                        "marginRight": "14px",
+                        "marginBottom": "2px",
+                        "fontSize": "12px",
+                        "whiteSpace": "nowrap",
+                    },
+                    style={"lineHeight": "1.7"},
+                ),
+                html.Div(
+                    [
+                        html.Span(
+                            "fail_surge 지표",
+                            style={
+                                "fontSize": "12px",
+                                "fontWeight": "600",
+                                "marginRight": "8px",
+                                "whiteSpace": "nowrap",
+                            },
+                        ),
+                        dcc.Dropdown(
+                            id="label-fail-metrics",
+                            options=[],
+                            value=[],
+                            multi=True,
+                            placeholder="FAIL/TO 등 폭증 지표 (복수)",
+                            style={"flex": "1 1 360px", "minWidth": "260px"},
+                        ),
+                    ],
+                    id="label-fail-metrics-wrap",
+                    style={
+                        "display": "none",
+                        "alignItems": "center",
+                        "gap": "4px",
+                        "marginTop": "6px",
+                        "flexWrap": "wrap",
+                    },
+                ),
+                dcc.Textarea(
+                    id="label-reason-note",
+                    value="",
+                    placeholder="메모 (선택, other면 권장)",
+                    style={
+                        "width": "100%",
+                        "height": "48px",
+                        "marginTop": "6px",
+                        "fontSize": "12px",
+                        "resize": "vertical",
+                    },
+                ),
+                html.Div(
+                    [
+                        html.Button(
+                            "메모·기준 반영",
+                            id="btn-apply-reason",
+                            n_clicks=0,
+                            title="같은 라벨에 머문 채 메모를 즉시 저장 (다른 라벨로 옮기거나 Save 할 때도 자동 저장됨)",
+                            style={"fontSize": "12px"},
+                        ),
+                        html.Span(
+                            id="reason-status",
+                            style={
+                                "fontSize": "12px",
+                                "color": "#64748b",
+                                "marginLeft": "10px",
+                            },
+                        ),
+                    ],
+                    style={"marginTop": "6px", "display": "flex", "alignItems": "center"},
+                ),
+            ],
+            style={
+                "border": "1px solid #e0e0e0",
+                "padding": "8px 10px",
+                "marginBottom": "8px",
+                "background": "#fafafa",
+            },
+        ),
+        html.Div(
+            id="confirm-modal",
+            style={
+                "display": "none",
+                "position": "fixed",
+                "inset": "0",
+                "zIndex": 2000,
+                "alignItems": "center",
+                "justifyContent": "center",
+            },
+            children=[
+                html.Div(
+                    id="confirm-modal-backdrop",
+                    n_clicks=0,
+                    style={
+                        "position": "absolute",
+                        "inset": "0",
+                        "background": "rgba(15, 23, 42, 0.45)",
+                    },
+                ),
+                html.Div(
+                    [
+                        html.H4(
+                            id="confirm-modal-title",
+                            children="확인",
+                            style={"margin": "0 0 10px", "fontSize": "18px"},
+                        ),
+                        html.P(
+                            id="confirm-modal-message",
+                            children="",
+                            style={
+                                "margin": "0 0 18px",
+                                "lineHeight": "1.5",
+                                "whiteSpace": "pre-wrap",
+                                "color": "#334155",
+                            },
+                        ),
+                        html.Div(
+                            [
+                                html.Button(
+                                    "취소",
+                                    id="btn-confirm-cancel",
+                                    n_clicks=0,
+                                    style={
+                                        "padding": "8px 16px",
+                                        "border": "1px solid #cbd5e1",
+                                        "borderRadius": "6px",
+                                        "background": "#fff",
+                                        "cursor": "pointer",
+                                    },
+                                ),
+                                html.Button(
+                                    "확인",
+                                    id="btn-confirm-ok",
+                                    n_clicks=0,
+                                    style={
+                                        "padding": "8px 16px",
+                                        "border": "none",
+                                        "borderRadius": "6px",
+                                        "background": "#2563eb",
+                                        "color": "#fff",
+                                        "cursor": "pointer",
+                                        "fontWeight": "600",
+                                    },
+                                ),
+                            ],
+                            style={
+                                "display": "flex",
+                                "justifyContent": "flex-end",
+                                "gap": "8px",
+                            },
+                        ),
+                    ],
+                    style={
+                        "position": "relative",
+                        "zIndex": 1,
+                        "width": "min(420px, calc(100vw - 32px))",
+                        "background": "#fff",
+                        "borderRadius": "10px",
+                        "padding": "20px 22px",
+                        "boxShadow": "0 18px 40px rgba(15, 23, 42, 0.25)",
+                    },
+                ),
+            ],
         ),
         dcc.Graph(
             id="graph",
@@ -3357,7 +3363,7 @@ def _on_model_pred_selected(pred_id, click_mode):
         if not state.get("show_model_preds", True):
             return no_update, status, no_update, no_update
         return (
-            _build_graph(click_mode or "zoom"),
+            _build_graph(click_mode or "zoom", light=True),
             status,
             no_update,
             no_update,
@@ -3373,6 +3379,8 @@ def _on_model_pred_selected(pred_id, click_mode):
         f"모델 예측 선택·줌: "
         f"{pred_line(item, feature_mode=_ui_feature_mode_for_display(), predictions=state.get('predictions'))}"
     )
+    # click-mode → inspect echo가 figure를 한 번 더 그리지 않게 한다.
+    state["_skip_mode_rebuild"] = True
     return _build_graph("inspect"), status, "inspect", panel
 
 
@@ -3955,6 +3963,9 @@ def _main_body(
 
     # ----- 현재 click mode별 동작 분기 -----
     if prop == "click-mode.value":
+        # 목록 선택 등에서 이미 figure를 만들었으면 모드 echo로 한 번 더 그리지 않는다.
+        # dragmode는 click-mode clientside가 Plotly.relayout로 맞춘다.
+        skip_rebuild = state.pop("_skip_mode_rebuild", False)
         state["label_range_anchor"] = None
         state.pop("place_click_guard_until", None)
         if click_mode != "inspect":
@@ -3997,8 +4008,18 @@ def _main_body(
             )
         else:
             status = "① 왼쪽 시작 클릭 → ② 오른쪽 끝 클릭 · Esc 취소"
+        if skip_rebuild:
+            return (
+                no_update,
+                no_update,
+                no_update,
+                status,
+                _cancel_style(click_mode),
+                no_update,
+                no_update,
+            )
         return (
-            _build_graph(click_mode),
+            _build_graph(click_mode, light=True),
             _label_options(),
             state.get("highlight_id"),
             status,
@@ -4065,10 +4086,12 @@ def _main_body(
                 state["highlight_id"] = None
             _bump_label_rev()
             opts = _label_options()
+            # 다음 항목을 자동 선택하면 label-list → (줌) → click-mode 연쇄로
+            # figure가 2~3번 더 그려지므로, 삭제 후에는 선택만 해제한다.
             return (
                 _build_graph(click_mode),
                 opts,
-                opts[0]["value"] if opts else None,
+                None,
                 f"삭제됨: {selected_label} — Save Labels로 저장",
                 _cancel_style(click_mode),
                 no_update,
@@ -4083,7 +4106,7 @@ def _main_body(
         _bump_hi_rev()
         _store_draft_reasons([], [], "")
         return (
-            _build_graph(click_mode),
+            _build_graph(click_mode, light=True),
             no_update,
             None,
             "라벨 선택이 해제되었습니다.",
@@ -4103,6 +4126,8 @@ def _main_body(
         status = f"선택 구간으로 줌: {label_line(item)}"
         if row is not None:
             status = f"{status} · 값 탐색 {format_kst(row['time'])}"
+        # _sync_click_mode_on_nav → inspect echo로 figure를 한 번 더 그리지 않는다.
+        state["_skip_mode_rebuild"] = True
         return (
             _build_graph("inspect"),
             _label_options(),
@@ -4122,7 +4147,7 @@ def _main_body(
             _bump_hi_rev()
             _store_draft_reasons([], [], "")
             return (
-                _build_graph(click_mode),
+                _build_graph(click_mode, light=True),
                 no_update,
                 None,
                 "라벨 선택이 해제되었습니다.",
@@ -4137,7 +4162,7 @@ def _main_body(
             _bump_hi_rev()
             _arm_select_guard()
             return (
-                _build_graph(click_mode),
+                _build_graph(click_mode, light=True),
                 no_update,
                 selected_label,
                 "",
@@ -4157,19 +4182,29 @@ def _main_body(
             if snapped is not None:
                 status = f"{status} · 값 탐색 {format_kst(snapped[0]['time'])}"
             panel = snapped[1] if snapped is not None else no_update
+            # _sync_click_mode_on_nav가 inspect로 바꾸며 _main이 한 번 더 돌지 않게 한다.
+            state["_skip_mode_rebuild"] = True
+            return (
+                _build_graph(mode),
+                no_update,
+                selected_label,
+                status,
+                _cancel_style(mode),
+                panel,
+                no_update,
+            )
+        state["highlight_id"] = item["id"]
+        state.pop("_offscreen_cleared", None)
+        _bump_hi_rev()
+        _arm_select_guard()
+        mode = click_mode
+        panel = no_update
+        if click_mode == "edit_range":
+            status = "빨간 좌·우 경계선만 좌우로 드래그하세요. 화면 이동은 ◀ ▶ 버튼을 사용하세요."
         else:
-            state["highlight_id"] = item["id"]
-            state.pop("_offscreen_cleared", None)
-            _bump_hi_rev()
-            _arm_select_guard()
-            mode = click_mode
-            panel = no_update
-            if click_mode == "edit_range":
-                status = "빨간 좌·우 경계선만 좌우로 드래그하세요. 화면 이동은 ◀ ▶ 버튼을 사용하세요."
-            else:
-                status = f"선택: {label_line(item)}"
+            status = f"선택: {label_line(item)}"
         return (
-            _build_graph(mode),
+            _build_graph(mode, light=True),
             no_update,
             selected_label,
             status,
@@ -4199,7 +4234,7 @@ def _main_body(
             return (no_update,) * 7
         row, panel = selected
         return (
-            _build_graph(click_mode),
+            _build_graph(click_mode, light=True),
             no_update,
             no_update,
             f"값 탐색: {format_kst(row['time'])} · ←/→ 키로 이동",
@@ -4269,16 +4304,15 @@ def _main_body(
             return placed if placed is not None else (no_update,) * 7
 
         # 전문가 anomaly 선택을 우선하고 모델 track click은
-        # _pick_model_pred_on_graph가 처리한다. 얇은 label strip은 hit tolerance를 조금 넓게 잡는다.
+        # _pick_model_pred_on_graph가 처리한다.
+        # shape-click-event는 커스텀 host가 보내는 경로라, track 판별이 비어도
+        # point/짧은 range를 놓치지 않도록 hit tolerance를 항상 넉넉히 둔다.
         track = shape_click.get("track")
-        on_label_track = track in ("human", "model") or bool(
-            shape_click.get("label_track")
-        )
         if track == "model":
             return (no_update,) * 7
         hit = _label_at_time(
             ts,
-            point_tol_seconds=(45 * 60.0) if on_label_track else None,
+            point_tol_seconds=45 * 60.0,
         )
         if hit is not None:
             return _select_or_toggle_label_hit(hit, click_mode)
@@ -4290,7 +4324,7 @@ def _main_body(
                 return (no_update,) * 7
             row, panel = selected
             return (
-                _build_graph(click_mode),
+                _build_graph(click_mode, light=True),
                 no_update,
                 no_update,
                 f"값 탐색: {format_kst(row['time'])} · ←/→ 키로 이동",
@@ -4335,7 +4369,7 @@ def _main_body(
                 return (no_update,) * 7
             row, panel = selected
             return (
-                _build_graph(click_mode),
+                _build_graph(click_mode, light=True),
                 no_update,
                 no_update,
                 f"값 탐색: {format_kst(row['time'])} · ←/→ 키로 이동",
@@ -6120,41 +6154,64 @@ app.clientside_callback(
         window.__installPlotClickHost = function() {
                 var host = document.getElementById('graph');
                 if (!host) return;
-                if (host.__plotClickHostBoundV6) return;
-                host.__plotClickHostBoundV6 = true;
+                // V8: 이미 설치됐으면 유지. 재설치 시에는 이전 handler를 먼저 제거한다.
+                if (host.__plotClickHostBoundV8 && host.__plotClickHandlers) return;
+                if (host.__plotClickHandlers) {
+                    var oldH = host.__plotClickHandlers;
+                    host.removeEventListener('pointerdown', oldH.down, true);
+                    host.removeEventListener('click', oldH.click, true);
+                    host.removeEventListener('pointerup', oldH.up, true);
+                    host.__plotClickHandlers = null;
+                }
+                host.__plotClickHostBoundV7 = true;
+                host.__plotClickHostBoundV8 = true;
                 var lastEmit = {x: null, t: 0};
                 var ptrDown = null;
 
+                function axisTrackKind(ya) {
+                    // title 문자열뿐 아니라 yaxis id(y3=human, y4=model)로도 판별한다.
+                    var title = '';
+                    var id = '';
+                    try {
+                        title = (ya && ya.title && ya.title.text) || '';
+                    } catch (err) {}
+                    try {
+                        id = String((ya && (ya._id || ya._name || ya._subplot || '')) || '');
+                    } catch (err2) {}
+                    var t = String(title);
+                    if (/human|사람/i.test(t) || (/label/i.test(t) && !/model/i.test(t))) {
+                        return 'human';
+                    }
+                    if (/model|모델/i.test(t)) return 'model';
+                    // make_subplots 4행: y3=전문가, y4=모델
+                    if (/(^|[^0-9])y3([^0-9]|$)/i.test(id) || id === 'y3') return 'human';
+                    if (/(^|[^0-9])y4([^0-9]|$)/i.test(id) || id === 'y4') return 'model';
+                    return null;
+                }
+
                 function labelTrackInfo(gd, clientX, clientY) {
                     // label strip 위에 있으면 어떤 track인지와 해당 rect를 반환한다.
+                    // 트랙이 얇아 클릭이 빗나가기 쉬우므로 세로로 약간 패딩을 둔다.
                     try {
                         var fl = gd._fullLayout;
                         var plots = fl && fl._plots;
                         if (!plots) return null;
+                        var padY = 10;
                         var keys = Object.keys(plots);
                         for (var i = 0; i < keys.length; i++) {
                             var p = plots[keys[i]];
                             if (!p || !p.plot || !p.plot.getBoundingClientRect) continue;
-                            var ya = p.yaxis;
-                            var title = '';
-                            try {
-                                title = (ya && ya.title && ya.title.text) || '';
-                            } catch (err) {}
+                            var kind = axisTrackKind(p.yaxis);
+                            if (!kind) continue;
                             var r = p.plot.getBoundingClientRect();
-                            if (!(r.width > 2 && r.height > 2)) continue;
+                            if (!(r.width > 2 && r.height > 1)) continue;
                             if (clientX < r.left || clientX > r.right
-                                || clientY < r.top || clientY > r.bottom) {
+                                || clientY < (r.top - padY) || clientY > (r.bottom + padY)) {
                                 continue;
                             }
-                            var t = String(title);
-                            if (/human|사람/i.test(t) || (/label/i.test(t) && !/model/i.test(t))) {
-                                return {track: 'human', rect: r};
-                            }
-                            if (/model|모델/i.test(t)) {
-                                return {track: 'model', rect: r};
-                            }
+                            return {track: kind, rect: r};
                         }
-                    } catch (err2) {}
+                    } catch (err3) {}
                     return null;
                 }
 
@@ -6183,7 +6240,7 @@ app.clientside_callback(
                     return true;
                 }
 
-                host.addEventListener('pointerdown', function(ev) {
+                function onPointerDown(ev) {
                     if (ev.button !== 0) return;
                     var gd0 = host.querySelector('.js-plotly-plot');
                     var info0 = gd0 && labelTrackInfo(gd0, ev.clientX, ev.clientY);
@@ -6192,9 +6249,9 @@ app.clientside_callback(
                         y: ev.clientY,
                         track: info0 && info0.track
                     };
-                }, true);
+                }
 
-                host.addEventListener('click', function(ev) {
+                function onClick(ev) {
                     if (ev.button !== 0) return;
                     // 값 탐색에서는 pointerup이 WebGL score-panel click을 처리하므로 중복 emit을 막는다.
                     if (window.__currentClickMode === 'inspect') return;
@@ -6214,11 +6271,11 @@ app.clientside_callback(
                         }
                     }
                     emitSnap(ev.clientX, ev.clientY);
-                }, true);
+                }
 
                 // 짧은 click은 Plotly zoom/pan이 이벤트를 소비하더라도 label 선택으로 해석할 수 있게 별도 처리한다.
-                // label track은 얇고 pan 모드에서도 누르기 쉽도록 click 허용 이동거리를 조금 넓게 잡는다.
-                host.addEventListener('pointerup', function(ev) {
+                // Magic Mouse는 클릭 중 미세 이동이 잦아, track 미판별 시에도 허용 폭을 넉넉히 둔다.
+                function onPointerUp(ev) {
                     if (ev.button !== 0) return;
                     if (window.__edgeDragging) return;
                     var down = ptrDown;
@@ -6236,11 +6293,21 @@ app.clientside_callback(
                     if (down) {
                         var dx = Math.abs(ev.clientX - down.x);
                         var dy = Math.abs(ev.clientY - down.y);
-                        var maxMove = track ? 28 : 6;
+                        // track 위: 32px / 그 외(매직마우스 대비): 20px (기존 6px는 너무 빡셈)
+                        var maxMove = track ? 32 : 20;
                         if (dx > maxMove || dy > maxMove) return;
                     }
                     emitSnap(ev.clientX, ev.clientY, {track: track});
-                }, true);
+                }
+
+                host.__plotClickHandlers = {
+                    down: onPointerDown,
+                    click: onClick,
+                    up: onPointerUp
+                };
+                host.addEventListener('pointerdown', onPointerDown, true);
+                host.addEventListener('click', onClick, true);
+                host.addEventListener('pointerup', onPointerUp, true);
             };
 
         // 전문가/모델 label subplot은 pan/zoom하지 않고 click을 segment 선택에만 사용한다.
@@ -6252,10 +6319,18 @@ app.clientside_callback(
                         var p = plots[key];
                         var ya = p && p.yaxis;
                         var title = '';
+                        var id = '';
                         try {
                             title = (ya && ya.title && ya.title.text) || '';
                         } catch (err) {}
-                        if (!/label|human|model|사람|모델/i.test(String(title))) return;
+                        try {
+                            id = String((ya && (ya._id || ya._name || '')) || '');
+                        } catch (errId) {}
+                        var isLabel = /label|human|model|사람|모델/i.test(String(title))
+                            || /(^|[^0-9])y3([^0-9]|$)/i.test(id)
+                            || /(^|[^0-9])y4([^0-9]|$)/i.test(id)
+                            || id === 'y3' || id === 'y4';
+                        if (!isLabel) return;
                         var nodes = gd.querySelectorAll(
                             '.draglayer .' + key + ' .nsewdrag, .draglayer > .' + key + ' > .nsewdrag'
                         );
@@ -6940,8 +7015,9 @@ app.clientside_callback(
                 }
             }
 
-            // edge drag가 남긴 임시 relayout patch가 화면에 남지 않도록 전체 layout을 다시 동기화한다.
-            // 서버가 수정된 label shape를 보낸 뒤 최종 상태로 맞추기 위한 처리다.
+            // edge drag가 남긴 임시 relayout patch가 화면에 남지 않도록 layout을 다시 동기화한다.
+            // datarevision이 같으면 (highlight/커서 등 overlay만 변경) 전체 Plotly.react를
+            // 한 번 더 돌리지 않고 shapes·축만 relayout한다 — 선택이 버벅이는 주원인 제거.
             if (figure && figure.data && figure.layout && !window.__edgeDragging) {
                 var cfg = gd.config || {responsive: true, displayModeBar: true};
                 var hostH = host.clientHeight || 420;
@@ -6958,6 +7034,14 @@ app.clientside_callback(
                 } else if (window.__ingestHoverMeta && layout.meta) {
                     window.__ingestHoverMeta(layout.meta);
                 }
+                var dataRev = String(layout.datarevision || '');
+                var prevDataRev = window.__lastGraphDataRev;
+                window.__lastGraphDataRev = dataRev;
+                var layoutOnly = (
+                    prevDataRev != null
+                    && prevDataRev !== ''
+                    && prevDataRev === dataRev
+                );
                 var isPanMode = (
                     window.__currentClickMode === 'pan'
                     || window.__currentClickMode === 'pan_keep_y'
@@ -6965,7 +7049,7 @@ app.clientside_callback(
                 );
                 // pan 정밀 갱신에서는 Dash가 이미 Plotly.react를 수행했으므로 두 번째
                 // react를 다시 호출하면 특히 setTimeout 뒤 pan 이전
-                // trace가 잠깐 보였다가 바뀔 수 있다. 여기서는 Y만 맞추고 X/data는 건드리지 않는다.
+                // trace가 잠깐 보였다가 바뀔 수 있다. 여기는 Y만 맞추고 X/data는 건드리지 않는다.
                 if (isPanMode && !window.__graphPointerDown && !window.__edgeDragging) {
                     try {
                         var yOnly = {};
@@ -6988,6 +7072,43 @@ app.clientside_callback(
                             done();
                         }
                     } catch (errPan) {
+                        afterGraphReady();
+                    }
+                    return;
+                }
+                function axisPatchFromLayout(lay, keepX) {
+                    var patch = {autosize: true, height: wantH};
+                    if (lay.shapes) patch.shapes = lay.shapes;
+                    if (lay.uirevision != null) patch.uirevision = lay.uirevision;
+                    if (window.__desiredDragmode !== undefined) {
+                        patch.dragmode = window.__desiredDragmode;
+                    }
+                    var meta = lay.meta || {};
+                    var zx = keepX || meta.zoom_x;
+                    if (zx && zx.length === 2 && !window.__graphPointerDown) {
+                        ['xaxis', 'xaxis2', 'xaxis3', 'xaxis4'].forEach(function(ax) {
+                            patch[ax + '.autorange'] = false;
+                            patch[ax + '.range'] = [zx[0], zx[1]];
+                        });
+                    }
+                    ['yaxis', 'yaxis2', 'yaxis3', 'yaxis4'].forEach(function(key) {
+                        var ax = lay[key];
+                        if (!ax || !ax.range || ax.range.length !== 2) return;
+                        if (ax.autorange) return;
+                        patch[key + '.autorange'] = false;
+                        patch[key + '.range'] = [ax.range[0], ax.range[1]];
+                        patch[key + '.fixedrange'] = true;
+                    });
+                    return patch;
+                }
+                if (layoutOnly) {
+                    try {
+                        var lightPatch = axisPatchFromLayout(layout, null);
+                        window.Plotly.relayout(gd, lightPatch).then(function() {
+                            try { window.Plotly.Plots.resize(gd); } catch (errR) {}
+                            afterGraphReady();
+                        }).catch(function() { afterGraphReady(); });
+                    } catch (errLight) {
                         afterGraphReady();
                     }
                     return;
@@ -7026,26 +7147,8 @@ app.clientside_callback(
                 }
                 window.Plotly.react(gd, figure.data, layout, cfg).then(function() {
                     // react 뒤 축 범위를 다시 적용해 layout race를 정리한다.
-                    // 예를 들어 anomaly 선택→줌 과정에서 figure JSON에는 새 Y 자동 범위가 있어도
-                    // 실제 화면에는 이전 Y scale이 남을 수 있기 때문이다.
                     try {
-                        var patch = {};
-                        var meta = layout.meta || {};
-                        var zx = keepX || meta.zoom_x;
-                        if (zx && zx.length === 2 && !window.__graphPointerDown) {
-                            ['xaxis', 'xaxis2', 'xaxis3', 'xaxis4'].forEach(function(ax) {
-                                patch[ax + '.autorange'] = false;
-                                patch[ax + '.range'] = [zx[0], zx[1]];
-                            });
-                        }
-                        ['yaxis', 'yaxis2', 'yaxis3', 'yaxis4'].forEach(function(key) {
-                            var ax = layout[key];
-                            if (!ax || !ax.range || ax.range.length !== 2) return;
-                            if (ax.autorange) return;
-                            patch[key + '.autorange'] = false;
-                            patch[key + '.range'] = [ax.range[0], ax.range[1]];
-                            patch[key + '.fixedrange'] = true;
-                        });
+                        var patch = axisPatchFromLayout(layout, keepX);
                         if (Object.keys(patch).length) {
                             return window.Plotly.relayout(gd, patch);
                         }

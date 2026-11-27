@@ -3232,9 +3232,21 @@ def build_figure(
 
     if show_labels and human_label_row is not None:
         hi = str(highlight_id) if highlight_id is not None else None
+        # 화면에 보이는 구간의 label만 shape로 그려 JSON/SVG 비용을 줄인다.
+        # 선택된 항목은 화면 밖이어도 항상 포함해 highlight가 사라지지 않게 한다.
+        t0 = pd.to_datetime(start, utc=True) if start is not None else None
+        t1 = pd.to_datetime(end, utc=True) if end is not None else None
         for item in doc.get("labels", []):
             label_id = item.get("id", "")
             selected = hi is not None and str(label_id) == hi
+            if not selected and t0 is not None and t1 is not None:
+                try:
+                    s = pd.to_datetime(item["start"], utc=True)
+                    e = pd.to_datetime(item["end"], utc=True)
+                except (ValueError, TypeError, KeyError):
+                    continue
+                if e < t0 or s > t1:
+                    continue
             add_label_indicator(
                 fig, item, highlight=selected, row=human_label_row
             )
