@@ -59,6 +59,7 @@ from ui.plotting import (  # noqa: E402
 from ui.ui_labels import (  # noqa: E402
     LABEL_HIGHLIGHT_END,
     LABEL_HIGHLIGHT_START,
+    LABEL_REASON_CODES,
     LABEL_REASON_DEFS,
     add_label,
     label_highlight_overlays,
@@ -2868,38 +2869,6 @@ app.layout = html.Div(
                         "flexWrap": "wrap",
                     },
                 ),
-                dcc.Textarea(
-                    id="label-reason-note",
-                    value="",
-                    placeholder="메모 (선택, other면 권장)",
-                    style={
-                        "width": "100%",
-                        "height": "48px",
-                        "marginTop": "6px",
-                        "fontSize": "12px",
-                        "resize": "vertical",
-                    },
-                ),
-                html.Div(
-                    [
-                        html.Button(
-                            "메모·기준 반영",
-                            id="btn-apply-reason",
-                            n_clicks=0,
-                            title="같은 라벨에 머문 채 메모를 즉시 저장 (다른 라벨로 옮기거나 Save 할 때도 자동 저장됨)",
-                            style={"fontSize": "12px"},
-                        ),
-                        html.Span(
-                            id="reason-status",
-                            style={
-                                "fontSize": "12px",
-                                "color": "#64748b",
-                                "marginLeft": "10px",
-                            },
-                        ),
-                    ],
-                    style={"marginTop": "6px", "display": "flex", "alignItems": "center"},
-                ),
             ],
             style={
                 "border": "1px solid #e0e0e0",
@@ -3501,7 +3470,6 @@ def _zoom_model_pred(n_clicks, pred_id):
     State("view-range", "data"),
     State("label-reason-codes", "value"),
     State("label-fail-metrics", "value"),
-    State("label-reason-note", "value"),
     prevent_initial_call=False,
 )
 def _main(
@@ -3524,7 +3492,6 @@ def _main(
     view_range,
     reason_codes,
     fail_metrics,
-    reason_note,
 ):
     tid = getattr(callback_context, "triggered_id", None)
     deselecting = (
@@ -3538,7 +3505,7 @@ def _main(
         # 새 label이 현재 입력한 원인 값을 이어받도록 draft와 UI 상태를 동기화한다.
         codes = list(reason_codes or [])
         mets = list(fail_metrics or []) if "fail_surge" in codes else []
-        _store_draft_reasons(codes, mets, reason_note)
+        _store_draft_reasons(codes, mets, state.get("draft_note") or "")
     result = _main_body(
         plmn,
         n_prev,
@@ -3768,57 +3735,49 @@ def _fail_metrics_wrap_style(reasons: list[str] | None) -> dict[str, str]:
     Output("label-fail-metrics", "value"),
     Output("label-fail-metrics", "options"),
     Output("label-fail-metrics-wrap", "style"),
-    Output("label-reason-note", "value"),
-    Output("reason-status", "children"),
     Output("label-list", "options", allow_duplicate=True),
     Input("label-list", "value"),
     Input("label-reason-codes", "value"),
     Input("label-fail-metrics", "value"),
-    Input("btn-apply-reason", "n_clicks"),
     Input("dd-plmn", "value"),
-    State("label-reason-note", "value"),
     prevent_initial_call="initial_duplicate",
 )
 def _sync_label_reasons(
     selected_label,
     reason_codes,
     fail_metrics,
-    _n_apply,
     _plmn,
-    note,
 ):
     """원인 입력 UI와 선택된 label 또는 새 label 초안 상태를 서로 동기화한다."""
     tid = getattr(callback_context, "triggered_id", None)
     fail_opts = _fail_metric_options()
     list_opts = no_update
+    note_s = state.get("draft_note") or ""
 
     if tid in ("label-list", "dd-plmn", None):
-        # 다른 label로 이동하기 전에 현재 note/checklist 입력을 이전 label에 저장한다.
-        # note는 저장 전까지 textarea에만 존재하므로 반드시 먼저 flush해야 한다.
+        # 다른 label로 이동하기 전에 현재 checklist 입력을 이전 label에 저장한다.
         prev = state.get("reason_bound_id")
         if tid == "label-list" and prev and str(prev) != str(selected_label or ""):
             if _flush_reasons_to_label(
                 prev,
                 reasons=reason_codes,
                 fail_metrics=fail_metrics,
-                note=note,
+                note=note_s,
             ):
                 list_opts = _label_options()
 
         item = _label_by_id(selected_label) if selected_label else None
         if item is not None:
-            codes = list(item.get("reasons") or [])
+            codes = [c for c in (item.get("reasons") or []) if c in LABEL_REASON_CODES]
             mets = list(item.get("fail_metrics") or [])
-            note_s = item.get("note") or ""
+            note_keep = item.get("note") or ""
             state["reason_bound_id"] = selected_label
-            _store_draft_reasons(codes, mets, note_s)
+            _store_draft_reasons(codes, mets, note_keep)
             return (
                 codes,
                 mets,
                 fail_opts,
                 _fail_metrics_wrap_style(codes),
-                note_s,
-                "",
                 list_opts,
             )
         # 선택된 label이 없으면 원인 UI도 비워 다음 새 label이 빈 상태에서 시작하게 한다.
@@ -3829,19 +3788,15 @@ def _sync_label_reasons(
             [],
             fail_opts,
             _fail_metrics_wrap_style([]),
-            "",
-            "",
             list_opts,
         )
 
-    codes = list(reason_codes or [])
+    codes = [c for c in (reason_codes or []) if c in LABEL_REASON_CODES]
     mets = list(fail_metrics or [])
-    note_s = note if note is not None else ""
     if "fail_surge" not in codes:
         mets = []
     _store_draft_reasons(codes, mets, note_s)
 
-    reason_msg = ""
     bound = selected_label or state.get("reason_bound_id")
     if bound and state.get("doc") is not None:
         if _flush_reasons_to_label(
@@ -3852,17 +3807,12 @@ def _sync_label_reasons(
         ):
             state["reason_bound_id"] = bound
             list_opts = _label_options()
-            item = _label_by_id(bound)
-            if item is not None:
-                reason_msg = f"반영됨 · {label_line(item)}"
 
     return (
         codes,
         mets,
         fail_opts,
         _fail_metrics_wrap_style(codes),
-        no_update if tid != "btn-apply-reason" else note_s,
-        reason_msg,
         list_opts,
     )
 

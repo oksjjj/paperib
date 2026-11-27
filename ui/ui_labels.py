@@ -3,6 +3,7 @@
 from ui.tool import (
     LABEL_HIGHLIGHT_END,
     LABEL_HIGHLIGHT_START,
+    LABEL_REASON_CODES,
     LABEL_REASON_DEFS,
     add_label,
     label_highlight_overlays,
@@ -20,6 +21,7 @@ from ui.tool import (
 __all__ = [
     "LABEL_HIGHLIGHT_END",
     "LABEL_HIGHLIGHT_START",
+    "LABEL_REASON_CODES",
     "LABEL_REASON_DEFS",
     "add_label",
     "label_highlight_overlays",

@@ -2078,7 +2078,6 @@ LABEL_REASON_DEFS: list[tuple[str, str]] = [
     ("attempt_drop", "M971 급락"),
     ("attempt_spike", "M971 급증"),
     ("fail_surge", "FAIL/TO 등 실패·타임아웃 폭증"),
-    ("other", "기타 (메모 권장)"),
 ]
 LABEL_REASON_CODES = frozenset(code for code, _ in LABEL_REASON_DEFS)
 LABEL_REASON_LABELS = dict(LABEL_REASON_DEFS)
